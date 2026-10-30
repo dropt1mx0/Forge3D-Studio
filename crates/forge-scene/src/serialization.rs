@@ -63,6 +63,7 @@ mod tests {
 
         let loaded = ForgeProject::from_json(&json).expect("Deserialization failed");
         assert_eq!(loaded.name, "Test Project");
-        assert_eq!(loaded.scene.objects.len(), 3);
+        assert_eq!(loaded.scene.objects.len(), 4);
+        assert!(loaded.scene.active_camera_id.is_some());
     }
 }

@@ -5,6 +5,38 @@ All notable changes to Forge3D Rust Edition will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-alpha.3] - 2026-10-30
+
+### Added
+- **Full Viewport Camera Navigation System**:
+  - Orbit, Pan, and Dolly Zoom with pitch clamping and configurable sensitivity.
+  - Fly and Walk Navigation (`Shift+F` or View menu): WASD translation, Q/E vertical translation, Shift boost, Ctrl slow-down, mouse look, and walk height ground lock.
+  - Standard Numpad views: Front (1), Back (Ctrl+1), Right (3), Left (Ctrl+3), Top (7), Bottom (Ctrl+7), Perspective/Orthographic toggle (5), Camera View (0), 15° step rotation (2/4/6/8), and Emulate Numpad option for compact keyboards.
+  - Framing: Frame Selected (`F` / Numpad `.`) and Frame All (`Home`).
+- **First-Class Scene Camera Objects**:
+  - `PrimitiveType::Camera` object in scene hierarchy with procedural 3D camera marker mesh (body, tapered lens frustum, upward indicator).
+  - Physical optical properties: Perspective & Orthographic projection, synchronized Focal Length (mm) and FOV (deg), Sensor Size (36×24mm default), near/far clipping, ortho scale, Depth of Field settings, and resolution presets (1080p, 4K, 1:1).
+  - Camera View overlay with film gate / safe area letterboxing.
+  - Align Active Camera to View (`Ctrl+Alt+Num0` and inspector button).
+  - Active camera switching via Outliner, Viewport, and Properties Inspector.
+- **Modal Transformations & Keyboard Workflow**:
+  - Modal Grab/Move (`G`), Rotate (`R`), Scale (`S`) finite state machine.
+  - Axis locks (`X`, `Y`, `Z`) and plane locks (`Shift+X`, `Shift+Y`, `Shift+Z`).
+  - Repeat axis press toggles Local vs Global coordinate constraint.
+  - Exact real-time numeric input (digits, `-`, `.`, Backspace) with live viewport HUD status readout.
+  - Confirm with `Enter` / `LMB`, cancel with `Escape` / `RMB` (restores original transforms).
+  - Multi-object transformation support with Pivot Points: Median Point, Active Element, 3D Cursor, Individual Origins.
+  - Object operations: Duplicate (`Shift+D`), Delete (`X`/`Del`), Hide (`H`), Unhide All (`Alt+H`), Reset Transforms (`Alt+G/R/S`), Apply Transform (`Ctrl+A`), Parent/Unparent (`Ctrl+P`/`Alt+P`), Join Objects (`Ctrl+J`), and Set Origin (to Geometry, to 3D Cursor).
+- **Interactive 3D Gizmos & Snapping**:
+  - Interactive Move (arrows + planes), Rotate (rings), and Scale (boxes + uniform) manipulators.
+  - Grid snap integration (`🧲`) with configurable increments.
+- **Input Architecture & Priority Routing**:
+  - Isolated keyboard routing preventing hotkey leakage during text edits (`egui_wants_keyboard_input`).
+  - Hierarchical priority: Text Input > Fly Navigation > Modal Transform > 3D Gizmos > Viewport Navigation > Hotkeys.
+- **Inspector & Outliner Enhancements**:
+  - Properties panel: Per-axis translation, rotation, and scale locks (`🔒`/`🔓`) and reset buttons (`↺`), Dimensions editing, Copy/Paste transform buttons, and dedicated Camera Optics section.
+  - Outliner: Camera icon (`📷`), active camera indicator (`★`), transform lock toggles (`🔒`/`🔓`), hierarchy tree indentation with child relationships, and multi-select support (`Ctrl+Click`).
+
 ## [0.2.0-alpha.2] - 2026-10-30
 
 ### Added

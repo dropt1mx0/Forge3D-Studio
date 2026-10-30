@@ -18,7 +18,31 @@ pub enum ViewPreset {
     Bottom,
 }
 
-/// A comprehensive 3D camera supporting Orbit, Pan, Zoom, Dolly, Presets, and Orthographic/Perspective projection.
+/// Settings controlling navigation sensitivity and speed for the 3D viewport camera.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CameraSettings {
+    pub orbit_sensitivity: f32,
+    pub pan_sensitivity: f32,
+    pub zoom_sensitivity: f32,
+    pub fly_speed: f32,
+    pub walk_height: f32,
+    pub invert_y: bool,
+}
+
+impl Default for CameraSettings {
+    fn default() -> Self {
+        Self {
+            orbit_sensitivity: 0.007,
+            pan_sensitivity: 0.0015,
+            zoom_sensitivity: 0.02,
+            fly_speed: 5.0,
+            walk_height: 1.6,
+            invert_y: false,
+        }
+    }
+}
+
+/// A comprehensive 3D camera supporting Orbit, Pan, Zoom, Dolly, Presets, Fly/Walk, and Orthographic/Perspective projection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Camera {
     pub eye: Vec3,
@@ -30,6 +54,7 @@ pub struct Camera {
     pub aspect_ratio: f32,
     pub projection: CameraProjection,
     pub ortho_size: f32,
+    pub settings: CameraSettings,
 }
 
 impl Default for Camera {
@@ -44,6 +69,7 @@ impl Default for Camera {
             aspect_ratio: 16.0 / 9.0,
             projection: CameraProjection::Perspective,
             ortho_size: 4.0,
+            settings: CameraSettings::default(),
         }
     }
 }
@@ -61,6 +87,7 @@ impl Camera {
             aspect_ratio,
             projection: CameraProjection::Perspective,
             ortho_size: 4.0,
+            settings: CameraSettings::default(),
         }
     }
 
@@ -98,6 +125,21 @@ impl Camera {
         self.proj_matrix() * self.view_matrix()
     }
 
+    /// Normalized forward vector towards target.
+    pub fn forward(&self) -> Vec3 {
+        (self.target - self.eye).normalize_or_zero()
+    }
+
+    /// Normalized horizontal right vector.
+    pub fn right(&self) -> Vec3 {
+        self.forward().cross(self.up).normalize_or_zero()
+    }
+
+    /// Normalized true up vector perpendicular to forward and right.
+    pub fn camera_up(&self) -> Vec3 {
+        self.right().cross(self.forward()).normalize_or_zero()
+    }
+
     /// Orbit rotation around the target point.
     /// `delta_yaw`: horizontal rotation in radians (around world Y axis).
     /// `delta_pitch`: vertical rotation in radians (around camera right axis).
@@ -108,12 +150,14 @@ impl Camera {
             return;
         }
 
+        let pitch_sign = if self.settings.invert_y { -1.0 } else { 1.0 };
+
         // Spherical coordinate angles
         let mut yaw = offset.z.atan2(offset.x);
         let mut pitch = (offset.y / radius).clamp(-0.999, 0.999).asin();
 
         yaw -= delta_yaw;
-        pitch = (pitch - delta_pitch).clamp(
+        pitch = (pitch - delta_pitch * pitch_sign).clamp(
             -std::f32::consts::FRAC_PI_2 + 0.02,
             std::f32::consts::FRAC_PI_2 - 0.02,
         );
@@ -128,15 +172,21 @@ impl Camera {
         self.up = Vec3::Y;
     }
 
+    /// Step rotation around focus point by 15-degree increments (for Numpad 2/4/6/8).
+    pub fn step_rotate(&mut self, yaw_steps: i32, pitch_steps: i32) {
+        let step_rad = 15.0_f32.to_radians();
+        self.orbit(yaw_steps as f32 * step_rad, pitch_steps as f32 * step_rad);
+    }
+
     /// Pan camera along viewport right and up axes.
     pub fn pan(&mut self, delta_x: f32, delta_y: f32) {
-        let forward = (self.target - self.eye).normalize_or_zero();
+        let forward = self.forward();
         let right = forward.cross(self.up).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
 
         let dist = (self.eye - self.target).length();
         let factor = match self.projection {
-            CameraProjection::Perspective => (dist * 0.0015).max(0.001),
+            CameraProjection::Perspective => (dist * self.settings.pan_sensitivity).max(0.001),
             CameraProjection::Orthographic => (self.ortho_size * 0.002).max(0.001),
         };
 
@@ -152,12 +202,14 @@ impl Camera {
             CameraProjection::Perspective => {
                 let offset = self.eye - self.target;
                 let dist = offset.length();
-                let zoom_mult = (1.0 - factor * 0.1).clamp(0.05, 5.0);
+                let zoom_mult =
+                    (1.0 - factor * self.settings.zoom_sensitivity * 5.0).clamp(0.05, 5.0);
                 let new_dist = (dist * zoom_mult).clamp(0.1, 2000.0);
                 self.eye = self.target + offset.normalize_or_zero() * new_dist;
             }
             CameraProjection::Orthographic => {
-                let zoom_mult = (1.0 - factor * 0.1).clamp(0.05, 5.0);
+                let zoom_mult =
+                    (1.0 - factor * self.settings.zoom_sensitivity * 5.0).clamp(0.05, 5.0);
                 self.ortho_size = (self.ortho_size * zoom_mult).clamp(0.05, 5000.0);
             }
         }
@@ -165,9 +217,79 @@ impl Camera {
 
     /// Dolly camera forward or backward along its look vector.
     pub fn dolly(&mut self, delta: f32) {
-        let forward = (self.target - self.eye).normalize_or_zero();
+        let forward = self.forward();
         self.eye += forward * delta;
         self.target += forward * delta;
+    }
+
+    /// Sets the orbit pivot point without changing the camera's eye position.
+    pub fn set_orbit_pivot(&mut self, new_pivot: Vec3) {
+        self.target = new_pivot;
+    }
+
+    /// Resets camera to standard default overview angle and distance.
+    pub fn reset_view(&mut self) {
+        self.eye = Vec3::new(4.5, 3.5, 5.5);
+        self.target = Vec3::new(0.0, 0.5, 0.0);
+        self.up = Vec3::Y;
+        self.fov_y_deg = 45.0;
+        self.projection = CameraProjection::Perspective;
+        self.ortho_size = 4.0;
+    }
+
+    /// Fly / Walk translation: moves both `eye` and `target` so orientation is preserved.
+    /// `dir`: (x = right/left, y = up/down, z = forward/back) in camera space.
+    pub fn fly_move(&mut self, dir: Vec3, dt: f32, speed_mult: f32, is_walk: bool) {
+        let fwd = if is_walk {
+            Vec3::new(self.forward().x, 0.0, self.forward().z).normalize_or_zero()
+        } else {
+            self.forward()
+        };
+        let right = if is_walk {
+            Vec3::new(self.right().x, 0.0, self.right().z).normalize_or_zero()
+        } else {
+            self.right()
+        };
+        let up = if is_walk { Vec3::Y } else { self.camera_up() };
+
+        let speed = self.settings.fly_speed * speed_mult * dt;
+        let mut move_delta = right * dir.x * speed + up * dir.y * speed + fwd * dir.z * speed;
+
+        if is_walk {
+            // Lock camera eye Y to walk height
+            move_delta.y = 0.0;
+            self.eye.y = self.settings.walk_height;
+        }
+
+        self.eye += move_delta;
+        self.target += move_delta;
+    }
+
+    /// Fly / Walk orientation look: rotates the look direction from the fixed `eye` position.
+    pub fn fly_look(&mut self, delta_yaw: f32, delta_pitch: f32) {
+        let forward = self.forward();
+        let dist = (self.target - self.eye).length().max(1.0);
+
+        let pitch_sign = if self.settings.invert_y { -1.0 } else { 1.0 };
+
+        let mut yaw = forward.z.atan2(forward.x);
+        let mut pitch = forward.y.clamp(-0.999, 0.999).asin();
+
+        yaw -= delta_yaw;
+        pitch = (pitch - delta_pitch * pitch_sign).clamp(
+            -std::f32::consts::FRAC_PI_2 + 0.02,
+            std::f32::consts::FRAC_PI_2 - 0.02,
+        );
+
+        let new_forward = Vec3::new(
+            pitch.cos() * yaw.cos(),
+            pitch.sin(),
+            pitch.cos() * yaw.sin(),
+        )
+        .normalize_or_zero();
+
+        self.target = self.eye + new_forward * dist;
+        self.up = Vec3::Y;
     }
 
     /// Toggles between Perspective and Orthographic projection.
@@ -356,5 +478,39 @@ mod tests {
         // Target should project near center of screen
         assert!((pos.x - 400.0).abs() < 5.0);
         assert!((pos.y - 300.0).abs() < 5.0);
+    }
+
+    #[test]
+    fn test_step_rotate() {
+        let mut cam = Camera::default();
+        let initial_eye = cam.eye;
+        cam.step_rotate(1, 0); // Rotate 15 deg yaw
+        assert_ne!(cam.eye, initial_eye);
+        assert!((cam.eye.y - initial_eye.y).abs() < 1e-4); // Y should stay constant for pure yaw
+    }
+
+    #[test]
+    fn test_fly_movement_and_look() {
+        let mut cam = Camera::default();
+        let initial_eye = cam.eye;
+        // Move forward by 1 unit
+        cam.fly_move(Vec3::new(0.0, 0.0, 1.0), 1.0, 1.0, false);
+        assert_ne!(cam.eye, initial_eye);
+        assert!((cam.forward().length() - 1.0).abs() < 1e-4);
+
+        // Fly look changes target
+        let initial_target = cam.target;
+        cam.fly_look(0.1, 0.0);
+        assert_ne!(cam.target, initial_target);
+    }
+
+    #[test]
+    fn test_camera_reset_and_pivot() {
+        let mut cam = Camera::default();
+        cam.set_orbit_pivot(Vec3::new(10.0, 5.0, -2.0));
+        assert_eq!(cam.target, Vec3::new(10.0, 5.0, -2.0));
+
+        cam.reset_view();
+        assert_eq!(cam.target, Vec3::new(0.0, 0.5, 0.0));
     }
 }

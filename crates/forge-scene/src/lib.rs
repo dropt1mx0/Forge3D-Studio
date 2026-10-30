@@ -17,7 +17,10 @@ pub use editor_state::{
     SnapSettings, TransformMode, TransformOrientation,
 };
 pub use history::{Action, HistoryStack};
-pub use object::{PrimitiveType, SceneObject};
+pub use object::{
+    CameraData, CameraProjectionType, CameraViewParameters, PrimitiveType, SceneObject,
+    TransformLocks,
+};
 pub use scene::Scene;
 pub use selection::SelectionState;
 pub use serialization::ForgeProject;

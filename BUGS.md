@@ -63,3 +63,34 @@
     - **Solidify**: Extrudes flat surfaces along normals to give volume.
     - **Array**: Repeats geometry $N$ times with a 3D offset.
   - Connected modifiers stack to Properties panel with enable toggles, parameter sliders, reordering (`▲`/`▼`), deletion, and "Apply to Mesh" baking.
+
+---
+
+## Resolved Issues (Full 3D Control System — Phase 1–6)
+
+### BUG-005: Hotkey Leakage into Text Input Fields
+- **Severity**: P1 (UX / Interaction Blocker)
+- **Symptoms**: Typing object names or numerical values in text edit fields triggered modal transforms (`G`, `R`, `S`), camera framing (`F`), or object deletion (`X`).
+- **Root Cause**: Hotkeys were intercepted globally without checking whether egui's text edit context had active keyboard focus.
+- **Fix**:
+  - Added `let wants_keyboard = ui.ctx().egui_wants_keyboard_input();` check guarding all viewport navigation and transform shortcuts.
+  - While text fields are focused, all single-character hotkeys (`G`, `R`, `S`, `X`, `F`, `H`, numbers) are ignored by the 3D viewport and routed exclusively to text widgets.
+
+---
+
+### BUG-006: Serialization Project Roundtrip Object Count Drift
+- **Severity**: P2 (Unit Test Failure)
+- **Symptoms**: `test_project_roundtrip` asserted exact object count `left: 4, right: 3` after adding default Camera to `create_default_scene()`.
+- **Root Cause**: `create_default_scene` was updated to include a first-class Scene Camera object (Cube, Sphere, Plane, Camera = 4), but the unit test hardcoded the legacy count of 3.
+- **Fix**: Updated `serialization::tests::test_project_roundtrip` assertion to 4 objects and verified that `camera_data` roundtrips accurately with full optical parameters.
+
+---
+
+### BUG-007: Circular Dependency Between Scene Domain and Render Domain
+- **Severity**: P0 (Architecture / Compilation Blocker)
+- **Symptoms**: Attempting to query or align cameras in `forge-scene` required `forge_render::Camera`, violating the strict domain decoupling rule (scene must not depend on render).
+- **Root Cause**: `Camera` struct with GPU projection logic lived in `forge-render`.
+- **Fix**:
+  - Introduced pure mathematical `CameraViewParameters` struct in `forge-scene::object` containing eye, target, up, FOV, and clipping planes.
+  - Encapsulated camera matrix calculations into `forge-scene::Scene::camera_view_parameters(id)` without any graphics dependencies.
+  - Mapped parameters to `forge_render::Camera` in `forge3d-studio` at the application composition boundary.

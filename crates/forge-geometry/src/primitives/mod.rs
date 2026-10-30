@@ -1,3 +1,4 @@
+pub mod camera_marker;
 pub mod circle;
 pub mod cone;
 pub mod cube;
@@ -8,6 +9,7 @@ pub mod plane;
 pub mod sphere;
 pub mod torus;
 
+pub use camera_marker::generate_camera_marker;
 pub use circle::generate_circle;
 pub use cone::generate_cone;
 pub use cube::generate_cube;

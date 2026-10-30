@@ -263,6 +263,234 @@ impl Forge3dStudioApp {
         }
     }
 
+    pub fn begin_modal_transform(
+        &mut self,
+        mode: forge_scene::TransformMode,
+        mouse_pos: forge_math::Vec2,
+    ) {
+        if self.selection.selected_ids.is_empty() {
+            return;
+        }
+
+        let mut initial_transforms = std::collections::HashMap::new();
+        let mut center_sum = forge_math::Vec3::ZERO;
+        let mut count = 0.0;
+
+        for &id in &self.selection.selected_ids {
+            if let Some(obj) = self.scene.get_object(id) {
+                initial_transforms.insert(id, obj.local_transform);
+                center_sum += obj.local_transform.translation;
+                count += 1.0;
+            }
+        }
+
+        if count == 0.0 {
+            return;
+        }
+
+        let pivot = match self.editor_state.pivot_point {
+            forge_scene::PivotPoint::MedianPoint => center_sum / count,
+            forge_scene::PivotPoint::ActiveElement => {
+                if let Some(aid) = self.selection.active_id
+                    && let Some(obj) = self.scene.get_object(aid)
+                {
+                    obj.local_transform.translation
+                } else {
+                    center_sum / count
+                }
+            }
+            forge_scene::PivotPoint::Cursor3D => self.editor_state.cursor_3d,
+            forge_scene::PivotPoint::IndividualOrigins => center_sum / count,
+        };
+
+        self.editor_state
+            .modal_transform
+            .begin(mode, mouse_pos, pivot, initial_transforms);
+        self.status_message = format!("Modal Transform: {:?}", mode);
+    }
+
+    pub fn apply_modal_transform(&mut self) {
+        if !self.editor_state.modal_transform.active {
+            return;
+        }
+
+        let mut transforms = Vec::new();
+        for (&id, &old_tf) in &self.editor_state.modal_transform.initial_transforms {
+            if let Some(obj) = self.scene.get_object(id)
+                && obj.local_transform != old_tf
+            {
+                transforms.push((id, old_tf, obj.local_transform));
+            }
+        }
+
+        if !transforms.is_empty() {
+            self.history.push(Action::MultiTransform { transforms });
+            self.scene.dirty = true;
+        }
+
+        self.editor_state.modal_transform.cancel();
+        self.status_message = "Transform Applied".to_string();
+    }
+
+    pub fn cancel_modal_transform(&mut self) {
+        if !self.editor_state.modal_transform.active {
+            return;
+        }
+
+        for (&id, &old_tf) in &self.editor_state.modal_transform.initial_transforms {
+            if let Some(obj) = self.scene.get_object_mut(id) {
+                obj.local_transform = old_tf;
+            }
+        }
+        self.scene.dirty = true;
+        self.editor_state.modal_transform.cancel();
+        self.status_message = "Transform Cancelled".to_string();
+    }
+
+    pub fn toggle_fly_navigation(&mut self) {
+        self.editor_state.fly_nav_active = !self.editor_state.fly_nav_active;
+        if self.editor_state.fly_nav_active {
+            self.status_message =
+                "Fly Navigation Active (WASD move, Mouse look, Esc exit)".to_string();
+        } else {
+            self.status_message = "Exited Fly Navigation".to_string();
+        }
+    }
+
+    pub fn toggle_camera_view(&mut self) {
+        if self.editor_state.is_camera_view {
+            self.editor_state.is_camera_view = false;
+            self.status_message = "User View".to_string();
+        } else if let Some(cam_id) = self.scene.active_camera_id {
+            if let Some(params) = self.scene.camera_view_parameters(cam_id) {
+                self.camera.eye = params.eye;
+                self.camera.target = params.target;
+                self.camera.up = params.up;
+                self.camera.fov_y_deg = params.fov_y_deg;
+                self.camera.z_near = params.clip_start;
+                self.camera.z_far = params.clip_end;
+                if params.is_orthographic {
+                    self.camera.projection = forge_render::CameraProjection::Orthographic;
+                    self.camera.ortho_size = params.ortho_scale;
+                } else {
+                    self.camera.projection = forge_render::CameraProjection::Perspective;
+                }
+                self.editor_state.is_camera_view = true;
+                self.status_message = "Camera View (Numpad 0 to exit)".to_string();
+            }
+        } else {
+            self.status_message =
+                "No active camera in scene. Add a Camera via Add menu.".to_string();
+        }
+    }
+
+    pub fn align_active_camera_to_view(&mut self) {
+        if let Some(cam_id) = self.scene.active_camera_id {
+            self.scene.align_active_camera_to_view(
+                self.camera.eye,
+                self.camera.target,
+                self.camera.up,
+            );
+            if let Some(cam_obj) = self.scene.get_object_mut(cam_id)
+                && let Some(data) = &mut cam_obj.camera_data
+            {
+                data.fov_y_deg = self.camera.fov_y_deg;
+                data.clip_start = self.camera.z_near;
+                data.clip_end = self.camera.z_far;
+                data.ortho_scale = self.camera.ortho_size;
+                data.projection = match self.camera.projection {
+                    forge_render::CameraProjection::Perspective => {
+                        forge_scene::CameraProjectionType::Perspective
+                    }
+                    forge_render::CameraProjection::Orthographic => {
+                        forge_scene::CameraProjectionType::Orthographic
+                    }
+                };
+            }
+            self.status_message = "Aligned Active Camera to View".to_string();
+        } else {
+            self.status_message = "No active camera to align".to_string();
+        }
+    }
+
+    pub fn parent_selected_to_active(&mut self) {
+        let active = self.selection.active_id;
+        let selected = self.selection.selected_ids.clone();
+        if let Some(active_id) = active {
+            for id in selected {
+                if id != active_id
+                    && let Some(action) = self.scene.parent_object(id, Some(active_id))
+                {
+                    self.history.push(action);
+                }
+            }
+            self.status_message = "Parented selected objects to active".to_string();
+        }
+    }
+
+    pub fn unparent_selected(&mut self) {
+        let selected = self.selection.selected_ids.clone();
+        for id in selected {
+            if let Some(action) = self.scene.parent_object(id, None) {
+                self.history.push(action);
+            }
+        }
+        self.status_message = "Unparented selected objects".to_string();
+    }
+
+    pub fn join_selected(&mut self) {
+        let active = self.selection.active_id;
+        let selected: Vec<ObjectId> = self.selection.selected_ids.iter().copied().collect();
+        if let Some(active_id) = active
+            && let Some(action) = self.scene.join_objects(active_id, &selected)
+        {
+            self.history.push(action);
+            self.selection.select(active_id);
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_all_meshes();
+            }
+            self.status_message = "Joined selected objects".to_string();
+        }
+    }
+
+    pub fn hide_selected(&mut self) {
+        for &id in &self.selection.selected_ids {
+            self.scene.set_object_visibility(id, false);
+        }
+        self.selection.deselect();
+        self.status_message = "Hidden selected objects (Alt+H to unhide)".to_string();
+    }
+
+    pub fn unhide_all(&mut self) {
+        self.scene.unhide_all();
+        self.status_message = "Unhid all objects".to_string();
+    }
+
+    pub fn set_origin_selected_geometry(&mut self) {
+        if let Some(aid) = self.selection.active_id
+            && let Some(action) = self.scene.set_origin_to_geometry(aid)
+        {
+            self.history.push(action);
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(&aid);
+            }
+            self.status_message = "Set Origin to Geometry".to_string();
+        }
+    }
+
+    pub fn set_origin_selected_cursor(&mut self) {
+        let cursor = self.editor_state.cursor_3d;
+        if let Some(aid) = self.selection.active_id
+            && let Some(action) = self.scene.set_origin_to_cursor(aid, cursor)
+        {
+            self.history.push(action);
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(&aid);
+            }
+            self.status_message = "Set Origin to 3D Cursor".to_string();
+        }
+    }
+
     pub fn undo(&mut self) {
         if let Some(desc) = self.history.undo(&mut self.scene) {
             self.status_message = format!("Undo: {desc}");
@@ -283,6 +511,18 @@ impl Forge3dStudioApp {
         } else {
             self.status_message = "Nothing to redo".to_string();
         }
+    }
+
+    pub fn frame_selected(&mut self) {
+        let bbox = self.scene.selected_aabb(&self.selection);
+        self.camera.frame_box(&bbox);
+        self.status_message = "Framed Selected".to_string();
+    }
+
+    pub fn frame_all(&mut self) {
+        let bbox = self.scene.scene_aabb();
+        self.camera.frame_box(&bbox);
+        self.status_message = "Framed All".to_string();
     }
 }
 

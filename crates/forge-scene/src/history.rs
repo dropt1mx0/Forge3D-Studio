@@ -30,16 +30,46 @@ pub enum Action {
         old_transform: Transform,
         old_mesh: Mesh,
     },
+    MultiTransform {
+        transforms: Vec<(ObjectId, Transform, Transform)>, // (id, old_tf, new_tf)
+    },
+    MultiDelete {
+        objects: Vec<SceneObject>,
+    },
+    Join {
+        active_id: ObjectId,
+        old_mesh: Mesh,
+        removed_objects: Vec<SceneObject>,
+    },
+    ParentChange {
+        child_id: ObjectId,
+        old_parent: Option<ObjectId>,
+        new_parent: Option<ObjectId>,
+        old_local_tf: Transform,
+        new_local_tf: Transform,
+    },
+    SetOrigin {
+        id: ObjectId,
+        old_transform: Transform,
+        old_mesh: Mesh,
+        new_transform: Transform,
+        new_mesh: Mesh,
+    },
 }
 
 impl Action {
     pub fn description(&self) -> &str {
         match self {
             Self::Transform { .. } => "Transform Object",
+            Self::MultiTransform { .. } => "Transform Multiple Objects",
             Self::AddObject { .. } => "Add Object",
             Self::DeleteObject { .. } => "Delete Object",
+            Self::MultiDelete { .. } => "Delete Multiple Objects",
             Self::ModifyMesh { name, .. } => name.as_str(),
             Self::ApplyTransform { .. } => "Apply Transform",
+            Self::Join { .. } => "Join Objects",
+            Self::ParentChange { .. } => "Change Parent",
+            Self::SetOrigin { .. } => "Set Origin",
         }
     }
 }
@@ -106,11 +136,24 @@ impl HistoryStack {
                     scene.dirty = true;
                 }
             }
+            Action::MultiTransform { transforms } => {
+                for (id, old_tf, _) in transforms {
+                    if let Some(obj) = scene.get_object_mut(*id) {
+                        obj.local_transform = *old_tf;
+                    }
+                }
+                scene.dirty = true;
+            }
             Action::AddObject { object } => {
                 scene.remove_object(object.id);
             }
             Action::DeleteObject { object } => {
                 scene.add_object(object.clone());
+            }
+            Action::MultiDelete { objects } => {
+                for obj in objects {
+                    scene.add_object(obj.clone());
+                }
             }
             Action::ModifyMesh { id, old_mesh, .. } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
@@ -122,6 +165,43 @@ impl HistoryStack {
                 id,
                 old_transform,
                 old_mesh,
+            } => {
+                if let Some(obj) = scene.get_object_mut(*id) {
+                    obj.local_transform = *old_transform;
+                    obj.mesh = old_mesh.clone();
+                    scene.dirty = true;
+                }
+            }
+            Action::Join {
+                active_id,
+                old_mesh,
+                removed_objects,
+            } => {
+                if let Some(obj) = scene.get_object_mut(*active_id) {
+                    obj.mesh = old_mesh.clone();
+                }
+                for ro in removed_objects {
+                    scene.add_object(ro.clone());
+                }
+                scene.dirty = true;
+            }
+            Action::ParentChange {
+                child_id,
+                old_parent,
+                old_local_tf,
+                ..
+            } => {
+                if let Some(child) = scene.objects.get_mut(child_id) {
+                    child.parent = *old_parent;
+                    child.local_transform = *old_local_tf;
+                }
+                scene.rebuild_hierarchy();
+            }
+            Action::SetOrigin {
+                id,
+                old_transform,
+                old_mesh,
+                ..
             } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
                     obj.local_transform = *old_transform;
@@ -149,11 +229,24 @@ impl HistoryStack {
                     scene.dirty = true;
                 }
             }
+            Action::MultiTransform { transforms } => {
+                for (id, _, new_tf) in transforms {
+                    if let Some(obj) = scene.get_object_mut(*id) {
+                        obj.local_transform = *new_tf;
+                    }
+                }
+                scene.dirty = true;
+            }
             Action::AddObject { object } => {
                 scene.add_object(object.clone());
             }
             Action::DeleteObject { object } => {
                 scene.remove_object(object.id);
+            }
+            Action::MultiDelete { objects } => {
+                for obj in objects {
+                    scene.remove_object(obj.id);
+                }
             }
             Action::ModifyMesh { id, new_mesh, .. } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
@@ -163,6 +256,38 @@ impl HistoryStack {
             }
             Action::ApplyTransform { id, .. } => {
                 scene.apply_transform_to_object(*id);
+            }
+            Action::Join {
+                active_id,
+                removed_objects,
+                ..
+            } => {
+                let remove_ids: Vec<ObjectId> = removed_objects.iter().map(|o| o.id).collect();
+                let _ = scene.join_objects(*active_id, &remove_ids);
+            }
+            Action::ParentChange {
+                child_id,
+                new_parent,
+                new_local_tf,
+                ..
+            } => {
+                if let Some(child) = scene.objects.get_mut(child_id) {
+                    child.parent = *new_parent;
+                    child.local_transform = *new_local_tf;
+                }
+                scene.rebuild_hierarchy();
+            }
+            Action::SetOrigin {
+                id,
+                new_transform,
+                new_mesh,
+                ..
+            } => {
+                if let Some(obj) = scene.get_object_mut(*id) {
+                    obj.local_transform = *new_transform;
+                    obj.mesh = new_mesh.clone();
+                    scene.dirty = true;
+                }
             }
         }
 

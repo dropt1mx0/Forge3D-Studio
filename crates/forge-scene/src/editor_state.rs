@@ -86,17 +86,60 @@ pub struct ModalTransformState {
     pub active: bool,
     pub mode: TransformMode,
     pub constraint: Option<AxisConstraint>,
+    pub is_local_constraint: bool,
     pub numeric_input: String,
     pub initial_transforms: HashMap<ObjectId, Transform>,
     pub start_mouse_pos: Vec2,
     pub pivot_world: Vec3,
+    pub start_distance_from_pivot: f32,
+    pub start_angle_rad: f32,
 }
 
 impl ModalTransformState {
+    /// Begins a modal transformation session.
+    pub fn begin(
+        &mut self,
+        mode: TransformMode,
+        start_mouse: Vec2,
+        pivot: Vec3,
+        initial_transforms: HashMap<ObjectId, Transform>,
+    ) {
+        self.active = true;
+        self.mode = mode;
+        self.constraint = None;
+        self.is_local_constraint = false;
+        self.numeric_input.clear();
+        self.start_mouse_pos = start_mouse;
+        self.pivot_world = pivot;
+        self.initial_transforms = initial_transforms;
+        self.start_distance_from_pivot = (start_mouse - Vec2::new(pivot.x, pivot.y))
+            .length()
+            .max(1.0);
+        self.start_angle_rad = (start_mouse.y - pivot.y).atan2(start_mouse.x - pivot.x);
+    }
+
+    /// Toggles axis constraint: if same axis pressed again, toggles between Global and Local space!
+    pub fn set_or_toggle_axis(&mut self, axis: AxisConstraint) {
+        if self.constraint == Some(axis) {
+            if self.is_local_constraint {
+                // Third press clears constraint
+                self.constraint = None;
+                self.is_local_constraint = false;
+            } else {
+                // Second press switches to local
+                self.is_local_constraint = true;
+            }
+        } else {
+            self.constraint = Some(axis);
+            self.is_local_constraint = false;
+        }
+    }
+
     /// Resets the modal transform state.
     pub fn cancel(&mut self) {
         self.active = false;
         self.constraint = None;
+        self.is_local_constraint = false;
         self.numeric_input.clear();
         self.initial_transforms.clear();
     }
@@ -140,9 +183,18 @@ pub struct EditorState {
     pub show_wireframe: bool,
     pub proportional_editing: bool,
     pub proportional_radius: f32,
+    pub emulate_numpad: bool,
 
     #[serde(skip)]
+    pub fly_nav_active: bool,
+    #[serde(skip)]
+    pub walk_mode: bool,
+    #[serde(skip)]
+    pub is_camera_view: bool,
+    #[serde(skip)]
     pub modal_transform: ModalTransformState,
+    #[serde(skip)]
+    pub transform_clipboard: Option<Transform>,
 }
 
 impl Default for EditorState {
@@ -160,7 +212,62 @@ impl Default for EditorState {
             show_wireframe: false,
             proportional_editing: false,
             proportional_radius: 1.0,
+            emulate_numpad: false,
+            fly_nav_active: false,
+            walk_mode: false,
+            is_camera_view: false,
             modal_transform: ModalTransformState::default(),
+            transform_clipboard: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_modal_transform_axis_toggle() {
+        let mut modal = ModalTransformState::default();
+        modal.begin(
+            TransformMode::Translate,
+            Vec2::new(100.0, 100.0),
+            Vec3::ZERO,
+            HashMap::new(),
+        );
+        assert!(modal.active);
+        assert_eq!(modal.constraint, None);
+
+        // First press: X (Global)
+        modal.set_or_toggle_axis(AxisConstraint::X);
+        assert_eq!(modal.constraint, Some(AxisConstraint::X));
+        assert!(!modal.is_local_constraint);
+
+        // Second press: X (Local)
+        modal.set_or_toggle_axis(AxisConstraint::X);
+        assert_eq!(modal.constraint, Some(AxisConstraint::X));
+        assert!(modal.is_local_constraint);
+
+        // Third press: clears constraint
+        modal.set_or_toggle_axis(AxisConstraint::X);
+        assert_eq!(modal.constraint, None);
+        assert!(!modal.is_local_constraint);
+    }
+
+    #[test]
+    fn test_modal_numeric_input() {
+        let mut modal = ModalTransformState::default();
+        modal.push_char('-');
+        modal.push_char('4');
+        modal.push_char('.');
+        modal.push_char('5');
+        assert_eq!(modal.parsed_number(), Some(-4.5));
+
+        modal.pop_char();
+        assert_eq!(modal.parsed_number(), Some(-4.0));
+
+        modal.cancel();
+        assert!(!modal.active);
+        assert!(modal.numeric_input.is_empty());
     }
 }

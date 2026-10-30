@@ -81,3 +81,52 @@
   - Hotkeys `Ctrl+Z` (Undo) and `Ctrl+Shift+Z` / `Ctrl+Y` (Redo) are integrated globally into the studio application.
 - **Consequences:**
   Provides confidence to artists during complex modeling workflows; completely decoupled from UI code.
+
+---
+
+## ADR-0006: Scene Camera as Pure Domain Structure with Procedural 3D Marker
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  A 3D application requires persistent scene cameras that can be positioned, rotated, parented, and calibrated with realistic optics (focal length, sensor size, clipping, depth of field), distinct from the working viewport navigation camera.
+- **Decision:**
+  - Add `PrimitiveType::Camera` and `CameraData` to `forge-scene::object`.
+  - Generate a procedural 3D camera marker mesh (`generate_camera_marker()` in `forge-geometry::primitives`) consisting of an equipment body, a tapered wire frustum lens, and an orange upward-pointing triangle.
+  - Calculate camera viewing matrices through pure-CPU `CameraViewParameters` in `forge-scene`, avoiding any dependencies on graphics crates.
+  - Render an on-screen film gate / safe area overlay in the viewport matching the camera's aspect ratio and resolution settings.
+- **Consequences:**
+  Clean-room implementation with zero asset dependencies. Camera objects participate seamlessly in scene graphs, transforms, gizmos, and `.forge` project serialization.
+
+---
+
+## ADR-0007: Modal Transformation Finite State Machine with Precision Numeric Input
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  Professional 3D software (such as Blender) relies heavily on fast modal keyboard transformations (`G` Grab, `R` Rotate, `S` Scale) with axis constraints (`X`, `Y`, `Z`), plane constraints (`Shift+X/Y/Z`), and typed numbers (`G X 5 Enter`).
+- **Decision:**
+  - Implement `ModalTransformState` in `forge-scene::editor_state` tracking transform mode, axis constraint, space (global vs. local), start pointer position, pivot point, and a typed numeric string buffer.
+  - Multi-select transform: Apply offsets to all selected objects around configured Pivot Points (Median Point, Active Element, 3D Cursor, Individual Origins).
+  - Toggling: Pressing the same axis key a second time toggles constraint between Global and Local coordinates; a third press clears the constraint.
+  - Atomic confirmation / cancellation: Enter or Left Click commits the transform to `HistoryStack`; Escape or Right Click reverts all objects to their initial transforms.
+- **Consequences:**
+  High-speed keyboard workflow matching professional expectations with zero ambiguity and full cancellation safety.
+
+---
+
+## ADR-0008: Centralized Event Routing Priority and Text Input Isolation
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  Single-key hotkeys (such as `G`, `R`, `S`, `X`, `F`, `H`) easily collide with typing text in inspector fields, outliner renames, or fly navigation inputs.
+- **Decision:**
+  - Establish a strict priority chain:
+    1. UI Text Focus (`egui_wants_keyboard_input`): Blocks all viewport shortcut processing.
+    2. Fly / Walk Navigation: WASDQE and mouse look take precedence over object transforms.
+    3. Modal Transformation: Number keys, axis keys, Enter, and Escape are consumed by the modal state machine.
+    4. 3D Gizmo Dragging: Consumes mouse clicks, preventing accidental viewport orbiting.
+    5. Viewport Navigation: MMB / Alt-drag, Shift-drag, and wheel scroll.
+    6. Global Shortcuts: Fall-through when all above are idle.
+- **Consequences:**
+  Completely eliminates inadvertent object modifications while typing text, and prevents navigation conflicts during transforms.
+

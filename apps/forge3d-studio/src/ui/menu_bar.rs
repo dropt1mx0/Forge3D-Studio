@@ -283,11 +283,27 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.status_message = "Added Circle".to_string();
                 ui.close();
             }
+
+            ui.separator();
+
+            if ui.button("📷 Camera").clicked() {
+                let mut camera_obj = SceneObject::new_camera("Camera");
+                camera_obj.local_transform.translation = cursor + Vec3::new(0.0, 1.5, 3.0);
+                let id = app.scene.add_object(camera_obj);
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
+                app.selection.select(id);
+                app.status_message = "Added Camera".to_string();
+                ui.close();
+            }
         });
 
         // ---------------- Object Menu ----------------
         ui.menu_button("Object", |ui| {
-            let has_sel = app.selection.active_id.is_some();
+            let has_sel = !app.selection.is_empty();
 
             if ui
                 .add_enabled(has_sel, egui::Button::new("✔ Apply Transform"))
@@ -296,6 +312,69 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.apply_transform_selected();
                 ui.close();
             }
+
+            ui.separator();
+
+            ui.menu_button("Parent", |ui| {
+                if ui
+                    .add_enabled(has_sel, egui::Button::new("Make Parent to Active (Ctrl+P)"))
+                    .clicked()
+                {
+                    app.parent_selected_to_active();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(has_sel, egui::Button::new("Clear Parent (Alt+P)"))
+                    .clicked()
+                {
+                    app.unparent_selected();
+                    ui.close();
+                }
+            });
+
+            if ui
+                .add_enabled(
+                    app.selection.selected_ids.len() > 1,
+                    egui::Button::new("🔗 Join Objects (Ctrl+J)"),
+                )
+                .clicked()
+            {
+                app.join_selected();
+                ui.close();
+            }
+
+            ui.menu_button("Set Origin", |ui| {
+                if ui
+                    .add_enabled(has_sel, egui::Button::new("Origin to Geometry"))
+                    .clicked()
+                {
+                    app.set_origin_selected_geometry();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(has_sel, egui::Button::new("Origin to 3D Cursor"))
+                    .clicked()
+                {
+                    app.set_origin_selected_cursor();
+                    ui.close();
+                }
+            });
+
+            ui.separator();
+
+            ui.menu_button("Show / Hide", |ui| {
+                if ui
+                    .add_enabled(has_sel, egui::Button::new("Hide Selected (H)"))
+                    .clicked()
+                {
+                    app.hide_selected();
+                    ui.close();
+                }
+                if ui.button("Unhide All (Alt+H)").clicked() {
+                    app.unhide_all();
+                    ui.close();
+                }
+            });
 
             ui.separator();
 
@@ -393,6 +472,38 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         // ---------------- View Menu ----------------
         ui.menu_button("View", |ui| {
+            let cam_view_text = if app.editor_state.is_camera_view {
+                "📷 Exit Camera View (Numpad 0)"
+            } else {
+                "📷 Camera View (Numpad 0)"
+            };
+            if ui.button(cam_view_text).clicked() {
+                app.toggle_camera_view();
+                ui.close();
+            }
+
+            if ui
+                .button("Align Active Camera to View (Ctrl+Alt+Numpad 0)")
+                .clicked()
+            {
+                app.align_active_camera_to_view();
+                ui.close();
+            }
+
+            ui.separator();
+
+            let fly_text = if app.editor_state.fly_nav_active {
+                "🚀 Exit Fly Navigation (Esc)"
+            } else {
+                "🚀 Fly Navigation (Shift+~ / Shift+F)"
+            };
+            if ui.button(fly_text).clicked() {
+                app.toggle_fly_navigation();
+                ui.close();
+            }
+
+            ui.separator();
+
             ui.menu_button("Standard Viewpoints", |ui| {
                 if ui.button("Front (Numpad 1)").clicked() {
                     app.camera.set_view_preset(ViewPreset::Front);
@@ -436,19 +547,28 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.separator();
 
             if ui.button("🎯 Frame Selected (F / Numpad .)").clicked() {
-                let bbox = app.scene.selected_aabb(&app.selection);
-                app.camera.frame_box(&bbox);
+                app.frame_selected();
                 ui.close();
             }
 
             if ui.button("🌐 Frame All (Home)").clicked() {
-                let bbox = app.scene.scene_aabb();
-                app.camera.frame_box(&bbox);
+                app.frame_all();
+                ui.close();
+            }
+
+            if ui.button("🔄 Reset View").clicked() {
+                app.camera.reset_view();
+                app.editor_state.is_camera_view = false;
                 ui.close();
             }
 
             ui.separator();
 
+            ui.checkbox(
+                &mut app.editor_state.emulate_numpad,
+                "Emulate Numpad (Top Row 1-0)",
+            );
+            ui.checkbox(&mut app.editor_state.walk_mode, "Walk Mode (Lock Ground Y)");
             ui.checkbox(&mut app.editor_state.show_grid, "Show Ground Grid");
             ui.checkbox(&mut app.editor_state.show_axes, "Show Coordinate Axes");
             ui.checkbox(&mut app.editor_state.show_wireframe, "Show Wireframe");

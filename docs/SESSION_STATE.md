@@ -77,87 +77,84 @@
 ---
 
 ## 3. Verification & Test Evidence
-- **All Tests**: 40 passed, 0 failed, 0 ignored across 7 workspace crates.
+- **All Tests**: 50 passed, 0 failed, 0 ignored across 7 workspace crates.
 - **`cargo fmt --check`**: Clean (exit code 0).
 - **`cargo check --workspace`**: Clean (exit code 0).
 - **`cargo clippy --workspace --all-targets -- -D warnings`**: Clean (exit code 0, zero warnings).
 - **GPU Adapter Test**: Verified live hardware adapter detection (`Mesa Intel(R) HD Graphics 4000 (IVB GT2)` on OpenGL backend).
+- **Release Build**: `cargo build --release --workspace` completed cleanly.
 
 ---
 
-## 4. Completed Milestones & Git Commit
-- **Sprint 1 — Critical Interaction**:
-  - Interactive Camera: Orbit (MMB), Pan (Shift+MMB), Zoom (Scroll), Dolly.
-  - View presets: Front (Numpad 1), Right (Numpad 3), Top (Numpad 7).
-  - Perspective / Orthographic projection toggle (Numpad 5).
-  - Frame Selected (Numpad . / F) and Frame All (Home).
-  - Input-first frame synchronization eliminates 1-frame latency.
-- **Sprint 2 — Object Transforms & 3D Gizmos**:
-  - Full 3D on-screen gizmo: Move (arrows + planes), Rotate (rings), Scale (boxes + uniform handle).
-  - Live raycast hit testing, hover highlight (bright yellow), real-time dragging.
-  - Hotkeys: Q (Select), W (Move), E (Rotate), R (Scale), Alt+G/R/S (Reset).
-  - Snapping toggle (`🧲`) with configurable grid steps.
-  - Global vs. Local transform orientation and Pivot Point selection (Median / Individual).
-- **Sprint 3 — Modeling Foundation & Edit Mode**:
-  - B-Rep polygon mesh (`EditableMesh`, `EditVertex`, `EditEdge`, `EditFace`).
-  - Mode toggle: Object Mode vs. Edit Mode via `Tab`.
-  - Selection modes: Vertex (`1`), Edge (`2`), Face (`3`) with live viewport overlay.
-  - Modeling operators: Extrude (`E`), Inset (`I`), Bevel, Subdivide, Merge at center (`M`), Fill (`F`), Delete (`X`/`Del`).
-  - Extended primitives: Cylinder, Cone, Torus, Circle, Icosphere.
-- **Sprint 4 — Editor Workflow & Modifiers**:
-  - `forge-modifiers` crate: Non-destructive Mirror, Subdivision Surface, Solidify, Array.
-  - Modifier stack UI with parameter adjustments, reordering, and "Apply to Mesh" baking.
-  - `HistoryStack` with Undo (`Ctrl+Z`) and Redo (`Ctrl+Shift+Z` / `Ctrl+Y`).
-  - Dynamic GPU buffer reallocation on mesh topology edits.
-- **Release Build**: `cargo build --release --workspace` completed in 19.69s, generating optimized binary at `target/release/forge3d-studio`.
-- **Smoke Test**: Executed `timeout 3s ./target/release/forge3d-studio` verifying clean GPU adapter query (`Mesa Intel(R) HD Graphics 4000 (IVB GT2)` via `Gl`), offscreen viewport texture allocation, and window loop startup without panics.
+## 4. Completed Milestones & Git Commits
+- **Alpha 0.1 & 0.2**:
+  - Foundational crates, wgpu backend on Intel HD 4000, interactive viewport rendering, editable B-Rep mesh, modifier stack, undo/redo history.
+- **Alpha 0.3 — Full 3D Control System (Phases 1–6)**:
+  - **Phase 1 (Camera Foundation)**:
+    - Orbit (MMB / Alt+LMB), Pan (Shift+MMB), Dolly Zoom (Ctrl+MMB), Zoom (Scroll).
+    - Fly & Walk Navigation (`Shift+F`): WASD movement, Q/E vertical translation, Shift speed boost, Ctrl slow-down, mouse look, ground height locking.
+    - Standard views: Numpad 1/3/7 Front/Right/Top, Ctrl+1/3/7 Back/Left/Bottom, Numpad 5 Ortho/Persp, Numpad 0 Camera View, Numpad 2/4/6/8 15° step rotation.
+    - Emulate Numpad option for compact/laptop keyboards.
+    - Framing: Frame Selected (`F` / Numpad `.`) and Frame All (`Home`).
+  - **Phase 2 (Object Manipulation & Modal Transforms)**:
+    - Modal Grab/Move (`G`), Rotate (`R`), Scale (`S`) finite state machine.
+    - Axis locks (`X`, `Y`, `Z`), plane locks (`Shift+X/Y/Z`), repeat axis press toggles Global vs Local space.
+    - Real-time precision numeric input (digits, `-`, `.`, Backspace) with HUD overlay.
+    - Confirm with `Enter`/`LMB`, cancel with `Escape`/`RMB`.
+    - Multi-object transforms with Pivot Points: Median Point, Active Element, 3D Cursor, Individual Origins.
+    - Duplicate (`Shift+D`), Delete (`X`/`Del`), Hide (`H`), Unhide All (`Alt+H`), Reset Transforms (`Alt+G/R/S`), Apply Transform (`Ctrl+A`), Parent/Unparent (`Ctrl+P`/`Alt+P`), Join Objects (`Ctrl+J`), Set Origin (to Geometry, to Cursor).
+  - **Phase 3 (Interactive Gizmos)**:
+    - On-screen Move, Rotate, Scale manipulators with hover highlights and grid snapping (`🧲`).
+  - **Phase 4 (Keyboard Workflow & Input Architecture)**:
+    - Isolated keyboard routing: `egui_wants_keyboard_input` protects text fields in Inspector/Outliner.
+    - Hierarchical priority routing eliminating shortcut conflicts.
+  - **Phase 5 (Scene Camera Objects)**:
+    - `PrimitiveType::Camera` scene object with procedural 3D camera marker mesh.
+    - Active camera management, outliner `★` badge, Camera View overlay with film gate letterboxing.
+    - Optical properties: Perspective/Orthographic, Focal Length / FOV synchronization, Sensor dimensions, Clipping, Depth of Field, Resolution presets (1080p, 4K, 1:1), and Align Active Camera to View (`Ctrl+Alt+Num0`).
+    - Full serialization in `.forge` project files.
+  - **Phase 6 (Stability & Quality Gates)**:
+    - 50/50 tests passing, clippy zero warnings, cargo fmt clean, release binary verified on live hardware.
 
 ---
 
-## 5. How to Run & Test
-To launch Forge3D Studio interactively:
+## 5. Master Keyboard & Navigation Reference
+
+| Action | Shortcut | Context |
+| :--- | :--- | :--- |
+| **Orbit Camera** | `MMB + Drag` or `Alt + LMB + Drag` | Viewport |
+| **Pan Camera** | `Shift + MMB + Drag` | Viewport |
+| **Zoom / Dolly** | `Scroll Wheel` or `Ctrl + MMB + Drag` | Viewport |
+| **Fly / Walk Mode** | `Shift + F` (Exit with `Esc` / `Enter`) | Viewport |
+| **Fly Movement** | `W` (Fwd), `S` (Back), `A` (Left), `D` (Right), `Q` (Down), `E` (Up) | Fly Mode |
+| **Fly Speed Modifiers** | `Shift` (Boost), `Ctrl` (Slow), `Scroll` (Base Speed) | Fly Mode |
+| **Standard Views** | `Num 1` (Front), `Ctrl+Num 1` (Back), `Num 3` (Right), `Ctrl+Num 3` (Left), `Num 7` (Top), `Ctrl+Num 7` (Bottom) | Viewport |
+| **Projection Toggle** | `Num 5` (Perspective / Orthographic) | Viewport |
+| **Step Rotate** | `Num 2` / `Num 8` (Pitch 15°), `Num 4` / `Num 6` (Yaw 15°) | Viewport |
+| **Camera View** | `Num 0` (Toggle View through Active Scene Camera) | Viewport |
+| **Align Camera to View** | `Ctrl + Alt + Num 0` | Viewport |
+| **Frame Selected / All** | `F` / `Num .` (Selected), `Home` (All) | Viewport |
+| **Grab / Move** | `G` (Move), `G → X/Y/Z → [Number] → Enter` | Object Selection |
+| **Rotate** | `R` (Rotate), `R → X/Y/Z → [Degrees] → Enter` | Object Selection |
+| **Scale** | `S` (Scale), `S → X/Y/Z → [Factor] → Enter` | Object Selection |
+| **Plane Constraint** | `Shift + X` (YZ), `Shift + Y` (XZ), `Shift + Z` (XY) | Modal Transform |
+| **Toggle Local/Global** | Press axis key again (`X`, `Y`, `Z`) | Modal Transform |
+| **Cancel Transform** | `Escape` or `RMB` | Modal Transform |
+| **Confirm Transform** | `Enter` or `LMB` | Modal Transform |
+| **Duplicate Object** | `Shift + D` (Duplicates and starts Grab) | Object Selection |
+| **Delete Object** | `X` or `Delete` | Object Selection |
+| **Hide / Unhide** | `H` (Hide Selected), `Alt + H` (Unhide All) | Object Mode |
+| **Parent / Unparent** | `Ctrl + P` (Set Parent to Active), `Alt + P` (Clear Parent) | Multi-Selection |
+| **Join Objects** | `Ctrl + J` (Join selected into active mesh) | Multi-Selection |
+| **Reset Transforms** | `Alt + G` (Location), `Alt + R` (Rotation), `Alt + S` (Scale) | Object Selection |
+| **Apply Transform** | `Ctrl + A` (Bake transform into geometry) | Object Selection |
+| **Undo / Redo** | `Ctrl + Z` (Undo), `Ctrl + Shift + Z` / `Ctrl + Y` (Redo) | Global |
+
+---
+
+## 6. How to Run & Verify
 ```bash
 cd "/home/dropt1m/Forge3D Rust Edition"
-./target/release/forge3d-studio
-# or via cargo:
 cargo run --release -p forge3d-studio
 ```
 
-### Interactive Verification Guide:
-- [x] **Viewport Camera**:
-  - Drag MMB to Orbit smoothly around focus point.
-  - Drag Shift + MMB to Pan horizontally/vertically.
-  - Scroll wheel to Zoom; Shift + Scroll to Dolly.
-  - Numpad 1 / 3 / 7 for Front / Right / Top orthographic/perspective presets.
-  - Numpad 5 to toggle Perspective / Orthographic view.
-  - Numpad . or `F` to Frame Selected object; `Home` to Frame All.
-- [x] **Object Transforms & Gizmos**:
-  - Click on any object to select.
-  - Press `W` for Move: drag red (X), green (Y), blue (Z) arrows or planar quads (XY, XZ, YZ).
-  - Press `E` for Rotate: drag red, green, blue Euler circles.
-  - Press `R` for Scale: drag axis boxes or white central cube for uniform scale.
-  - Press `Alt+G` to reset position, `Alt+R` to reset rotation, `Alt+S` to reset scale.
-  - Toggle Snap (`🧲`) in toolbar for discrete grid increments.
-- [x] **Edit Mode Modeling**:
-  - Press `Tab` with an object selected to enter Edit Mode.
-  - Press `1` for Vertex select, `2` for Edge select, `3` for Face select.
-  - Click vertex dots in viewport to select (selected items highlight bright orange).
-  - Press `E` to Extrude selected face along normal.
-  - Press `I` to Inset selected face.
-  - Click "Subdivide" to refine polygons.
-  - Press `M` to Merge vertices at center.
-  - Press `Tab` to return to Object Mode with updated geometry preserved.
-- [x] **Modifiers**:
-  - In Properties panel, select a modifier from dropdown: Mirror, Subdivision Surface, Solidify, Array.
-  - Adjust parameters in real-time (e.g. thickness, levels, mirror axis).
-  - Click `✔` to bake modifier into base mesh.
-- [x] **Undo / Redo**:
-  - Press `Ctrl+Z` to undo any transform or geometry change.
-  - Press `Ctrl+Shift+Z` or `Ctrl+Y` to redo.
-
----
-
-## 6. Next Steps for Alpha 0.3
-1. Asset I/O crate (`crates/forge-io`) with Wavefront OBJ and glTF/GLB import/export pipelines.
-2. Material data model (roughness, metallic, albedo) and PBR shader upgrades.
-3. Multiple scene lights (point, directional, spot) with shadow mapping.
