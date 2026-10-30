@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/forge-core",
+    "crates/forge-math",
+    "crates/forge-geometry",
+    "crates/forge-scene",
+    "crates/forge-gpu",
+    "crates/forge-render",
+    "apps/forge3d-studio",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Forge3D Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/forge3d/forge3d"
+
+[workspace.dependencies]
+# Internal workspace crates
+forge-core = { path = "crates/forge-core" }
+forge-math = { path = "crates/forge-math" }
+forge-geometry = { path = "crates/forge-geometry" }
+forge-scene = { path = "crates/forge-scene" }
+forge-gpu = { path = "crates/forge-gpu" }
+forge-render = { path = "crates/forge-render" }
+
+# Third-party dependencies
+wgpu = { version = "30.0.1", default-features = true }
+glam = { version = "0.30", features = ["bytemuck"] }
+bytemuck = { version = "1.25", features = ["derive"] }
+eframe = { version = "0.37.0", default-features = true, features = ["wgpu"] }
+egui = "0.37.0"
+egui-wgpu = "0.37.0"
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+pollster = "0.3"

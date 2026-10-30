@@ -1,0 +1,18 @@
+[package]
+name = "forge-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+forge-core = { workspace = true }
+forge-math = { workspace = true }
+forge-geometry = { workspace = true }
+forge-scene = { workspace = true }
+forge-gpu = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+glam = { workspace = true }

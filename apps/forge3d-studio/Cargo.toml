@@ -1,0 +1,27 @@
+[package]
+name = "forge3d-studio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "forge3d-studio"
+path = "src/main.rs"
+
+[dependencies]
+forge-core = { workspace = true }
+forge-math = { workspace = true }
+forge-geometry = { workspace = true }
+forge-scene = { workspace = true }
+forge-gpu = { workspace = true }
+forge-render = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+wgpu = { workspace = true }
+glam = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+pollster = { workspace = true }
