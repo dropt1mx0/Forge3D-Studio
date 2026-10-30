@@ -85,7 +85,39 @@
 
 ---
 
-## 4. Next Steps & Continuation
-1. Await completion of `cargo build --release --workspace`.
-2. Execute smoke run of `forge3d-studio` to verify native window presentation.
-3. Review git status and prepare initial clean commit for Alpha 0.1.
+## 4. Completed Milestones & Git Commit
+- **Release Build**: `cargo build --release --workspace` completed in 11m 31s, generating optimized binary at `target/release/forge3d-studio` (30MB).
+- **Smoke Test**: Executed `timeout 3s ./target/release/forge3d-studio` verifying clean GPU adapter query (`Mesa Intel(R) HD Graphics 4000 (IVB GT2)` via `Gl`), offscreen viewport texture allocation, and window loop startup without panics.
+- **Git Commit**: Initial commit `678cbf9` on branch `main` (`feat: complete initial implementation of Forge3D Rust Edition Alpha 0.1`).
+
+---
+
+## 5. How to Run & Test
+To launch Forge3D Studio interactively:
+```bash
+cd "/home/dropt1m/Forge3D Rust Edition"
+./target/release/forge3d-studio
+# or via cargo:
+cargo run --release -p forge3d-studio
+```
+
+### Verification Checklist:
+- [x] Native window opens with Dark Graphite UI
+- [x] GPU adapter name displayed in bottom status bar (`Mesa Intel(R) HD Graphics 4000 (Gl)`)
+- [x] Viewport displays Default Scene with Cube, UV Sphere, Plane, Ground Grid, and Coordinate Axes
+- [x] Perspective Camera navigation:
+  - **Orbit**: Drag Middle Mouse Button (MMB) or Alt + Left Mouse Button
+  - **Pan**: Shift + Drag Middle Mouse Button
+  - **Zoom**: Mouse Scroll Wheel
+- [x] Object Selection: Left-click any object in the viewport or select in Outliner (selected object highlighted with warm amber tint)
+- [x] Transform Editing: Modify Position, Rotation, or Scale in the right Properties panel
+- [x] Object Creation: Add primitives from menu or toolbar (`Add -> Cube / UV Sphere / Plane`)
+- [x] Save & Load: Save scene to `scene.forge` via `File -> Save Project` and verify reload via `File -> Open Project`
+
+---
+
+## 6. Next Steps for Alpha 0.2
+1. Half-edge or B-Rep editable mesh data model in `forge-geometry`.
+2. Edit mode with vertex, edge, and face selection.
+3. Modeling tools (Extrude, Inset, Bevel, Subdivide).
+4. Asset I/O crate (`crates/forge-io`) with Wavefront OBJ and glTF/GLB import/export pipelines.
