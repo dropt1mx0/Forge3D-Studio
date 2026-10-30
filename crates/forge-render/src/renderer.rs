@@ -69,6 +69,16 @@ impl ViewportRenderer {
         }
     }
 
+    /// Invalidate GPU cache for a specific object mesh.
+    pub fn invalidate_mesh(&mut self, id: &ObjectId) {
+        self.mesh_cache.remove(id);
+    }
+
+    /// Clear all cached GPU meshes.
+    pub fn invalidate_all_meshes(&mut self) {
+        self.mesh_cache.clear();
+    }
+
     /// Re-allocates the depth texture if the viewport dimensions change.
     fn ensure_depth_texture(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         let width = width.max(1);
@@ -135,7 +145,32 @@ impl ViewportRenderer {
             let is_selected = selection.is_selected(id);
             let obj_uniform = ObjectUniform::new(world_tf.to_matrix(), obj.color, is_selected);
 
+            let eval_mesh = obj.evaluated_mesh();
+
             if let Some(entry) = self.mesh_cache.get_mut(&id) {
+                // If mesh geometry changed, re-upload buffers
+                if entry.vertex_buffer.count != eval_mesh.vertices.len()
+                    || entry.index_buffer.count != eval_mesh.indices.len()
+                {
+                    entry.vertex_buffer = GpuBuffer::new_vertex_buffer(
+                        device,
+                        &format!("{}_vbuf", obj.name),
+                        &eval_mesh.vertices,
+                    );
+                    entry.index_buffer = GpuBuffer::new_index_buffer(
+                        device,
+                        &format!("{}_ibuf", obj.name),
+                        &eval_mesh.indices,
+                    );
+                } else {
+                    // Update vertex buffer in-place if count matches
+                    queue.write_buffer(
+                        &entry.vertex_buffer.buffer,
+                        0,
+                        bytemuck::cast_slice(&eval_mesh.vertices),
+                    );
+                }
+
                 // Update object uniform
                 queue.write_buffer(
                     &entry.object_uniform_buffer,
@@ -147,12 +182,12 @@ impl ViewportRenderer {
                 let v_buf = GpuBuffer::new_vertex_buffer(
                     device,
                     &format!("{}_vbuf", obj.name),
-                    &obj.mesh.vertices,
+                    &eval_mesh.vertices,
                 );
                 let i_buf = GpuBuffer::new_index_buffer(
                     device,
                     &format!("{}_ibuf", obj.name),
-                    &obj.mesh.indices,
+                    &eval_mesh.indices,
                 );
 
                 let u_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

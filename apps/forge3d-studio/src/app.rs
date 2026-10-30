@@ -1,10 +1,13 @@
 use std::time::Instant;
 
 use eframe::egui;
+use forge_core::id::ObjectId;
+use forge_geometry::{EditSelectionMode, EditableMesh};
 use forge_gpu::GpuAdapterInfo;
 use forge_render::{Camera, ViewportRenderer};
-use forge_scene::{EditorState, Scene, SelectionState};
+use forge_scene::{Action, EditMode, EditorState, HistoryStack, Scene, SelectionState};
 
+use crate::ui::gizmo::GizmoState;
 use crate::ui::menu_bar::render_menu_bar;
 use crate::ui::outliner::render_outliner;
 use crate::ui::properties::render_properties;
@@ -22,6 +25,15 @@ pub struct Forge3dStudioApp {
     pub status_message: String,
     pub show_about_dialog: bool,
     pub show_gpu_dialog: bool,
+
+    // Undo / Redo Command History
+    pub history: HistoryStack,
+
+    // Interactive 3D Viewport Gizmo
+    pub gizmo_state: GizmoState,
+
+    // Active mesh in Edit Mode: (ObjectId, EditableMesh)
+    pub active_edit_mesh: Option<(ObjectId, EditableMesh)>,
 
     // Stored WGPU render state from CreationContext
     pub wgpu_render_state: Option<egui_wgpu::RenderState>,
@@ -77,6 +89,9 @@ impl Forge3dStudioApp {
             status_message: "Ready. Welcome to Forge3D Rust Edition.".to_string(),
             show_about_dialog: false,
             show_gpu_dialog: false,
+            history: HistoryStack::new(),
+            gizmo_state: GizmoState::new(),
+            active_edit_mesh: None,
             wgpu_render_state: cc.wgpu_render_state.clone(),
             viewport_texture: None,
             viewport_texture_view: None,
@@ -85,6 +100,188 @@ impl Forge3dStudioApp {
             last_frame_instant: Instant::now(),
             fps: 60.0,
             frame_time_ms: 16.6,
+        }
+    }
+
+    /// Toggles between Object Mode and Edit Mode.
+    pub fn toggle_edit_mode(&mut self) {
+        match self.editor_state.edit_mode {
+            EditMode::Object => {
+                if let Some(active_id) = self.selection.active_id {
+                    if let Some(obj) = self.scene.get_object(active_id) {
+                        let edit_mesh = EditableMesh::from_mesh(&obj.mesh);
+                        self.active_edit_mesh = Some((active_id, edit_mesh));
+                        self.editor_state.edit_mode = EditMode::Edit;
+                        self.status_message = format!("Edit Mode: {}", obj.name);
+                    }
+                } else {
+                    self.status_message = "Select an object to enter Edit Mode.".to_string();
+                }
+            }
+            EditMode::Edit => {
+                self.commit_edit_mesh_to_scene();
+                self.active_edit_mesh = None;
+                self.editor_state.edit_mode = EditMode::Object;
+                self.status_message = "Object Mode".to_string();
+            }
+        }
+    }
+
+    /// Commits changes in `active_edit_mesh` back to the scene object and marks scene dirty.
+    pub fn commit_edit_mesh_to_scene(&mut self) {
+        if let Some((id, edit_mesh)) = &self.active_edit_mesh
+            && let Some(obj) = self.scene.get_object_mut(*id)
+        {
+            let old_mesh = obj.mesh.clone();
+            let new_mesh = edit_mesh.to_render_mesh();
+            obj.mesh = new_mesh.clone();
+            self.scene.dirty = true;
+
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(id);
+            }
+
+            self.history.push(Action::ModifyMesh {
+                id: *id,
+                old_mesh,
+                new_mesh,
+                name: "Edit Mesh Geometry".to_string(),
+            });
+        }
+    }
+
+    /// Fast sync of edit mesh to scene object during interactive operations without pushing undo step.
+    pub fn sync_edit_mesh_to_scene(&mut self) {
+        if let Some((id, edit_mesh)) = &self.active_edit_mesh
+            && let Some(obj) = self.scene.get_object_mut(*id)
+        {
+            obj.mesh = edit_mesh.to_render_mesh();
+            self.scene.dirty = true;
+        }
+    }
+
+    pub fn extrude_selected_geometry(&mut self, distance: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            let res = edit_mesh.extrude_faces(distance);
+            if !res.is_empty() {
+                self.sync_edit_mesh_to_scene();
+                self.status_message = format!("Extruded {} face(s)", res.len());
+            }
+        }
+    }
+
+    pub fn inset_selected_geometry(&mut self, amount: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            let res = edit_mesh.inset_faces(amount);
+            if !res.is_empty() {
+                self.sync_edit_mesh_to_scene();
+                self.status_message = format!("Inset {} face(s)", res.len());
+            }
+        }
+    }
+
+    pub fn subdivide_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            edit_mesh.subdivide();
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Subdivided selected faces".to_string();
+        }
+    }
+
+    pub fn merge_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            edit_mesh.merge_selected_at_center();
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Merged selected vertices at center".to_string();
+        }
+    }
+
+    pub fn fill_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh
+            && let Some(idx) = edit_mesh.fill_face_from_selection()
+        {
+            self.sync_edit_mesh_to_scene();
+            self.status_message = format!("Created Face #{}", idx);
+        }
+    }
+
+    pub fn delete_selected(&mut self) {
+        match self.editor_state.edit_mode {
+            EditMode::Object => {
+                let to_delete: Vec<ObjectId> =
+                    self.selection.selected_ids.iter().copied().collect();
+                for id in to_delete {
+                    if let Some(removed) = self.scene.remove_object(id) {
+                        self.history.push(Action::DeleteObject { object: removed });
+                    }
+                }
+                self.selection.deselect();
+                self.status_message = "Deleted selected object(s)".to_string();
+            }
+            EditMode::Edit => {
+                if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+                    let sel_mode = match self.editor_state.selection_element {
+                        forge_scene::SelectionElement::Vertex => EditSelectionMode::Vertex,
+                        forge_scene::SelectionElement::Edge => EditSelectionMode::Edge,
+                        forge_scene::SelectionElement::Face => EditSelectionMode::Face,
+                    };
+                    edit_mesh.delete_selected(sel_mode);
+                    self.sync_edit_mesh_to_scene();
+                    self.status_message = "Deleted selected elements".to_string();
+                }
+            }
+        }
+    }
+
+    pub fn duplicate_selected(&mut self) {
+        if let Some(active_id) = self.selection.active_id
+            && let Some(new_id) = self.scene.duplicate_object(active_id)
+        {
+            if let Some(dup) = self.scene.get_object(new_id) {
+                self.history.push(Action::AddObject {
+                    object: dup.clone(),
+                });
+            }
+            self.selection.select(new_id);
+            self.status_message = "Duplicated object".to_string();
+        }
+    }
+
+    pub fn apply_transform_selected(&mut self) {
+        if let Some(active_id) = self.selection.active_id
+            && let Some(obj) = self.scene.get_object(active_id)
+        {
+            let old_transform = obj.local_transform;
+            let old_mesh = obj.mesh.clone();
+            self.scene.apply_transform_to_object(active_id);
+            self.history.push(Action::ApplyTransform {
+                id: active_id,
+                old_transform,
+                old_mesh,
+            });
+            self.status_message = "Applied Transform".to_string();
+        }
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(desc) = self.history.undo(&mut self.scene) {
+            self.status_message = format!("Undo: {desc}");
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_all_meshes();
+            }
+        } else {
+            self.status_message = "Nothing to undo".to_string();
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if let Some(desc) = self.history.redo(&mut self.scene) {
+            self.status_message = format!("Redo: {desc}");
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_all_meshes();
+            }
+        } else {
+            self.status_message = "Nothing to redo".to_string();
         }
     }
 }
@@ -116,18 +313,17 @@ impl eframe::App for Forge3dStudioApp {
         // 4. Left Toolbar
         egui::Panel::left("tools_panel")
             .resizable(false)
-            .exact_size(60.0)
+            .exact_size(68.0)
             .show(ui, |ui| {
                 render_toolbar(self, ui);
             });
 
         // 5. Right Sidebar: Outliner (Top) and Properties (Bottom)
         egui::Panel::right("outliner_properties_panel")
-            .default_size(280.0)
+            .default_size(300.0)
             .show(ui, |ui| {
-                // Outliner half
                 ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), ui.available_height() * 0.45),
+                    egui::vec2(ui.available_width(), ui.available_height() * 0.40),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         render_outliner(self, ui);
@@ -136,7 +332,6 @@ impl eframe::App for Forge3dStudioApp {
 
                 ui.separator();
 
-                // Properties half
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     render_properties(self, ui);
                 });
@@ -151,79 +346,79 @@ impl eframe::App for Forge3dStudioApp {
                 let width = (available_size.x * ppp).round() as u32;
                 let height = (available_size.y * ppp).round() as u32;
 
+                // A. Recreate offscreen WGPU texture if size changed
                 if width >= 10
                     && height >= 10
                     && let Some(wgpu_state) = self.wgpu_render_state.clone()
+                    && (self.viewport_pixel_size != (width, height)
+                        || self.viewport_texture.is_none())
                 {
-                    // Check if offscreen render texture needs recreation
-                    if self.viewport_pixel_size != (width, height)
-                        || self.viewport_texture.is_none()
-                    {
-                        let texture = wgpu_state.device.create_texture(&wgpu::TextureDescriptor {
-                            label: Some("Viewport Offscreen Color Texture"),
-                            size: wgpu::Extent3d {
-                                width,
-                                height,
-                                depth_or_array_layers: 1,
-                            },
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                                | wgpu::TextureUsages::TEXTURE_BINDING,
-                            view_formats: &[],
-                        });
+                    let texture = wgpu_state.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("Viewport Offscreen Color Texture"),
+                        size: wgpu::Extent3d {
+                            width,
+                            height,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    });
 
-                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-                        // Register or update with egui renderer
-                        let _texture_id = if let Some(existing_id) = self.viewport_egui_texture_id {
-                            wgpu_state
-                                .renderer
-                                .write()
-                                .update_egui_texture_from_wgpu_texture(
-                                    &wgpu_state.device,
-                                    &view,
-                                    wgpu::FilterMode::Linear,
-                                    existing_id,
-                                );
-                            existing_id
-                        } else {
-                            let id = wgpu_state.renderer.write().register_native_texture(
+                    let _texture_id = if let Some(existing_id) = self.viewport_egui_texture_id {
+                        wgpu_state
+                            .renderer
+                            .write()
+                            .update_egui_texture_from_wgpu_texture(
                                 &wgpu_state.device,
                                 &view,
                                 wgpu::FilterMode::Linear,
+                                existing_id,
                             );
-                            self.viewport_egui_texture_id = Some(id);
-                            id
-                        };
-
-                        self.viewport_texture = Some(texture);
-                        self.viewport_texture_view = Some(view);
-                        self.viewport_pixel_size = (width, height);
-                    }
-
-                    // Render the 3D scene into the offscreen texture view
-                    if let (Some(renderer), Some(target_view)) =
-                        (&mut self.renderer, &self.viewport_texture_view)
-                    {
-                        renderer.render(
+                        existing_id
+                    } else {
+                        let id = wgpu_state.renderer.write().register_native_texture(
                             &wgpu_state.device,
-                            &wgpu_state.queue,
-                            target_view,
-                            width,
-                            height,
-                            &self.scene,
-                            &self.selection,
-                            &self.camera,
-                            self.editor_state.show_grid,
+                            &view,
+                            wgpu::FilterMode::Linear,
                         );
-                    }
+                        self.viewport_egui_texture_id = Some(id);
+                        id
+                    };
+
+                    self.viewport_texture = Some(texture);
+                    self.viewport_texture_view = Some(view);
+                    self.viewport_pixel_size = (width, height);
                 }
 
-                // Render the interactive viewport widget
+                // B. Render viewport interaction and paint canvas
                 render_viewport(self, ui);
+
+                // C. Render 3D GPU Scene into offscreen texture with the freshly updated camera and scene!
+                if width >= 10
+                    && height >= 10
+                    && let Some(wgpu_state) = self.wgpu_render_state.clone()
+                    && let (Some(renderer), Some(target_view)) =
+                        (&mut self.renderer, &self.viewport_texture_view)
+                {
+                    renderer.render(
+                        &wgpu_state.device,
+                        &wgpu_state.queue,
+                        target_view,
+                        width,
+                        height,
+                        &self.scene,
+                        &self.selection,
+                        &self.camera,
+                        self.editor_state.show_grid,
+                    );
+                }
             });
 
         // 7. About Modal Dialog
@@ -237,13 +432,17 @@ impl eframe::App for Forge3dStudioApp {
                     ui.label(format!("Version: {}", env!("CARGO_PKG_VERSION")));
                     ui.label("Independent, open-source 3D creation suite built in Rust.");
                     ui.add_space(8.0);
-                    ui.label("Features in Alpha 0.1:");
-                    ui.label("• wgpu + WGSL 3D graphics pipeline");
-                    ui.label("• Orbit, Pan, and Zoom camera navigation");
-                    ui.label("• Procedural Cube, UV Sphere, Plane, and Ground Grid");
-                    ui.label("• Precise raycasting object selection & highlight");
-                    ui.label("• Real-time transform manipulation and scene hierarchy");
-                    ui.label("• Versioned .forge project serialization");
+                    ui.label("Key Features:");
+                    ui.label("• Interactive 3D Viewport with Orbit, Pan, Zoom, Dolly");
+                    ui.label("• Camera Presets (Front, Back, Right, Left, Top, Bottom)");
+                    ui.label("• Orthographic & Perspective projection");
+                    ui.label("• Interactive 3D Gizmos (Move, Rotate, Scale)");
+                    ui.label("• Object Mode & Edit Mode (Tab)");
+                    ui.label(
+                        "• Vertex, Edge, Face Modeling (Extrude, Inset, Subdivide, Merge, Fill)",
+                    );
+                    ui.label("• Non-destructive Modifiers (Mirror, Subdivision, Solidify, Array)");
+                    ui.label("• Full Undo / Redo Command History (Ctrl+Z, Ctrl+Shift+Z)");
                     ui.add_space(12.0);
                     if ui.button("Close").clicked() {
                         self.show_about_dialog = false;
@@ -278,8 +477,5 @@ impl eframe::App for Forge3dStudioApp {
                     }
                 });
         }
-
-        // Continuous repaint for responsive camera interaction
-        ctx.request_repaint();
     }
 }

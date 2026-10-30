@@ -16,6 +16,7 @@ forge-geometry = { workspace = true }
 forge-scene = { workspace = true }
 forge-gpu = { workspace = true }
 forge-render = { workspace = true }
+forge-modifiers = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }

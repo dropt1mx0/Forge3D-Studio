@@ -77,7 +77,7 @@
 ---
 
 ## 3. Verification & Test Evidence
-- **All Tests**: 22 passed, 0 failed, 0 ignored.
+- **All Tests**: 40 passed, 0 failed, 0 ignored across 7 workspace crates.
 - **`cargo fmt --check`**: Clean (exit code 0).
 - **`cargo check --workspace`**: Clean (exit code 0).
 - **`cargo clippy --workspace --all-targets -- -D warnings`**: Clean (exit code 0, zero warnings).
@@ -86,9 +86,31 @@
 ---
 
 ## 4. Completed Milestones & Git Commit
-- **Release Build**: `cargo build --release --workspace` completed in 11m 31s, generating optimized binary at `target/release/forge3d-studio` (30MB).
+- **Sprint 1 — Critical Interaction**:
+  - Interactive Camera: Orbit (MMB), Pan (Shift+MMB), Zoom (Scroll), Dolly.
+  - View presets: Front (Numpad 1), Right (Numpad 3), Top (Numpad 7).
+  - Perspective / Orthographic projection toggle (Numpad 5).
+  - Frame Selected (Numpad . / F) and Frame All (Home).
+  - Input-first frame synchronization eliminates 1-frame latency.
+- **Sprint 2 — Object Transforms & 3D Gizmos**:
+  - Full 3D on-screen gizmo: Move (arrows + planes), Rotate (rings), Scale (boxes + uniform handle).
+  - Live raycast hit testing, hover highlight (bright yellow), real-time dragging.
+  - Hotkeys: Q (Select), W (Move), E (Rotate), R (Scale), Alt+G/R/S (Reset).
+  - Snapping toggle (`🧲`) with configurable grid steps.
+  - Global vs. Local transform orientation and Pivot Point selection (Median / Individual).
+- **Sprint 3 — Modeling Foundation & Edit Mode**:
+  - B-Rep polygon mesh (`EditableMesh`, `EditVertex`, `EditEdge`, `EditFace`).
+  - Mode toggle: Object Mode vs. Edit Mode via `Tab`.
+  - Selection modes: Vertex (`1`), Edge (`2`), Face (`3`) with live viewport overlay.
+  - Modeling operators: Extrude (`E`), Inset (`I`), Bevel, Subdivide, Merge at center (`M`), Fill (`F`), Delete (`X`/`Del`).
+  - Extended primitives: Cylinder, Cone, Torus, Circle, Icosphere.
+- **Sprint 4 — Editor Workflow & Modifiers**:
+  - `forge-modifiers` crate: Non-destructive Mirror, Subdivision Surface, Solidify, Array.
+  - Modifier stack UI with parameter adjustments, reordering, and "Apply to Mesh" baking.
+  - `HistoryStack` with Undo (`Ctrl+Z`) and Redo (`Ctrl+Shift+Z` / `Ctrl+Y`).
+  - Dynamic GPU buffer reallocation on mesh topology edits.
+- **Release Build**: `cargo build --release --workspace` completed in 19.69s, generating optimized binary at `target/release/forge3d-studio`.
 - **Smoke Test**: Executed `timeout 3s ./target/release/forge3d-studio` verifying clean GPU adapter query (`Mesa Intel(R) HD Graphics 4000 (IVB GT2)` via `Gl`), offscreen viewport texture allocation, and window loop startup without panics.
-- **Git Commit**: Initial commit `678cbf9` on branch `main` (`feat: complete initial implementation of Forge3D Rust Edition Alpha 0.1`).
 
 ---
 
@@ -101,23 +123,41 @@ cd "/home/dropt1m/Forge3D Rust Edition"
 cargo run --release -p forge3d-studio
 ```
 
-### Verification Checklist:
-- [x] Native window opens with Dark Graphite UI
-- [x] GPU adapter name displayed in bottom status bar (`Mesa Intel(R) HD Graphics 4000 (Gl)`)
-- [x] Viewport displays Default Scene with Cube, UV Sphere, Plane, Ground Grid, and Coordinate Axes
-- [x] Perspective Camera navigation:
-  - **Orbit**: Drag Middle Mouse Button (MMB) or Alt + Left Mouse Button
-  - **Pan**: Shift + Drag Middle Mouse Button
-  - **Zoom**: Mouse Scroll Wheel
-- [x] Object Selection: Left-click any object in the viewport or select in Outliner (selected object highlighted with warm amber tint)
-- [x] Transform Editing: Modify Position, Rotation, or Scale in the right Properties panel
-- [x] Object Creation: Add primitives from menu or toolbar (`Add -> Cube / UV Sphere / Plane`)
-- [x] Save & Load: Save scene to `scene.forge` via `File -> Save Project` and verify reload via `File -> Open Project`
+### Interactive Verification Guide:
+- [x] **Viewport Camera**:
+  - Drag MMB to Orbit smoothly around focus point.
+  - Drag Shift + MMB to Pan horizontally/vertically.
+  - Scroll wheel to Zoom; Shift + Scroll to Dolly.
+  - Numpad 1 / 3 / 7 for Front / Right / Top orthographic/perspective presets.
+  - Numpad 5 to toggle Perspective / Orthographic view.
+  - Numpad . or `F` to Frame Selected object; `Home` to Frame All.
+- [x] **Object Transforms & Gizmos**:
+  - Click on any object to select.
+  - Press `W` for Move: drag red (X), green (Y), blue (Z) arrows or planar quads (XY, XZ, YZ).
+  - Press `E` for Rotate: drag red, green, blue Euler circles.
+  - Press `R` for Scale: drag axis boxes or white central cube for uniform scale.
+  - Press `Alt+G` to reset position, `Alt+R` to reset rotation, `Alt+S` to reset scale.
+  - Toggle Snap (`🧲`) in toolbar for discrete grid increments.
+- [x] **Edit Mode Modeling**:
+  - Press `Tab` with an object selected to enter Edit Mode.
+  - Press `1` for Vertex select, `2` for Edge select, `3` for Face select.
+  - Click vertex dots in viewport to select (selected items highlight bright orange).
+  - Press `E` to Extrude selected face along normal.
+  - Press `I` to Inset selected face.
+  - Click "Subdivide" to refine polygons.
+  - Press `M` to Merge vertices at center.
+  - Press `Tab` to return to Object Mode with updated geometry preserved.
+- [x] **Modifiers**:
+  - In Properties panel, select a modifier from dropdown: Mirror, Subdivision Surface, Solidify, Array.
+  - Adjust parameters in real-time (e.g. thickness, levels, mirror axis).
+  - Click `✔` to bake modifier into base mesh.
+- [x] **Undo / Redo**:
+  - Press `Ctrl+Z` to undo any transform or geometry change.
+  - Press `Ctrl+Shift+Z` or `Ctrl+Y` to redo.
 
 ---
 
-## 6. Next Steps for Alpha 0.2
-1. Half-edge or B-Rep editable mesh data model in `forge-geometry`.
-2. Edit mode with vertex, edge, and face selection.
-3. Modeling tools (Extrude, Inset, Bevel, Subdivide).
-4. Asset I/O crate (`crates/forge-io`) with Wavefront OBJ and glTF/GLB import/export pipelines.
+## 6. Next Steps for Alpha 0.3
+1. Asset I/O crate (`crates/forge-io`) with Wavefront OBJ and glTF/GLB import/export pipelines.
+2. Material data model (roughness, metallic, albedo) and PBR shader upgrades.
+3. Multiple scene lights (point, directional, spot) with shadow mapping.

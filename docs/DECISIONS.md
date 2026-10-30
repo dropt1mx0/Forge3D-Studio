@@ -35,3 +35,49 @@
 - **Consequences:**
   - Guarantees windowing and DPI scaling work seamlessly on both Wayland and X11.
   - No decorative fake controls: every UI panel and button corresponds to real scene and viewport actions.
+
+---
+
+## ADR-0003: Viewport Input Processing and Rendering Synchronization
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  In Alpha 0.1, camera and viewport interactions suffered from a 1-frame latency and frame dropping because egui rendering consumed inputs after offscreen wgpu texture dispatch.
+- **Decision:**
+  Restructure the top-level application loop in `forge3d-studio`:
+  1. Capture all pointer events, keyboard shortcuts, and viewport bounds *before* drawing UI panels.
+  2. Directly mutate camera and active gizmo state using delta time and mouse delta.
+  3. Perform wgpu render pass to the viewport texture.
+  4. Present the updated texture inside egui's central panel with zero latency.
+- **Consequences:**
+  Eliminates input lag, jitter, and frame stalling during orbit, pan, zoom, and gizmo dragging.
+
+---
+
+## ADR-0004: B-Rep `EditableMesh` and Non-Destructive Modifiers Separation
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  Mesh modeling requires topology inspection, boundary loop traversal, polygon extrusion, and non-destructive modifier evaluation (Mirror, Subdivision, Solidify, Array).
+  Triangulated GPU meshes (`forge_geometry::Mesh`) are inadequate for polygon editing.
+- **Decision:**
+  - Introduce `EditableMesh` in `crates/forge-geometry/src/edit_mesh.rs` with `EditVertex`, `EditEdge`, and `EditFace` (arbitrary n-gons with winding orders).
+  - Implement conversion between `Mesh` and `EditableMesh`.
+  - Isolate modifiers into `crates/forge-modifiers`, operating as pure functions `fn apply(&self, mesh: &Mesh) -> Result<Mesh, ModifierError>`.
+  - In `SceneObject`, maintain the base mesh as authoritative and expose `evaluated_mesh()` which executes `ModifierStack::evaluate(&self.mesh)`.
+- **Consequences:**
+  Base mesh topology remains pure and uncorrupted during modifier adjustments; baking is an explicit one-click action.
+
+---
+
+## ADR-0005: Command Pattern and Undo/Redo System
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  Professional 3D modeling demands robust undo/redo for object transforms, mesh edits, primitive additions, and deletions.
+- **Decision:**
+  - Implement `HistoryStack` in `crates/forge-scene/src/history.rs` supporting `Action::Transform`, `Action::MeshEdit`, `Action::AddObject`, and `Action::DeleteObject`.
+  - Undo restores preceding transforms and mesh snapshots; Redo reapplies them.
+  - Hotkeys `Ctrl+Z` (Undo) and `Ctrl+Shift+Z` / `Ctrl+Y` (Redo) are integrated globally into the studio application.
+- **Consequences:**
+  Provides confidence to artists during complex modeling workflows; completely decoupled from UI code.

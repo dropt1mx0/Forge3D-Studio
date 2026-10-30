@@ -1,17 +1,22 @@
 use egui::Ui;
-use forge_geometry::primitives::{generate_cube, generate_plane, generate_uv_sphere};
+use forge_geometry::primitives::{
+    generate_circle, generate_cone, generate_cube, generate_cylinder, generate_icosphere,
+    generate_plane, generate_torus, generate_uv_sphere,
+};
 use forge_math::{Transform, Vec3};
-use forge_scene::{ForgeProject, PrimitiveType, Scene, SceneObject};
+use forge_render::{CameraProjection, ViewPreset};
+use forge_scene::{Action, EditMode, ForgeProject, PrimitiveType, Scene, SceneObject};
 
 use crate::app::Forge3dStudioApp;
 
 pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     egui::MenuBar::new().ui(ui, |ui| {
-        // File Menu
+        // ---------------- File Menu ----------------
         ui.menu_button("File", |ui| {
             if ui.button("📄 New Scene").clicked() {
                 app.scene = Scene::create_default_scene();
                 app.selection.deselect();
+                app.history.clear();
                 app.status_message = "Created new scene".to_string();
                 ui.close();
             }
@@ -25,6 +30,10 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         Ok(project) => {
                             app.scene = project.scene;
                             app.selection.deselect();
+                            app.history.clear();
+                            if let Some(r) = &mut app.renderer {
+                                r.invalidate_all_meshes();
+                            }
                             app.status_message = format!("Loaded project from {default_path}");
                         }
                         Err(e) => {
@@ -64,61 +73,377 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         });
 
-        // Add Menu
+        // ---------------- Edit Menu ----------------
+        ui.menu_button("Edit", |ui| {
+            let undo_label = if let Some(desc) = app.history.last_undo_description() {
+                format!("↩ Undo: {desc} (Ctrl+Z)")
+            } else {
+                "↩ Undo (Ctrl+Z)".to_string()
+            };
+            if ui
+                .add_enabled(app.history.can_undo(), egui::Button::new(undo_label))
+                .clicked()
+            {
+                app.undo();
+                ui.close();
+            }
+
+            let redo_label = if let Some(desc) = app.history.last_redo_description() {
+                format!("↪ Redo: {desc} (Ctrl+Shift+Z)")
+            } else {
+                "↪ Redo (Ctrl+Shift+Z)".to_string()
+            };
+            if ui
+                .add_enabled(app.history.can_redo(), egui::Button::new(redo_label))
+                .clicked()
+            {
+                app.redo();
+                ui.close();
+            }
+
+            ui.separator();
+
+            let has_sel = !app.selection.is_empty();
+            if ui
+                .add_enabled(has_sel, egui::Button::new("📑 Duplicate (Shift+D)"))
+                .clicked()
+            {
+                app.duplicate_selected();
+                ui.close();
+            }
+
+            if ui
+                .add_enabled(has_sel, egui::Button::new("🗑 Delete (Del)"))
+                .clicked()
+            {
+                app.delete_selected();
+                ui.close();
+            }
+
+            ui.separator();
+
+            let mode_text = match app.editor_state.edit_mode {
+                EditMode::Object => "Switch to Edit Mode (Tab)",
+                EditMode::Edit => "Switch to Object Mode (Tab)",
+            };
+            if ui.button(mode_text).clicked() {
+                app.toggle_edit_mode();
+                ui.close();
+            }
+        });
+
+        // ---------------- Add Menu ----------------
         ui.menu_button("Add", |ui| {
+            let cursor = app.editor_state.cursor_3d;
+
             if ui.button("📦 Cube").clicked() {
                 let mesh = generate_cube(1.0);
                 let id = app.scene.add_object(
                     SceneObject::new("Cube", PrimitiveType::Cube, mesh)
                         .with_color([0.85, 0.45, 0.25, 1.0])
-                        .with_transform(Transform::from_translation(Vec3::new(0.0, 0.5, 0.0))),
+                        .with_transform(Transform::from_translation(
+                            cursor + Vec3::new(0.0, 0.5, 0.0),
+                        )),
                 );
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
                 app.selection.select(id);
                 app.status_message = "Added Cube".to_string();
                 ui.close();
             }
 
             if ui.button("🌐 UV Sphere").clicked() {
-                let mesh = generate_uv_sphere(0.65, 32, 16);
+                let mesh = generate_uv_sphere(0.75, 32, 16);
                 let id = app.scene.add_object(
-                    SceneObject::new("Sphere", PrimitiveType::Sphere, mesh)
+                    SceneObject::new("UV Sphere", PrimitiveType::Sphere, mesh)
                         .with_color([0.25, 0.65, 0.85, 1.0])
-                        .with_transform(Transform::from_translation(Vec3::new(0.0, 0.65, 0.0))),
+                        .with_transform(Transform::from_translation(
+                            cursor + Vec3::new(0.0, 0.75, 0.0),
+                        )),
                 );
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
                 app.selection.select(id);
                 app.status_message = "Added UV Sphere".to_string();
                 ui.close();
             }
 
+            if ui.button("🌐 Icosphere").clicked() {
+                let mesh = generate_icosphere(0.75, 2);
+                let id = app.scene.add_object(
+                    SceneObject::new("Icosphere", PrimitiveType::Icosphere, mesh)
+                        .with_color([0.45, 0.75, 0.45, 1.0])
+                        .with_transform(Transform::from_translation(
+                            cursor + Vec3::new(0.0, 0.75, 0.0),
+                        )),
+                );
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
+                app.selection.select(id);
+                app.status_message = "Added Icosphere".to_string();
+                ui.close();
+            }
+
+            if ui.button("🛢 Cylinder").clicked() {
+                let mesh = generate_cylinder(0.6, 1.5, 24);
+                let id = app.scene.add_object(
+                    SceneObject::new("Cylinder", PrimitiveType::Cylinder, mesh)
+                        .with_color([0.75, 0.75, 0.35, 1.0])
+                        .with_transform(Transform::from_translation(
+                            cursor + Vec3::new(0.0, 0.75, 0.0),
+                        )),
+                );
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
+                app.selection.select(id);
+                app.status_message = "Added Cylinder".to_string();
+                ui.close();
+            }
+
+            if ui.button("▲ Cone").clicked() {
+                let mesh = generate_cone(0.8, 1.5, 24);
+                let id = app.scene.add_object(
+                    SceneObject::new("Cone", PrimitiveType::Cone, mesh)
+                        .with_color([0.85, 0.55, 0.35, 1.0])
+                        .with_transform(Transform::from_translation(
+                            cursor + Vec3::new(0.0, 0.75, 0.0),
+                        )),
+                );
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
+                app.selection.select(id);
+                app.status_message = "Added Cone".to_string();
+                ui.close();
+            }
+
+            if ui.button("🍩 Torus").clicked() {
+                let mesh = generate_torus(1.0, 0.3, 24, 16);
+                let id = app.scene.add_object(
+                    SceneObject::new("Torus", PrimitiveType::Torus, mesh)
+                        .with_color([0.85, 0.35, 0.65, 1.0])
+                        .with_transform(Transform::from_translation(
+                            cursor + Vec3::new(0.0, 0.5, 0.0),
+                        )),
+                );
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
+                app.selection.select(id);
+                app.status_message = "Added Torus".to_string();
+                ui.close();
+            }
+
             if ui.button("⬛ Plane").clicked() {
-                let mesh = generate_plane(10.0, 10);
+                let mesh = generate_plane(8.0, 8);
                 let id = app.scene.add_object(
                     SceneObject::new("Plane", PrimitiveType::Plane, mesh)
                         .with_color([0.28, 0.30, 0.34, 1.0])
-                        .with_transform(Transform::IDENTITY),
+                        .with_transform(Transform::from_translation(cursor)),
                 );
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
                 app.selection.select(id);
                 app.status_message = "Added Plane".to_string();
                 ui.close();
             }
+
+            if ui.button("⭕ Circle").clicked() {
+                let mesh = generate_circle(1.0, 32);
+                let id = app.scene.add_object(
+                    SceneObject::new("Circle", PrimitiveType::Circle, mesh)
+                        .with_color([0.5, 0.7, 0.8, 1.0])
+                        .with_transform(Transform::from_translation(cursor)),
+                );
+                if let Some(obj) = app.scene.get_object(id) {
+                    app.history.push(Action::AddObject {
+                        object: obj.clone(),
+                    });
+                }
+                app.selection.select(id);
+                app.status_message = "Added Circle".to_string();
+                ui.close();
+            }
         });
 
-        // View Menu
-        ui.menu_button("View", |ui| {
-            if ui.button("🔄 Reset Camera").clicked() {
-                app.camera = forge_render::Camera::default();
-                app.status_message = "Camera reset".to_string();
+        // ---------------- Object Menu ----------------
+        ui.menu_button("Object", |ui| {
+            let has_sel = app.selection.active_id.is_some();
+
+            if ui
+                .add_enabled(has_sel, egui::Button::new("✔ Apply Transform"))
+                .clicked()
+            {
+                app.apply_transform_selected();
                 ui.close();
             }
 
-            if ui.button("🎯 Frame Selected").clicked() {
-                if let Some(id) = app.selection.active_id {
-                    let world_tf = app.scene.world_transform(id);
-                    app.camera.target = world_tf.translation;
-                    let offset = (app.camera.eye - app.camera.target).normalize_or_zero() * 4.0;
-                    app.camera.eye = app.camera.target + offset;
-                    app.status_message = "Framed selected object".to_string();
+            ui.separator();
+
+            if ui
+                .add_enabled(has_sel, egui::Button::new("Reset Position (Alt+G)"))
+                .clicked()
+            {
+                if let Some(id) = app.selection.active_id
+                    && let Some(obj) = app.scene.get_object_mut(id)
+                {
+                    let old = obj.local_transform;
+                    obj.reset_translation();
+                    app.history.push(Action::Transform {
+                        id,
+                        old_transform: old,
+                        new_transform: obj.local_transform,
+                    });
                 }
+                ui.close();
+            }
+
+            if ui
+                .add_enabled(has_sel, egui::Button::new("Reset Rotation (Alt+R)"))
+                .clicked()
+            {
+                if let Some(id) = app.selection.active_id
+                    && let Some(obj) = app.scene.get_object_mut(id)
+                {
+                    let old = obj.local_transform;
+                    obj.reset_rotation();
+                    app.history.push(Action::Transform {
+                        id,
+                        old_transform: old,
+                        new_transform: obj.local_transform,
+                    });
+                }
+                ui.close();
+            }
+
+            if ui
+                .add_enabled(has_sel, egui::Button::new("Reset Scale (Alt+S)"))
+                .clicked()
+            {
+                if let Some(id) = app.selection.active_id
+                    && let Some(obj) = app.scene.get_object_mut(id)
+                {
+                    let old = obj.local_transform;
+                    obj.reset_scale();
+                    app.history.push(Action::Transform {
+                        id,
+                        old_transform: old,
+                        new_transform: obj.local_transform,
+                    });
+                }
+                ui.close();
+            }
+        });
+
+        // ---------------- Mesh Menu (Edit Mode Tools) ----------------
+        if app.editor_state.edit_mode == EditMode::Edit {
+            ui.menu_button("Mesh", |ui| {
+                if ui.button("⏏ Extrude (E)").clicked() {
+                    app.extrude_selected_geometry(0.5);
+                    ui.close();
+                }
+
+                if ui.button("⇲ Inset (I)").clicked() {
+                    app.inset_selected_geometry(0.15);
+                    ui.close();
+                }
+
+                if ui.button("⊞ Subdivide").clicked() {
+                    app.subdivide_selected_geometry();
+                    ui.close();
+                }
+
+                if ui.button("⨁ Merge at Center (M)").clicked() {
+                    app.merge_selected_geometry();
+                    ui.close();
+                }
+
+                if ui.button("▱ Fill Face/Edge (F)").clicked() {
+                    app.fill_selected_geometry();
+                    ui.close();
+                }
+
+                ui.separator();
+
+                if ui.button("🗑 Delete Selected").clicked() {
+                    app.delete_selected();
+                    ui.close();
+                }
+            });
+        }
+
+        // ---------------- View Menu ----------------
+        ui.menu_button("View", |ui| {
+            ui.menu_button("Standard Viewpoints", |ui| {
+                if ui.button("Front (Numpad 1)").clicked() {
+                    app.camera.set_view_preset(ViewPreset::Front);
+                    ui.close();
+                }
+                if ui.button("Back (Ctrl+Numpad 1)").clicked() {
+                    app.camera.set_view_preset(ViewPreset::Back);
+                    ui.close();
+                }
+                if ui.button("Right (Numpad 3)").clicked() {
+                    app.camera.set_view_preset(ViewPreset::Right);
+                    ui.close();
+                }
+                if ui.button("Left (Ctrl+Numpad 3)").clicked() {
+                    app.camera.set_view_preset(ViewPreset::Left);
+                    ui.close();
+                }
+                if ui.button("Top (Numpad 7)").clicked() {
+                    app.camera.set_view_preset(ViewPreset::Top);
+                    ui.close();
+                }
+                if ui.button("Bottom (Ctrl+Numpad 7)").clicked() {
+                    app.camera.set_view_preset(ViewPreset::Bottom);
+                    ui.close();
+                }
+            });
+
+            let proj_label = match app.camera.projection {
+                CameraProjection::Perspective => {
+                    "Projection: Perspective → Switch to Orthographic (Numpad 5)"
+                }
+                CameraProjection::Orthographic => {
+                    "Projection: Orthographic → Switch to Perspective (Numpad 5)"
+                }
+            };
+            if ui.button(proj_label).clicked() {
+                app.camera.toggle_projection();
+                ui.close();
+            }
+
+            ui.separator();
+
+            if ui.button("🎯 Frame Selected (F / Numpad .)").clicked() {
+                let bbox = app.scene.selected_aabb(&app.selection);
+                app.camera.frame_box(&bbox);
+                ui.close();
+            }
+
+            if ui.button("🌐 Frame All (Home)").clicked() {
+                let bbox = app.scene.scene_aabb();
+                app.camera.frame_box(&bbox);
                 ui.close();
             }
 
@@ -126,9 +451,10 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             ui.checkbox(&mut app.editor_state.show_grid, "Show Ground Grid");
             ui.checkbox(&mut app.editor_state.show_axes, "Show Coordinate Axes");
+            ui.checkbox(&mut app.editor_state.show_wireframe, "Show Wireframe");
         });
 
-        // Help Menu
+        // ---------------- Help Menu ----------------
         ui.menu_button("Help", |ui| {
             if ui.button("ℹ About Forge3D").clicked() {
                 app.show_about_dialog = true;

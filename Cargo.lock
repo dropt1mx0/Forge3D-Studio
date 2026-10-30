@@ -1207,6 +1207,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-modifiers"
+version = "0.1.0"
+dependencies = [
+ "forge-core",
+ "forge-geometry",
+ "forge-math",
+ "glam",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "forge-render"
 version = "0.1.0"
 dependencies = [
@@ -1217,6 +1229,7 @@ dependencies = [
  "forge-math",
  "forge-scene",
  "glam",
+ "serde",
  "thiserror 2.0.21",
  "tracing",
  "wgpu",
@@ -1229,6 +1242,7 @@ dependencies = [
  "forge-core",
  "forge-geometry",
  "forge-math",
+ "forge-modifiers",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1247,6 +1261,7 @@ dependencies = [
  "forge-geometry",
  "forge-gpu",
  "forge-math",
+ "forge-modifiers",
  "forge-render",
  "forge-scene",
  "glam",

@@ -40,6 +40,19 @@ impl Ray {
         None
     }
 
+    /// Finds the distance `s` along a 3D line `line_point + s * line_dir` closest to this ray.
+    pub fn closest_point_on_line(&self, line_point: Vec3, line_dir: Vec3) -> f32 {
+        let v = line_dir.normalize_or_zero();
+        let d = self.direction;
+        let b = d.dot(v);
+        let denom = 1.0 - b * b;
+        if denom.abs() < 1e-5 {
+            return 0.0;
+        }
+        let w0 = line_point - self.origin;
+        (b * d.dot(w0) - v.dot(w0)) / denom
+    }
+
     /// Intersects ray with a sphere. Returns the closest positive distance `t`.
     pub fn intersect_sphere(&self, center: Vec3, radius: f32) -> Option<f32> {
         let oc = self.origin - center;
@@ -135,5 +148,12 @@ mod tests {
         assert!(hit.is_some());
         let (t, _) = hit.unwrap();
         assert!((t - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_closest_point_on_line() {
+        let ray = Ray::new(Vec3::new(2.0, 5.0, 0.0), -Vec3::Y);
+        let s = ray.closest_point_on_line(Vec3::ZERO, Vec3::X);
+        assert!((s - 2.0).abs() < 1e-4);
     }
 }

@@ -1,9 +1,19 @@
+pub mod circle;
+pub mod cone;
 pub mod cube;
+pub mod cylinder;
 pub mod grid;
+pub mod icosphere;
 pub mod plane;
 pub mod sphere;
+pub mod torus;
 
+pub use circle::generate_circle;
+pub use cone::generate_cone;
 pub use cube::generate_cube;
+pub use cylinder::generate_cylinder;
 pub use grid::generate_grid_lines;
+pub use icosphere::generate_icosphere;
 pub use plane::generate_plane;
 pub use sphere::generate_uv_sphere;
+pub use torus::generate_torus;

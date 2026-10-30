@@ -1,7 +1,7 @@
 use forge_core::id::ObjectId;
 use forge_core::traits::{Identifiable, Named};
 use forge_geometry::Mesh;
-use forge_math::Transform;
+use forge_math::{Quat, Transform, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// Type of 3D primitive.
@@ -9,7 +9,13 @@ use serde::{Deserialize, Serialize};
 pub enum PrimitiveType {
     Cube,
     Sphere,
+    Icosphere,
     Plane,
+    Circle,
+    Cylinder,
+    Cone,
+    Torus,
+    Grid,
     Custom,
 }
 
@@ -25,6 +31,7 @@ pub struct SceneObject {
     pub color: [f32; 4],
     pub parent: Option<ObjectId>,
     pub children: Vec<ObjectId>,
+    pub modifiers: forge_modifiers::ModifierStack,
 }
 
 impl SceneObject {
@@ -40,6 +47,7 @@ impl SceneObject {
             color: [0.8, 0.8, 0.85, 1.0], // Neutral clay/matte color
             parent: None,
             children: Vec::new(),
+            modifiers: forge_modifiers::ModifierStack::new(),
         }
     }
 
@@ -53,6 +61,41 @@ impl SceneObject {
     pub fn with_color(mut self, color: [f32; 4]) -> Self {
         self.color = color;
         self
+    }
+
+    /// Evaluates base mesh through all active modifiers in stack.
+    pub fn evaluated_mesh(&self) -> Mesh {
+        if self.modifiers.is_empty() {
+            self.mesh.clone()
+        } else {
+            self.modifiers.evaluate(&self.mesh)
+        }
+    }
+
+    /// Applies the current local transform permanently to the mesh geometry and resets transform to identity.
+    pub fn apply_transform(&mut self) {
+        self.mesh.transform(&self.local_transform);
+        self.local_transform = Transform::IDENTITY;
+    }
+
+    /// Resets translation, rotation, and scale to identity.
+    pub fn reset_transform(&mut self) {
+        self.local_transform = Transform::IDENTITY;
+    }
+
+    /// Resets translation to (0, 0, 0).
+    pub fn reset_translation(&mut self) {
+        self.local_transform.translation = Vec3::ZERO;
+    }
+
+    /// Resets rotation to identity quaternion (0, 0, 0, 1).
+    pub fn reset_rotation(&mut self) {
+        self.local_transform.rotation = Quat::IDENTITY;
+    }
+
+    /// Resets scale to uniform (1, 1, 1).
+    pub fn reset_scale(&mut self) {
+        self.local_transform.scale = Vec3::ONE;
     }
 }
 

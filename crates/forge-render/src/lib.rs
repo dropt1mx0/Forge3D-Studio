@@ -9,7 +9,7 @@ pub mod renderer;
 pub mod shaders;
 pub mod uniforms;
 
-pub use camera::Camera;
+pub use camera::{Camera, CameraProjection, ViewPreset};
 pub use pipelines::{DEPTH_FORMAT, RenderPipelines};
 pub use renderer::ViewportRenderer;
 pub use uniforms::{CameraUniform, ObjectUniform};

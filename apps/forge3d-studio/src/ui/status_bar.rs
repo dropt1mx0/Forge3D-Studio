@@ -1,11 +1,25 @@
 use egui::Ui;
+use forge_scene::EditMode;
 
 use crate::app::Forge3dStudioApp;
 
 pub fn render_status_bar(app: &Forge3dStudioApp, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        // Status message on left
-        ui.label(format!("Status: {}", app.status_message));
+        // Status message and active mode on left
+        let mode_tag = match app.editor_state.edit_mode {
+            EditMode::Object => "[Object Mode]".to_string(),
+            EditMode::Edit => format!("[Edit Mode: {:?}]", app.editor_state.selection_element),
+        };
+        ui.label(egui::RichText::new(mode_tag).strong());
+        ui.label(&app.status_message);
+
+        if app.editor_state.snap_settings.enabled {
+            ui.separator();
+            ui.label(format!(
+                "🧲 Snap: {:.2}m",
+                app.editor_state.snap_settings.grid_increment
+            ));
+        }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Right side stats:

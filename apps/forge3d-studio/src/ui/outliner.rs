@@ -33,8 +33,12 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     // Primitive icon
                     let icon = match obj.primitive_type {
                         PrimitiveType::Cube => "📦",
-                        PrimitiveType::Sphere => "🌐",
-                        PrimitiveType::Plane => "⬛",
+                        PrimitiveType::Sphere | PrimitiveType::Icosphere => "🌐",
+                        PrimitiveType::Plane | PrimitiveType::Grid => "⬛",
+                        PrimitiveType::Circle => "⭕",
+                        PrimitiveType::Cylinder => "🛢",
+                        PrimitiveType::Cone => "▲",
+                        PrimitiveType::Torus => "🍩",
                         PrimitiveType::Custom => "📐",
                     };
 

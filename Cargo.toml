@@ -7,6 +7,7 @@ members = [
     "crates/forge-scene",
     "crates/forge-gpu",
     "crates/forge-render",
+    "crates/forge-modifiers",
     "apps/forge3d-studio",
 ]
 
@@ -25,6 +26,7 @@ forge-geometry = { path = "crates/forge-geometry" }
 forge-scene = { path = "crates/forge-scene" }
 forge-gpu = { path = "crates/forge-gpu" }
 forge-render = { path = "crates/forge-render" }
+forge-modifiers = { path = "crates/forge-modifiers" }
 
 # Third-party dependencies
 wgpu = { version = "30.0.1", default-features = true }

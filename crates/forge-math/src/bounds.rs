@@ -55,6 +55,11 @@ impl Aabb {
         self.max = self.max.max(point);
     }
 
+    /// Returns true if the bounding box has inverted bounds (empty).
+    pub fn is_empty(&self) -> bool {
+        self.min.x > self.max.x || self.min.y > self.max.y || self.min.z > self.max.z
+    }
+
     /// Returns the center of the bounding box.
     pub fn center(&self) -> Vec3 {
         (self.min + self.max) * 0.5

@@ -131,6 +131,70 @@ impl Scene {
         closest_hit
     }
 
+    /// Duplicates an object in the scene, returning its new `ObjectId`.
+    pub fn duplicate_object(&mut self, id: ObjectId) -> Option<ObjectId> {
+        let original = self.objects.get(&id)?.clone();
+        let mut duplicate = original;
+        duplicate.id = ObjectId::new();
+        duplicate.name = format!("{} Copy", duplicate.name);
+        duplicate.local_transform.translation += Vec3::new(1.0, 0.0, 0.0);
+        duplicate.parent = None;
+        duplicate.children.clear();
+
+        let new_id = self.add_object(duplicate);
+        Some(new_id)
+    }
+
+    /// Computes the collective world-space bounding box of all visible objects in the scene.
+    pub fn scene_aabb(&self) -> Aabb {
+        let mut combined = Aabb::EMPTY;
+        for (&id, obj) in &self.objects {
+            if obj.visible && !obj.mesh.aabb.is_empty() {
+                let world_tf = self.world_transform(id);
+                combined = combined.union(&obj.mesh.aabb.transform(&world_tf));
+            }
+        }
+        if combined.is_empty() {
+            Aabb::new(Vec3::new(-2.0, 0.0, -2.0), Vec3::new(2.0, 2.0, 2.0))
+        } else {
+            combined
+        }
+    }
+
+    /// Computes the collective world-space bounding box of currently selected objects.
+    pub fn selected_aabb(&self, selection: &crate::selection::SelectionState) -> Aabb {
+        let mut combined = Aabb::EMPTY;
+        for &id in &selection.selected_ids {
+            if let Some(obj) = self.objects.get(&id)
+                && !obj.mesh.aabb.is_empty()
+            {
+                let world_tf = self.world_transform(id);
+                combined = combined.union(&obj.mesh.aabb.transform(&world_tf));
+            }
+        }
+        if combined.is_empty() {
+            self.scene_aabb()
+        } else {
+            combined
+        }
+    }
+
+    /// Applies the local transform of an object permanently into its mesh.
+    pub fn apply_transform_to_object(&mut self, id: ObjectId) {
+        if let Some(obj) = self.objects.get_mut(&id) {
+            obj.apply_transform();
+            self.dirty = true;
+        }
+    }
+
+    /// Resets transform for an object.
+    pub fn reset_transform_for_object(&mut self, id: ObjectId) {
+        if let Some(obj) = self.objects.get_mut(&id) {
+            obj.reset_transform();
+            self.dirty = true;
+        }
+    }
+
     /// Clears the scene.
     pub fn clear(&mut self) {
         self.objects.clear();
