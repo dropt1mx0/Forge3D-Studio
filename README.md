@@ -50,3 +50,4 @@ cargo test --workspace
 
 ## License
 Dual-licensed under MIT or Apache-2.0. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+# Forge3D-Rust-Edition
