@@ -45,9 +45,14 @@ cargo test --workspace
 
 ## Milestones & Status
 - **Alpha 0.1**: Initial native application, GPU viewport, camera navigation, primitives, selection, transforms, and scene hierarchy.
+- **Alpha 0.2**: Interaction & Workspace UX, automatic gizmo, modal transforms, resizable workspace, expanded primitives.
+
+---
+
+## Security
+If you discover a vulnerability or security-sensitive defect, please review [SECURITY.md](SECURITY.md) and contact maintainers privately at `dropt1m.sup@gmail.com`.
 
 ---
 
 ## License
 Dual-licensed under MIT or Apache-2.0. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-# Forge3D-Rust-Edition

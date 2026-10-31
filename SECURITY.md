@@ -10,6 +10,6 @@ Only the latest development version and active milestones receive security updat
 ## Reporting a Vulnerability
 If you discover a vulnerability or security-sensitive defect in Forge3D:
 1. Please do not open a public issue.
-2. Contact the maintainers privately via email: `maksimosnach10@gmail.com`.
+2. Contact the maintainers privately via email: `dropt1m.sup@gmail.com`.
 3. Provide reproducible steps and impact analysis.
 4. Maintainers will review, triage, and patch the issue promptly.
