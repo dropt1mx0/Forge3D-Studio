@@ -1,7 +1,7 @@
 use egui::Ui;
 use forge_geometry::primitives::{
-    generate_circle, generate_cone, generate_cube, generate_cylinder, generate_icosphere,
-    generate_plane, generate_torus, generate_uv_sphere,
+    generate_capsule, generate_circle, generate_cone, generate_cube, generate_cylinder,
+    generate_icosphere, generate_monkey, generate_plane, generate_torus, generate_uv_sphere,
 };
 use forge_math::{Transform, Vec3};
 use forge_render::{CameraProjection, ViewPreset};
@@ -136,168 +136,254 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         ui.menu_button("Add", |ui| {
             let cursor = app.editor_state.cursor_3d;
 
-            if ui.button("📦 Cube").clicked() {
-                let mesh = generate_cube(1.0);
-                let id = app.scene.add_object(
-                    SceneObject::new("Cube", PrimitiveType::Cube, mesh)
-                        .with_color([0.85, 0.45, 0.25, 1.0])
-                        .with_transform(Transform::from_translation(
-                            cursor + Vec3::new(0.0, 0.5, 0.0),
-                        )),
-                );
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
-                }
-                app.selection.select(id);
-                app.status_message = "Added Cube".to_string();
-                ui.close();
-            }
+            // Search filter field
+            let search_id = egui::Id::NULL.with("add_menu_search_query");
+            let mut search_buf =
+                ui.data_mut(|d| d.get_temp_mut_or_default::<String>(search_id).clone());
 
-            if ui.button("🌐 UV Sphere").clicked() {
-                let mesh = generate_uv_sphere(0.75, 32, 16);
-                let id = app.scene.add_object(
-                    SceneObject::new("UV Sphere", PrimitiveType::Sphere, mesh)
-                        .with_color([0.25, 0.65, 0.85, 1.0])
-                        .with_transform(Transform::from_translation(
-                            cursor + Vec3::new(0.0, 0.75, 0.0),
-                        )),
+            ui.horizontal(|ui| {
+                ui.label("🔍");
+                ui.add(
+                    egui::TextEdit::singleline(&mut search_buf)
+                        .hint_text("Search primitives...")
+                        .desired_width(140.0),
                 );
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
+                if !search_buf.is_empty() && ui.small_button("×").clicked() {
+                    search_buf.clear();
                 }
-                app.selection.select(id);
-                app.status_message = "Added UV Sphere".to_string();
-                ui.close();
-            }
+            });
+            ui.data_mut(|d| {
+                d.insert_temp(search_id, search_buf.clone());
+            });
 
-            if ui.button("🌐 Icosphere").clicked() {
-                let mesh = generate_icosphere(0.75, 2);
-                let id = app.scene.add_object(
-                    SceneObject::new("Icosphere", PrimitiveType::Icosphere, mesh)
-                        .with_color([0.45, 0.75, 0.45, 1.0])
-                        .with_transform(Transform::from_translation(
-                            cursor + Vec3::new(0.0, 0.75, 0.0),
-                        )),
-                );
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
-                }
-                app.selection.select(id);
-                app.status_message = "Added Icosphere".to_string();
-                ui.close();
-            }
-
-            if ui.button("🛢 Cylinder").clicked() {
-                let mesh = generate_cylinder(0.6, 1.5, 24);
-                let id = app.scene.add_object(
-                    SceneObject::new("Cylinder", PrimitiveType::Cylinder, mesh)
-                        .with_color([0.75, 0.75, 0.35, 1.0])
-                        .with_transform(Transform::from_translation(
-                            cursor + Vec3::new(0.0, 0.75, 0.0),
-                        )),
-                );
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
-                }
-                app.selection.select(id);
-                app.status_message = "Added Cylinder".to_string();
-                ui.close();
-            }
-
-            if ui.button("▲ Cone").clicked() {
-                let mesh = generate_cone(0.8, 1.5, 24);
-                let id = app.scene.add_object(
-                    SceneObject::new("Cone", PrimitiveType::Cone, mesh)
-                        .with_color([0.85, 0.55, 0.35, 1.0])
-                        .with_transform(Transform::from_translation(
-                            cursor + Vec3::new(0.0, 0.75, 0.0),
-                        )),
-                );
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
-                }
-                app.selection.select(id);
-                app.status_message = "Added Cone".to_string();
-                ui.close();
-            }
-
-            if ui.button("🍩 Torus").clicked() {
-                let mesh = generate_torus(1.0, 0.3, 24, 16);
-                let id = app.scene.add_object(
-                    SceneObject::new("Torus", PrimitiveType::Torus, mesh)
-                        .with_color([0.85, 0.35, 0.65, 1.0])
-                        .with_transform(Transform::from_translation(
-                            cursor + Vec3::new(0.0, 0.5, 0.0),
-                        )),
-                );
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
-                }
-                app.selection.select(id);
-                app.status_message = "Added Torus".to_string();
-                ui.close();
-            }
-
-            if ui.button("⬛ Plane").clicked() {
-                let mesh = generate_plane(8.0, 8);
-                let id = app.scene.add_object(
-                    SceneObject::new("Plane", PrimitiveType::Plane, mesh)
-                        .with_color([0.28, 0.30, 0.34, 1.0])
-                        .with_transform(Transform::from_translation(cursor)),
-                );
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
-                }
-                app.selection.select(id);
-                app.status_message = "Added Plane".to_string();
-                ui.close();
-            }
-
-            if ui.button("⭕ Circle").clicked() {
-                let mesh = generate_circle(1.0, 32);
-                let id = app.scene.add_object(
-                    SceneObject::new("Circle", PrimitiveType::Circle, mesh)
-                        .with_color([0.5, 0.7, 0.8, 1.0])
-                        .with_transform(Transform::from_translation(cursor)),
-                );
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
-                }
-                app.selection.select(id);
-                app.status_message = "Added Circle".to_string();
-                ui.close();
-            }
+            let query = search_buf.trim().to_lowercase();
+            let matches =
+                |name: &str| -> bool { query.is_empty() || name.to_lowercase().contains(&query) };
 
             ui.separator();
 
-            if ui.button("📷 Camera").clicked() {
-                let mut camera_obj = SceneObject::new_camera("Camera");
-                camera_obj.local_transform.translation = cursor + Vec3::new(0.0, 1.5, 3.0);
-                let id = app.scene.add_object(camera_obj);
-                if let Some(obj) = app.scene.get_object(id) {
-                    app.history.push(Action::AddObject {
-                        object: obj.clone(),
-                    });
+            let show_mesh_header = matches("Cube")
+                || matches("UV Sphere")
+                || matches("Icosphere")
+                || matches("Cylinder")
+                || matches("Cone")
+                || matches("Torus")
+                || matches("Capsule")
+                || matches("Plane")
+                || matches("Grid")
+                || matches("Circle")
+                || matches("Suzanne")
+                || matches("Monkey");
+
+            if show_mesh_header {
+                ui.label(egui::RichText::new("Mesh Primitives").weak().size(11.0));
+
+                if matches("Cube") && ui.button("📦 Cube").clicked() {
+                    let mesh = generate_cube(1.0);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Cube", PrimitiveType::Cube, mesh)
+                            .with_color([0.85, 0.45, 0.25, 1.0])
+                            .with_transform(Transform::from_translation(
+                                cursor + Vec3::new(0.0, 0.5, 0.0),
+                            )),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Cube".to_string();
+                    ui.close();
                 }
-                app.selection.select(id);
-                app.status_message = "Added Camera".to_string();
-                ui.close();
+
+                if matches("UV Sphere") && ui.button("🌐 UV Sphere").clicked() {
+                    let mesh = generate_uv_sphere(0.75, 32, 16);
+                    let id = app.scene.add_object(
+                        SceneObject::new("UV Sphere", PrimitiveType::Sphere, mesh)
+                            .with_color([0.25, 0.65, 0.85, 1.0])
+                            .with_transform(Transform::from_translation(
+                                cursor + Vec3::new(0.0, 0.75, 0.0),
+                            )),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added UV Sphere".to_string();
+                    ui.close();
+                }
+
+                if matches("Icosphere") && ui.button("🌐 Icosphere").clicked() {
+                    let mesh = generate_icosphere(0.75, 2);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Icosphere", PrimitiveType::Icosphere, mesh)
+                            .with_color([0.45, 0.75, 0.45, 1.0])
+                            .with_transform(Transform::from_translation(
+                                cursor + Vec3::new(0.0, 0.75, 0.0),
+                            )),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Icosphere".to_string();
+                    ui.close();
+                }
+
+                if matches("Cylinder") && ui.button("🛢 Cylinder").clicked() {
+                    let mesh = generate_cylinder(0.6, 1.5, 24);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Cylinder", PrimitiveType::Cylinder, mesh)
+                            .with_color([0.75, 0.75, 0.35, 1.0])
+                            .with_transform(Transform::from_translation(
+                                cursor + Vec3::new(0.0, 0.75, 0.0),
+                            )),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Cylinder".to_string();
+                    ui.close();
+                }
+
+                if matches("Cone") && ui.button("▲ Cone").clicked() {
+                    let mesh = generate_cone(0.8, 1.5, 24);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Cone", PrimitiveType::Cone, mesh)
+                            .with_color([0.85, 0.55, 0.35, 1.0])
+                            .with_transform(Transform::from_translation(
+                                cursor + Vec3::new(0.0, 0.75, 0.0),
+                            )),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Cone".to_string();
+                    ui.close();
+                }
+
+                if matches("Torus") && ui.button("🍩 Torus").clicked() {
+                    let mesh = generate_torus(1.0, 0.3, 24, 16);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Torus", PrimitiveType::Torus, mesh)
+                            .with_color([0.85, 0.35, 0.65, 1.0])
+                            .with_transform(Transform::from_translation(
+                                cursor + Vec3::new(0.0, 0.5, 0.0),
+                            )),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Torus".to_string();
+                    ui.close();
+                }
+
+                if matches("Capsule") && ui.button("💊 Capsule").clicked() {
+                    let mesh = generate_capsule(0.5, 1.0, 24, 8);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Capsule", PrimitiveType::Capsule, mesh)
+                            .with_color([0.85, 0.65, 0.25, 1.0])
+                            .with_transform(Transform::from_translation(
+                                cursor + Vec3::new(0.0, 1.0, 0.0),
+                            )),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Capsule".to_string();
+                    ui.close();
+                }
+
+                if (matches("Plane") || matches("Grid")) && ui.button("⬛ Plane / Grid").clicked()
+                {
+                    let mesh = generate_plane(8.0, 8);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Plane", PrimitiveType::Plane, mesh)
+                            .with_color([0.28, 0.30, 0.34, 1.0])
+                            .with_transform(Transform::from_translation(cursor)),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Plane Grid".to_string();
+                    ui.close();
+                }
+
+                if matches("Circle") && ui.button("⭕ Circle").clicked() {
+                    let mesh = generate_circle(1.0, 32);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Circle", PrimitiveType::Circle, mesh)
+                            .with_color([0.5, 0.7, 0.8, 1.0])
+                            .with_transform(Transform::from_translation(cursor)),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Circle".to_string();
+                    ui.close();
+                }
+
+                if (matches("Suzanne") || matches("Monkey"))
+                    && ui.button("🐵 Suzanne (Monkey)").clicked()
+                {
+                    let mesh = generate_monkey(1.0);
+                    let id = app.scene.add_object(
+                        SceneObject::new("Suzanne", PrimitiveType::Monkey, mesh)
+                            .with_color([0.78, 0.52, 0.32, 1.0])
+                            .with_transform(Transform::from_translation(
+                                cursor + Vec3::new(0.0, 0.75, 0.0),
+                            )),
+                    );
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Suzanne (Monkey Mesh)".to_string();
+                    ui.close();
+                }
+            }
+
+            if matches("Camera") {
+                ui.separator();
+                ui.label(egui::RichText::new("Scene Objects").weak().size(11.0));
+                if ui.button("📷 Camera").clicked() {
+                    let mut camera_obj = SceneObject::new_camera("Camera");
+                    camera_obj.local_transform.translation = cursor + Vec3::new(0.0, 1.5, 3.0);
+                    let id = app.scene.add_object(camera_obj);
+                    if let Some(obj) = app.scene.get_object(id) {
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
+                    }
+                    app.selection.select(id);
+                    app.status_message = "Added Camera".to_string();
+                    ui.close();
+                }
             }
         });
 
@@ -568,10 +654,51 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 &mut app.editor_state.emulate_numpad,
                 "Emulate Numpad (Top Row 1-0)",
             );
+
+            ui.checkbox(
+                &mut app.editor_state.show_debug_info,
+                "Show Viewport Debug Telemetry",
+            );
             ui.checkbox(&mut app.editor_state.walk_mode, "Walk Mode (Lock Ground Y)");
             ui.checkbox(&mut app.editor_state.show_grid, "Show Ground Grid");
             ui.checkbox(&mut app.editor_state.show_axes, "Show Coordinate Axes");
             ui.checkbox(&mut app.editor_state.show_wireframe, "Show Wireframe");
+
+            ui.separator();
+            ui.label(egui::RichText::new("Workspace Panels").weak().size(11.0));
+            if ui
+                .checkbox(
+                    &mut app.editor_state.panel_settings.toolbar_visible,
+                    "Show Left Toolbar",
+                )
+                .changed()
+            {
+                let _ = app.editor_state.panel_settings.save();
+            }
+            if ui
+                .checkbox(
+                    &mut app.editor_state.panel_settings.sidebar_visible,
+                    "Show Right Sidebar",
+                )
+                .changed()
+            {
+                let _ = app.editor_state.panel_settings.save();
+            }
+            if ui
+                .checkbox(
+                    &mut app.editor_state.panel_settings.timeline_visible,
+                    "Show Timeline",
+                )
+                .changed()
+            {
+                let _ = app.editor_state.panel_settings.save();
+            }
+            if ui.button("↺ Reset Workspace Layout").clicked() {
+                app.editor_state.panel_settings = forge_scene::PanelSettings::default();
+                let _ = app.editor_state.panel_settings.save();
+                app.status_message = "Reset workspace layout to defaults".to_string();
+                ui.close();
+            }
         });
 
         // ---------------- Help Menu ----------------

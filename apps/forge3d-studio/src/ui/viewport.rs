@@ -1,8 +1,8 @@
 use egui::{Color32, Key, PointerButton, Pos2, Rect, Sense, Stroke, Ui, Vec2 as EguiVec2};
 use forge_geometry::EditSelectionMode;
-use forge_math::{Quat, Transform, Vec2, Vec3};
+use forge_math::{Quat, Vec2, Vec3};
 use forge_render::{CameraProjection, ViewPreset};
-use forge_scene::{Action, AxisConstraint, EditMode, TransformMode};
+use forge_scene::{Action, AxisConstraint, EditMode, PointerInteractionState, TransformMode};
 
 use crate::app::Forge3dStudioApp;
 use crate::ui::gizmo::{render_and_interact_gizmo, world_to_screen_pos};
@@ -14,17 +14,20 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     }
 
     // Allocate exact viewport area for pointer and keyboard interaction
-    let (rect, _response) = ui.allocate_exact_size(available_size, Sense::click_and_drag());
+    let (rect, response) = ui.allocate_exact_size(available_size, Sense::click_and_drag());
 
     // Update camera aspect ratio
     app.camera.set_aspect_ratio(rect.width(), rect.height());
 
     let input = ui.input(|i| i.clone());
-    let mouse_pos = input.pointer.interact_pos();
-    let is_pointer_in_viewport = mouse_pos.map(|p| rect.contains(p)).unwrap_or(false);
+    let mouse_pos = ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()));
+    let is_pointer_in_viewport = response.hovered()
+        || response.contains_pointer()
+        || mouse_pos.map(|p| rect.contains(p)).unwrap_or(false);
     let dt = (app.frame_time_ms / 1000.0).clamp(0.001, 0.1);
 
     let wants_keyboard = ui.ctx().egui_wants_keyboard_input();
+    let mut modal_consumed_click = false;
 
     // =========================================================================
     // 1. FLY / WALK NAVIGATION MODE
@@ -184,23 +187,42 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.ctx().request_repaint();
         }
 
+        // Handle text events for modal numeric input
+        for event in &input.events {
+            if let egui::Event::Text(text) = event {
+                for c in text.chars() {
+                    if c.is_ascii_digit() || c == '.' || c == '-' {
+                        app.editor_state.modal_transform.push_char(c);
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+        }
+
         // C. Confirm (Enter or LMB) / Cancel (Escape or RMB)
         let lmb_clicked = input.pointer.button_clicked(PointerButton::Primary);
         let rmb_clicked = input.pointer.button_clicked(PointerButton::Secondary);
 
         if input.key_pressed(Key::Enter) || lmb_clicked {
             app.apply_modal_transform();
+            modal_consumed_click = true;
             ui.ctx().request_repaint();
         } else if input.key_pressed(Key::Escape) || rmb_clicked {
             app.cancel_modal_transform();
+            modal_consumed_click = true;
             ui.ctx().request_repaint();
-        } else if let Some(mouse) = mouse_pos {
+        } else {
             // D. Real-time calculation of modal transform delta
+            let numeric_val = app.editor_state.modal_transform.parsed_number();
+            let mouse = mouse_pos.unwrap_or_else(|| {
+                Pos2::new(
+                    rect.min.x + app.editor_state.modal_transform.start_mouse_pos.x,
+                    rect.min.y + app.editor_state.modal_transform.start_mouse_pos.y,
+                )
+            });
             let local_mouse = Vec2::new(mouse.x - rect.min.x, mouse.y - rect.min.y);
             let mouse_delta = local_mouse - app.editor_state.modal_transform.start_mouse_pos;
             let pivot = app.editor_state.modal_transform.pivot_world;
-
-            let numeric_val = app.editor_state.modal_transform.parsed_number();
 
             match app.editor_state.modal_transform.mode {
                 TransformMode::Translate => {
@@ -452,20 +474,52 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             .map(|p| Vec2::new(p.x - rect.min.x, p.y - rect.min.y))
             .unwrap_or(Vec2::new(rect.width() * 0.5, rect.height() * 0.5));
 
-        if !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.alt {
+        if !input.modifiers.command
+            && !input.modifiers.ctrl
+            && !input.modifiers.alt
+            && !input.modifiers.shift
+        {
             if input.key_pressed(Key::G) {
+                app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Translate;
+                app.editor_state.transform_mode = TransformMode::Translate;
                 app.begin_modal_transform(TransformMode::Translate, mouse_vec2);
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::R) && app.editor_state.edit_mode == EditMode::Object {
+                app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Rotate;
+                app.editor_state.transform_mode = TransformMode::Rotate;
                 app.begin_modal_transform(TransformMode::Rotate, mouse_vec2);
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::S) {
+                app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Scale;
+                app.editor_state.transform_mode = TransformMode::Scale;
                 app.begin_modal_transform(TransformMode::Scale, mouse_vec2);
                 ui.ctx().request_repaint();
             }
         }
 
-        // Tool Selector (Q, W, E, R)
+        // Selection Shortcuts (A = Select All, Alt+A = Deselect All, Ctrl+I = Invert Selection, B = Box Select)
+        if !input.modifiers.command
+            && !input.modifiers.ctrl
+            && !input.modifiers.alt
+            && !input.modifiers.shift
+        {
+            if input.key_pressed(Key::A) {
+                app.select_all();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::B) {
+                app.editor_state.transform_mode = TransformMode::BoxSelect;
+                app.status_message = "Box Select: Drag over objects to select".to_string();
+                ui.ctx().request_repaint();
+            }
+        } else if input.modifiers.alt && input.key_pressed(Key::A) {
+            app.deselect_all();
+            ui.ctx().request_repaint();
+        } else if (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(Key::I) {
+            app.invert_selection();
+            ui.ctx().request_repaint();
+        }
+
+        // Tool Selector (Q, W, E, R, Shift+R)
         if !input.modifiers.command && !input.modifiers.ctrl && !input.modifiers.alt {
             if input.key_pressed(Key::Q) {
                 app.editor_state.transform_mode = TransformMode::Select;
@@ -484,6 +538,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.editor_state.transform_mode = TransformMode::Scale;
                 app.status_message = "Tool: Scale (R)".to_string();
             }
+        }
+        if input.modifiers.shift && input.key_pressed(Key::R) {
+            app.editor_state.transform_mode = TransformMode::Scale;
+            app.status_message = "Tool: Scale (Shift+R)".to_string();
+            ui.ctx().request_repaint();
         }
 
         // Edit Mode Selection Element Shortcuts (1 = Vertex, 2 = Edge, 3 = Face)
@@ -739,12 +798,27 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     }
 
     // =========================================================================
-    // 6. INTERACTIVE 3D GIZMO
+    // 6. POINTER INTERACTION & 3D GIZMO
     // =========================================================================
     let lmb_pressed =
         input.pointer.button_pressed(PointerButton::Primary) && is_pointer_in_viewport;
     let lmb_down = input.pointer.button_down(PointerButton::Primary);
     let lmb_released = input.pointer.button_released(PointerButton::Primary);
+
+    // Safety & Focus Loss handling: if primary mouse button is released, reset interaction state
+    if !lmb_down && app.editor_state.pointer_state != PointerInteractionState::Idle {
+        app.editor_state.pointer_state = PointerInteractionState::Idle;
+        app.editor_state.pointer_press_pos = None;
+        app.editor_state.box_select_start = None;
+        app.gizmo_state.drag_state = None;
+    }
+
+    // UI Interaction tracking: if pointer was pressed outside viewport (or egui captured it)
+    if input.pointer.button_pressed(PointerButton::Primary)
+        && (!is_pointer_in_viewport || ui.ctx().egui_wants_pointer_input())
+    {
+        app.editor_state.pointer_state = PointerInteractionState::UIInteraction;
+    }
 
     let view_proj = app.camera.view_proj_matrix();
     let eye = app.camera.eye;
@@ -757,13 +831,55 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
     if !app.editor_state.fly_nav_active && !app.editor_state.modal_transform.active {
         if app.editor_state.edit_mode == EditMode::Object {
-            if let Some(active_id) = app.selection.active_id
-                && let Some(obj) = app.scene.get_object_mut(active_id)
+            if !app.selection.is_empty()
+                && app.editor_state.transform_mode != TransformMode::BoxSelect
             {
-                let pivot_world = obj.local_transform.translation;
-                let old_transform = obj.local_transform;
+                let pivot_world = match app.editor_state.pivot_point {
+                    forge_scene::PivotPoint::MedianPoint => {
+                        let mut sum = Vec3::ZERO;
+                        let mut count = 0;
+                        for &id in &app.selection.selected_ids {
+                            if let Some(obj) = app.scene.get_object(id) {
+                                sum += obj.local_transform.translation;
+                                count += 1;
+                            }
+                        }
+                        if count > 0 {
+                            sum / (count as f32)
+                        } else {
+                            Vec3::ZERO
+                        }
+                    }
+                    forge_scene::PivotPoint::ActiveElement => app
+                        .selection
+                        .active_id
+                        .and_then(|id| app.scene.get_object(id))
+                        .map(|obj| obj.local_transform.translation)
+                        .unwrap_or(Vec3::ZERO),
+                    forge_scene::PivotPoint::Cursor3D => app.editor_state.cursor_3d,
+                    forge_scene::PivotPoint::IndividualOrigins => app
+                        .selection
+                        .active_id
+                        .and_then(|id| app.scene.get_object(id))
+                        .map(|obj| obj.local_transform.translation)
+                        .unwrap_or(Vec3::ZERO),
+                };
 
-                gizmo_consumed = render_and_interact_gizmo(
+                let orientation_quat = app
+                    .selection
+                    .active_id
+                    .and_then(|id| app.scene.get_object(id))
+                    .map(|obj| obj.local_transform.rotation)
+                    .unwrap_or(Quat::IDENTITY);
+
+                let effective_gizmo_mode = match app.editor_state.transform_mode {
+                    TransformMode::Translate => forge_scene::GizmoMode::Translate,
+                    TransformMode::Rotate => forge_scene::GizmoMode::Rotate,
+                    TransformMode::Scale => forge_scene::GizmoMode::Scale,
+                    _ => app.editor_state.active_gizmo_mode,
+                };
+
+                let gizmo_res = render_and_interact_gizmo(
                     &mut app.gizmo_state,
                     &painter,
                     view_proj,
@@ -771,9 +887,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     screen_to_ray,
                     rect,
                     pivot_world,
-                    &mut obj.local_transform,
-                    app.editor_state.transform_mode,
+                    effective_gizmo_mode,
                     app.editor_state.transform_orientation,
+                    orientation_quat,
                     mouse_pos,
                     lmb_pressed && !input.modifiers.alt,
                     lmb_down && !input.modifiers.alt,
@@ -782,18 +898,89 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.snap_settings.grid_increment,
                 );
 
-                if gizmo_consumed {
-                    ui.ctx().request_repaint();
+                if gizmo_res.drag_started {
+                    app.gizmo_initial_transforms.clear();
+                    for &id in &app.selection.selected_ids {
+                        if let Some(obj) = app.scene.get_object(id) {
+                            app.gizmo_initial_transforms.insert(id, obj.local_transform);
+                        }
+                    }
                 }
 
-                // Push undo when gizmo finishes dragging
-                if lmb_released && old_transform != obj.local_transform {
-                    app.history.push(Action::Transform {
-                        id: active_id,
-                        old_transform,
-                        new_transform: obj.local_transform,
-                    });
+                if gizmo_res.is_dragging {
+                    gizmo_consumed = true;
+                    app.editor_state.pointer_state = PointerInteractionState::GizmoDragging;
+
+                    if let Some(delta) = gizmo_res.delta {
+                        match delta {
+                            crate::ui::gizmo::GizmoDelta::Translate(d) => {
+                                for (&id, &init_tf) in &app.gizmo_initial_transforms {
+                                    if let Some(obj) = app.scene.get_object_mut(id) {
+                                        obj.local_transform.translation = init_tf.translation + d;
+                                    }
+                                }
+                            }
+                            crate::ui::gizmo::GizmoDelta::Rotate(rot_delta) => {
+                                for (&id, &init_tf) in &app.gizmo_initial_transforms {
+                                    if let Some(obj) = app.scene.get_object_mut(id) {
+                                        obj.local_transform.rotation = rot_delta * init_tf.rotation;
+                                        if app.editor_state.pivot_point
+                                            != forge_scene::PivotPoint::IndividualOrigins
+                                        {
+                                            let offset = init_tf.translation - pivot_world;
+                                            obj.local_transform.translation =
+                                                pivot_world + rot_delta.mul_vec3(offset);
+                                        }
+                                    }
+                                }
+                            }
+                            crate::ui::gizmo::GizmoDelta::Scale(scale_vec) => {
+                                for (&id, &init_tf) in &app.gizmo_initial_transforms {
+                                    if let Some(obj) = app.scene.get_object_mut(id) {
+                                        obj.local_transform.scale = init_tf.scale * scale_vec;
+                                        if app.editor_state.pivot_point
+                                            != forge_scene::PivotPoint::IndividualOrigins
+                                        {
+                                            let offset = init_tf.translation - pivot_world;
+                                            obj.local_transform.translation =
+                                                pivot_world + offset * scale_vec;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        app.scene.dirty = true;
+                        ui.ctx().request_repaint();
+                    }
+                }
+
+                if gizmo_res.drag_ended {
+                    let mut changed = Vec::new();
+                    for (&id, &init_tf) in &app.gizmo_initial_transforms {
+                        if let Some(obj) = app.scene.get_object(id)
+                            && obj.local_transform != init_tf
+                        {
+                            changed.push((id, init_tf, obj.local_transform));
+                        }
+                    }
+                    if changed.len() == 1 {
+                        let (id, old_transform, new_transform) = changed[0];
+                        app.history.push(Action::Transform {
+                            id,
+                            old_transform,
+                            new_transform,
+                        });
+                    } else if changed.len() > 1 {
+                        app.history.push(Action::MultiTransform {
+                            transforms: changed,
+                        });
+                    }
+                    app.gizmo_initial_transforms.clear();
                     app.scene.dirty = true;
+                }
+
+                if gizmo_res.consumed {
+                    gizmo_consumed = true;
                 }
             }
         } else if app.editor_state.edit_mode == EditMode::Edit
@@ -840,10 +1027,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             };
 
             if let Some(pivot) = edit_mesh.selection_center(edit_mode_sel) {
-                let mut dummy_tf = Transform::from_translation(pivot);
-                let old_pos = dummy_tf.translation;
-
-                gizmo_consumed = render_and_interact_gizmo(
+                let gizmo_res = render_and_interact_gizmo(
                     &mut app.gizmo_state,
                     &painter,
                     view_proj,
@@ -851,9 +1035,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     screen_to_ray,
                     rect,
                     pivot,
-                    &mut dummy_tf,
-                    app.editor_state.transform_mode,
+                    app.editor_state.active_gizmo_mode,
                     app.editor_state.transform_orientation,
+                    Quat::IDENTITY,
                     mouse_pos,
                     lmb_pressed && !input.modifiers.alt,
                     lmb_down && !input.modifiers.alt,
@@ -861,9 +1045,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.snap_settings.enabled,
                     app.editor_state.snap_settings.grid_increment,
                 );
+                gizmo_consumed = gizmo_res.consumed;
+                if gizmo_consumed {
+                    app.editor_state.pointer_state = PointerInteractionState::GizmoDragging;
+                }
 
-                let delta = dummy_tf.translation - old_pos;
-                if delta.length_squared() > 1e-6 {
+                if let Some(crate::ui::gizmo::GizmoDelta::Translate(delta)) = gizmo_res.delta {
                     edit_mesh.translate_selection(delta, edit_mode_sel);
                     app.sync_edit_mesh_to_scene();
                     ui.ctx().request_repaint();
@@ -872,13 +1059,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     }
 
-    // =========================================================================
-    // 7. OBJECT RAYCAST SELECTION (If gizmo not clicked)
-    // =========================================================================
-    if lmb_pressed
-        && !gizmo_consumed
-        && !input.modifiers.alt
-        && is_pointer_in_viewport
+    // Update hover target under cursor
+    if is_pointer_in_viewport
+        && !lmb_down
         && !app.editor_state.fly_nav_active
         && !app.editor_state.modal_transform.active
         && let Some(pos) = mouse_pos
@@ -887,51 +1070,172 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         let screen_pos = Vec2::new(local_pos.x, local_pos.y);
         let viewport_size = Vec2::new(rect.width(), rect.height());
         let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
+        let hover_hit = app.scene.raycast(&ray).map(|(id, _)| id);
+        app.selection.set_hovered(hover_hit);
+    }
 
-        if app.editor_state.edit_mode == EditMode::Object {
-            if let Some((hit_id, _dist)) = app.scene.raycast(&ray) {
-                if input.modifiers.shift {
-                    app.selection.toggle_selection(hit_id);
-                } else {
-                    app.selection.select(hit_id);
-                }
-                if let Some(obj) = app.scene.get_object(hit_id) {
-                    app.status_message = format!("Selected: {}", obj.name);
-                }
-            } else if !input.modifiers.shift {
-                app.selection.deselect();
-                app.status_message = "Selection cleared".to_string();
-            }
-            ui.ctx().request_repaint();
-        } else if app.editor_state.edit_mode == EditMode::Edit
-            && let Some((_, edit_mesh)) = &mut app.active_edit_mesh
+    // =========================================================================
+    // 7. POINTER INTERACTION STATE MACHINE & EMPTY SPACE ORBIT
+    // =========================================================================
+    if !app.editor_state.fly_nav_active
+        && !app.editor_state.modal_transform.active
+        && !modal_consumed_click
+        && !input.modifiers.alt
+    {
+        // A. Pointer Press Transition (Determine interaction state)
+        if lmb_pressed
+            && is_pointer_in_viewport
+            && let Some(pos) = mouse_pos
         {
-            let mut closest_vert = None;
-            let mut min_dist_px = 15.0;
+            if gizmo_consumed {
+                app.editor_state.pointer_state = PointerInteractionState::GizmoDragging;
+            } else if app.editor_state.transform_mode == TransformMode::BoxSelect {
+                app.editor_state.pointer_state = PointerInteractionState::BoxSelecting;
+                app.editor_state.box_select_start = Some(Vec2::new(pos.x, pos.y));
+            } else {
+                let local_pos = pos - rect.min;
+                let screen_pos = Vec2::new(local_pos.x, local_pos.y);
+                let viewport_size = Vec2::new(rect.width(), rect.height());
+                let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
 
-            for (idx, v) in edit_mesh.vertices.iter().enumerate() {
-                if let Some(sp) = world_to_screen_pos(v.position, view_proj, rect) {
-                    let d = pos.distance(sp);
-                    if d < min_dist_px {
-                        min_dist_px = d;
-                        closest_vert = Some(idx);
+                if app.editor_state.edit_mode == EditMode::Object {
+                    if let Some((hit_id, _dist)) = app.scene.raycast(&ray) {
+                        app.editor_state.pointer_state = PointerInteractionState::ObjectPressed;
+                        app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
+                        if input.modifiers.shift {
+                            app.selection.toggle_selection(hit_id);
+                        } else {
+                            app.selection.select(hit_id);
+                        }
+                        if let Some(obj) = app.scene.get_object(hit_id) {
+                            app.status_message = format!("Selected: {}", obj.name);
+                        }
+                        ui.ctx().request_repaint();
+                    } else {
+                        // Empty space under cursor -> initiate Viewport Orbiting
+                        app.editor_state.pointer_state = PointerInteractionState::ViewportOrbiting;
+                        app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
+                    }
+                } else if app.editor_state.edit_mode == EditMode::Edit
+                    && let Some((_, edit_mesh)) = &mut app.active_edit_mesh
+                {
+                    let mut closest_vert = None;
+                    let mut min_dist_px = 15.0;
+
+                    for (idx, v) in edit_mesh.vertices.iter().enumerate() {
+                        if let Some(sp) = world_to_screen_pos(v.position, view_proj, rect) {
+                            let d = pos.distance(sp);
+                            if d < min_dist_px {
+                                min_dist_px = d;
+                                closest_vert = Some(idx);
+                            }
+                        }
+                    }
+
+                    if let Some(v_idx) = closest_vert {
+                        app.editor_state.pointer_state = PointerInteractionState::ObjectPressed;
+                        app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
+                        if input.modifiers.shift {
+                            edit_mesh.vertices[v_idx].selected =
+                                !edit_mesh.vertices[v_idx].selected;
+                        } else {
+                            edit_mesh.deselect_all(EditSelectionMode::Vertex);
+                            edit_mesh.vertices[v_idx].selected = true;
+                        }
+                        app.status_message = format!("Selected Vertex #{}", v_idx);
+                        app.sync_edit_mesh_to_scene();
+                        ui.ctx().request_repaint();
+                    } else {
+                        // Empty space in edit mode -> initiate Viewport Orbiting
+                        app.editor_state.pointer_state = PointerInteractionState::ViewportOrbiting;
+                        app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
                     }
                 }
             }
+        }
 
-            if let Some(v_idx) = closest_vert {
-                if input.modifiers.shift {
-                    edit_mesh.vertices[v_idx].selected = !edit_mesh.vertices[v_idx].selected;
-                } else {
-                    edit_mesh.deselect_all(EditSelectionMode::Vertex);
-                    edit_mesh.vertices[v_idx].selected = true;
+        // B. Active Dragging by State
+        if lmb_down && is_pointer_in_viewport {
+            match app.editor_state.pointer_state {
+                PointerInteractionState::ViewportOrbiting => {
+                    let delta = input.pointer.delta();
+                    if delta.length_sq() > 0.0 {
+                        app.camera.orbit(
+                            delta.x * app.camera.settings.orbit_sensitivity,
+                            delta.y * app.camera.settings.orbit_sensitivity,
+                        );
+                        ui.ctx().request_repaint();
+                    }
                 }
-                app.status_message = format!("Selected Vertex #{}", v_idx);
-            } else if !input.modifiers.shift {
-                edit_mesh.deselect_all(EditSelectionMode::Vertex);
+                PointerInteractionState::BoxSelecting => {
+                    if let Some(start) = app.editor_state.box_select_start
+                        && let Some(curr) = mouse_pos
+                    {
+                        let start_pos = Pos2::new(start.x, start.y);
+                        let box_rect = Rect::from_two_pos(start_pos, curr);
+                        if box_rect.width() > 3.0 || box_rect.height() > 3.0 {
+                            painter.rect_filled(
+                                box_rect,
+                                2.0,
+                                Color32::from_rgba_unmultiplied(255, 170, 40, 35),
+                            );
+                            painter.rect_stroke(
+                                box_rect,
+                                2.0,
+                                Stroke::new(1.5, Color32::from_rgb(255, 170, 40)),
+                                egui::StrokeKind::Outside,
+                            );
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                }
+                _ => {}
             }
-            app.sync_edit_mesh_to_scene();
-            ui.ctx().request_repaint();
+        }
+
+        // C. Pointer Release Handling
+        if lmb_released {
+            match app.editor_state.pointer_state {
+                PointerInteractionState::ViewportOrbiting => {
+                    let moved_dist = if let (Some(press), Some(curr)) =
+                        (app.editor_state.pointer_press_pos, mouse_pos)
+                    {
+                        (Vec2::new(curr.x, curr.y) - press).length()
+                    } else {
+                        0.0
+                    };
+                    // Normal static click on empty space clears selection!
+                    if moved_dist < 4.0 && !input.modifiers.shift {
+                        if app.editor_state.edit_mode == EditMode::Object {
+                            app.selection.deselect();
+                            app.status_message = "Selection cleared".to_string();
+                        } else if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+                            edit_mesh.deselect_all(EditSelectionMode::Vertex);
+                            app.sync_edit_mesh_to_scene();
+                        }
+                        ui.ctx().request_repaint();
+                    }
+                    app.editor_state.pointer_press_pos = None;
+                    app.editor_state.pointer_state = PointerInteractionState::Idle;
+                }
+                PointerInteractionState::BoxSelecting => {
+                    if let Some(start) = app.editor_state.box_select_start.take()
+                        && let Some(curr) = mouse_pos
+                    {
+                        let start_pos = Pos2::new(start.x, start.y);
+                        let box_rect = Rect::from_two_pos(start_pos, curr);
+                        if box_rect.width() > 5.0 || box_rect.height() > 5.0 {
+                            app.box_select(box_rect, view_proj, rect, input.modifiers.shift);
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                    app.editor_state.pointer_state = PointerInteractionState::Idle;
+                }
+                _ => {
+                    app.editor_state.pointer_state = PointerInteractionState::Idle;
+                    app.editor_state.pointer_press_pos = None;
+                }
+            }
         }
     }
 
@@ -949,10 +1253,16 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         CameraProjection::Orthographic => "Orthographic",
     };
 
+    let ptr_state_str = if app.editor_state.pointer_state != PointerInteractionState::Idle {
+        format!(" | State: {:?}", app.editor_state.pointer_state)
+    } else {
+        String::new()
+    };
+
     painter.text(
         rect.min + EguiVec2::new(14.0, 14.0),
         egui::Align2::LEFT_TOP,
-        format!("{mode_str} | Tool: {tool_str} | {proj_str}"),
+        format!("{mode_str} | Tool: {tool_str} | {proj_str}{ptr_state_str}"),
         egui::FontId::proportional(14.0),
         Color32::from_gray(210),
     );
@@ -1059,4 +1369,54 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     draw_axis(Vec3::X, Color32::from_rgb(235, 65, 65)); // X - Red
     draw_axis(Vec3::Y, Color32::from_rgb(65, 225, 75)); // Y - Green
     draw_axis(Vec3::Z, Color32::from_rgb(65, 130, 245)); // Z - Blue
+
+    // Floating Debug Telemetry Panel
+    if app.editor_state.show_debug_info {
+        let debug_rect = Rect::from_min_size(
+            rect.left_bottom() + EguiVec2::new(14.0, -140.0),
+            egui::vec2(320.0, 126.0),
+        );
+        painter.rect_filled(
+            debug_rect,
+            4.0,
+            Color32::from_rgba_unmultiplied(20, 24, 30, 225),
+        );
+        painter.rect_stroke(
+            debug_rect,
+            4.0,
+            Stroke::new(1.0, Color32::from_rgb(80, 95, 120)),
+            egui::StrokeKind::Outside,
+        );
+
+        let pointer_pos_str = if let Some(pos) = mouse_pos {
+            format!("({:.1}, {:.1})", pos.x, pos.y)
+        } else {
+            "None".to_string()
+        };
+
+        let debug_text = format!(
+            "POINTER & VIEWPORT TELEMETRY:\n• Pointer State: {:?}\n• Pointer Pos: {}\n• Viewport Rect: ({:.0}, {:.0}) - ({:.0}, {:.0}) [{:.0}x{:.0}]\n• Camera Mode: {}\n• Orbit Pivot: ({:.2}, {:.2}, {:.2})\n• Camera Dist: {:.2}",
+            app.editor_state.pointer_state,
+            pointer_pos_str,
+            rect.min.x,
+            rect.min.y,
+            rect.max.x,
+            rect.max.y,
+            rect.width(),
+            rect.height(),
+            proj_str,
+            app.camera.target.x,
+            app.camera.target.y,
+            app.camera.target.z,
+            app.camera.distance(),
+        );
+
+        painter.text(
+            debug_rect.min + EguiVec2::new(10.0, 10.0),
+            egui::Align2::LEFT_TOP,
+            debug_text,
+            egui::FontId::monospace(11.0),
+            Color32::from_rgb(200, 225, 255),
+        );
+    }
 }

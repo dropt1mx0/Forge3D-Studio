@@ -118,24 +118,48 @@ impl Aabb {
     }
 
     /// Tests ray intersection using slab method. Returns distance along ray if intersecting.
+    /// Robust against zero-thickness bounding boxes (such as planar meshes) and parallel rays.
     pub fn intersect_ray(&self, ray: &Ray) -> Option<f32> {
-        let inv_dir = Vec3::new(
-            1.0 / ray.direction.x,
-            1.0 / ray.direction.y,
-            1.0 / ray.direction.z,
-        );
+        let mut tmin = 0.0_f32;
+        let mut tmax = f32::INFINITY;
 
-        let t1 = (self.min.x - ray.origin.x) * inv_dir.x;
-        let t2 = (self.max.x - ray.origin.x) * inv_dir.x;
-        let t3 = (self.min.y - ray.origin.y) * inv_dir.y;
-        let t4 = (self.max.y - ray.origin.y) * inv_dir.y;
-        let t5 = (self.min.z - ray.origin.z) * inv_dir.z;
-        let t6 = (self.max.z - ray.origin.z) * inv_dir.z;
+        // Ensure flat bounding boxes (planes, thin sheets) have a small epsilon slab thickness
+        // to prevent false rejections due to numerical precision.
+        const EPSILON: f32 = 0.005;
+        let min = self.min.min(self.max);
+        let max = self.max.max(self.min);
+        let center = (min + max) * 0.5;
+        let half_size = ((max - min) * 0.5).max(Vec3::splat(EPSILON));
+        let b_min = center - half_size;
+        let b_max = center + half_size;
 
-        let tmin = t1.min(t2).max(t3.min(t4)).max(t5.min(t6));
-        let tmax = t1.max(t2).min(t3.max(t4)).min(t5.max(t6));
+        for i in 0..3 {
+            let origin = ray.origin[i];
+            let dir = ray.direction[i];
+            let min_val = b_min[i];
+            let max_val = b_max[i];
 
-        if tmax < 0.0 || tmin > tmax {
+            if dir.abs() < 1e-8 {
+                // Ray is parallel to this axis slab. Check if origin is inside.
+                if origin < min_val || origin > max_val {
+                    return None;
+                }
+            } else {
+                let inv_d = 1.0 / dir;
+                let mut t1 = (min_val - origin) * inv_d;
+                let mut t2 = (max_val - origin) * inv_d;
+                if t1 > t2 {
+                    std::mem::swap(&mut t1, &mut t2);
+                }
+                tmin = tmin.max(t1);
+                tmax = tmax.min(t2);
+                if tmin > tmax {
+                    return None;
+                }
+            }
+        }
+
+        if tmax < 0.0 {
             return None;
         }
 
@@ -155,5 +179,52 @@ mod tests {
         assert_eq!(aabb.min, Vec3::new(-1.0, 0.0, -2.0));
         assert_eq!(aabb.max, Vec3::new(3.0, 5.0, 2.0));
         assert_eq!(aabb.center(), Vec3::new(1.0, 2.5, 0.0));
+    }
+
+    #[test]
+    fn test_aabb_ray_intersection_box() {
+        let aabb = Aabb::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        let ray = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0));
+        let hit = aabb.intersect_ray(&ray);
+        assert!(hit.is_some());
+        let dist = hit.unwrap();
+        assert!((dist - 4.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_aabb_ray_intersection_flat_plane() {
+        // Flat horizontal plane: zero extent along Y axis
+        let plane_aabb = Aabb::new(Vec3::new(-5.0, 0.0, -5.0), Vec3::new(5.0, 0.0, 5.0));
+        let ray = Ray::new(Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, -1.0, 0.0));
+        let hit = plane_aabb.intersect_ray(&ray);
+        assert!(
+            hit.is_some(),
+            "Ray directly targeting flat plane must intersect"
+        );
+        let dist = hit.unwrap();
+        assert!((dist - 10.0).abs() < 0.02);
+
+        // Angled ray
+        let angled_ray = Ray::new(
+            Vec3::new(0.0, 5.0, 5.0),
+            Vec3::new(0.0, -1.0, -1.0).normalize(),
+        );
+        assert!(plane_aabb.intersect_ray(&angled_ray).is_some());
+
+        // Ray missing the plane
+        let miss_ray = Ray::new(Vec3::new(15.0, 5.0, 0.0), Vec3::new(0.0, -1.0, 0.0));
+        assert!(plane_aabb.intersect_ray(&miss_ray).is_none());
+    }
+
+    #[test]
+    fn test_aabb_ray_parallel_miss_and_hit() {
+        let aabb = Aabb::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        // Ray perfectly parallel to X and Y, shooting along Z from inside X/Y range
+        let hit_ray = Ray::new(Vec3::new(0.0, 0.0, -5.0), Vec3::new(0.0, 0.0, 1.0));
+        assert!(aabb.intersect_ray(&hit_ray).is_some());
+
+        // Ray perfectly parallel to Z but outside X range
+        let miss_ray = Ray::new(Vec3::new(2.5, 0.0, -5.0), Vec3::new(0.0, 0.0, 1.0));
+        assert!(aabb.intersect_ray(&miss_ray).is_none());
     }
 }

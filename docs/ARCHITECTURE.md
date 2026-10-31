@@ -86,3 +86,34 @@ To avoid conflicting shortcuts and prevent hotkey leakage, event handling follow
 5. **Viewport Navigation**: MMB, Alt+LMB, Shift+MMB, and scroll wheel drive camera orbit, pan, and zoom.
 6. **Global Hotkeys**: Object shortcuts (`G`, `R`, `S`, `F`, `H`, `Tab`, Numpad) execute only when no higher-priority mode is active.
 
+### 4. Selection & Raycast Geometry Pipeline
+- **Screen Coordinates**: Sampled with `hover_pos().or(latest_pos())` relative to `viewport_rect.min`.
+- **Screen to NDC**: $x_{ndc} = \frac{2 x_{screen}}{w} - 1$, $y_{ndc} = 1 - \frac{2 y_{screen}}{h}$.
+- **Unprojection**: Ray origin and direction derived using $(P \cdot V)^{-1}$.
+- **Broadphase**: Accelerated with `Aabb::intersect_ray` featuring Kay-Kajiya slab testing with $\epsilon = 0.005$ thickness inflation to guarantee robust intersection for zero-thickness 2D planar meshes.
+- **Narrowphase**: Möller–Trumbore ray-triangle intersection over the object's evaluated geometry.
+- **Click Consumption**: Modal transformation confirmation (`Enter`/`LMB`) marks `modal_consumed_click = true`, preventing event fallthrough into raycast selection on the same frame.
+
+### 5. Box Selection Pipeline
+- 2D rubber-band bounding rectangle is tracked in screen space while dragging in Select mode (`B`).
+- Objects in the active scene have their world positions transformed via $(P \cdot V)$ and clipped against the near plane ($w_{clip} > 0.0$).
+- Valid screen-space points falling inside `box_rect` are added to the selection set (or toggled when Shift is held).
+
+### 6. Pointer Interaction Finite State Machine (`PointerInteractionState`)
+To guarantee unambiguous pointer event handling and prevent conflicting operations (such as rotating the viewport while dragging a gizmo or selecting an object), the viewport interaction loop implements an explicit 6-state finite state machine:
+- **`Idle`**: Default resting state. No pointer buttons held down.
+- **`UIInteraction`**: Initiated when LMB is pressed over UI panels, floating windows, or widgets (`egui_wants_pointer_input()`). Viewport camera and object manipulation are inhibited.
+- **`GizmoDragging`**: Initiated when LMB is pressed over a 3D gizmo axis handle or planar quad. Cursor drag deltas drive object translation, rotation, or scaling.
+- **`BoxSelecting`**: Initiated when LMB is pressed in Box Select tool mode (`TransformMode::BoxSelect` or `B` key). Cursor drag renders a selection rectangle and selects enclosed objects upon release.
+- **`ObjectPressed`**: Initiated when LMB is pressed directly over a scene object (via raycast). Selects the object immediately.
+- **`ViewportOrbiting`**: Initiated when LMB is pressed over empty viewport space. Cursor movement rotates the working camera around its pivot target.
+
+**Click vs. Drag Disambiguation**:
+When `ViewportOrbiting` is active, pointer release measures the Euclidean distance from `pointer_press_pos`:
+- If displacement was $< 4.0$ px, the interaction is classified as an intentional static click on empty space, clearing active selection (`app.selection.deselect()`).
+- If displacement was $\ge 4.0$ px, the interaction is classified as a camera orbit drag; active selection is preserved intact.
+
+**Focus Loss & Release Safety**:
+If `lmb_down` is false while the state is not `Idle` (e.g. pointer released outside viewport or window lost focus), the state machine immediately resets to `Idle`, clearing press positions and active drag states.
+
+

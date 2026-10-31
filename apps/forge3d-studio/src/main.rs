@@ -1,10 +1,7 @@
 use eframe::egui;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod app;
-mod ui;
-
-use app::Forge3dStudioApp;
+use forge3d_studio::Forge3dStudioApp;
 
 fn main() -> eframe::Result<()> {
     // 1. Initialize structured logging

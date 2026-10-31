@@ -142,10 +142,47 @@ impl Mesh {
             // Compute hit point in world space and find distance along world ray
             let local_hit = local_ray.point_at(closest_local_t);
             let world_hit = world_transform.transform_point(local_hit);
-            let world_dist = (world_hit - ray.origin).length();
-            Some(world_dist)
+            let world_dist = (world_hit - ray.origin).dot(ray.direction);
+            if world_dist > 0.0 {
+                Some(world_dist)
+            } else {
+                None
+            }
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::{generate_cube, generate_plane};
+
+    #[test]
+    fn test_mesh_raycast_cube() {
+        let cube = generate_cube(1.0);
+        let tf = Transform::from_translation(Vec3::new(0.0, 0.0, 0.0));
+        let ray = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0));
+        let hit = cube.raycast(&ray, &tf);
+        assert!(hit.is_some());
+        let dist = hit.unwrap();
+        // Cube extends from -0.5 to 0.5 along Z, so ray starting at 5.0 hits at distance 4.5
+        assert!((dist - 4.5).abs() < 1e-4);
+
+        // Ray behind the cube looking away
+        let miss_ray = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 1.0));
+        assert!(cube.raycast(&miss_ray, &tf).is_none());
+    }
+
+    #[test]
+    fn test_mesh_raycast_flat_plane() {
+        let plane = generate_plane(10.0, 1);
+        let tf = Transform::from_translation(Vec3::new(0.0, 0.0, 0.0));
+        let ray = Ray::new(Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -1.0, 0.0));
+        let hit = plane.raycast(&ray, &tf);
+        assert!(hit.is_some(), "Raycast against flat plane must hit");
+        let dist = hit.unwrap();
+        assert!((dist - 5.0).abs() < 0.01);
     }
 }

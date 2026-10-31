@@ -13,8 +13,9 @@ pub mod selection;
 pub mod serialization;
 
 pub use editor_state::{
-    AxisConstraint, EditMode, EditorState, ModalTransformState, PivotPoint, SelectionElement,
-    SnapSettings, TransformMode, TransformOrientation,
+    AxisConstraint, EditMode, EditorState, GizmoMode, ModalTransformState, PanelSettings,
+    PivotPoint, PointerInteractionState, SelectionElement, SnapSettings, ToolbarDisplayMode,
+    TransformMode, TransformOrientation,
 };
 pub use history::{Action, HistoryStack};
 pub use object::{

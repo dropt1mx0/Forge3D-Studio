@@ -4,6 +4,7 @@ use eframe::egui;
 use forge_core::id::ObjectId;
 use forge_geometry::{EditSelectionMode, EditableMesh};
 use forge_gpu::GpuAdapterInfo;
+use forge_math::Transform;
 use forge_render::{Camera, ViewportRenderer};
 use forge_scene::{Action, EditMode, EditorState, HistoryStack, Scene, SelectionState};
 
@@ -48,6 +49,9 @@ pub struct Forge3dStudioApp {
     last_frame_instant: Instant,
     pub fps: f32,
     pub frame_time_ms: f32,
+
+    // Multi-object transformation initial transforms cache
+    pub gizmo_initial_transforms: std::collections::HashMap<ObjectId, Transform>,
 }
 
 impl Forge3dStudioApp {
@@ -79,10 +83,15 @@ impl Forge3dStudioApp {
             ));
         }
 
+        let editor_state = EditorState {
+            panel_settings: forge_scene::PanelSettings::load_or_default(),
+            ..Default::default()
+        };
+
         Self {
             scene: Scene::create_default_scene(),
             selection: SelectionState::new(),
-            editor_state: EditorState::default(),
+            editor_state,
             camera: Camera::default(),
             renderer,
             gpu_info,
@@ -100,6 +109,34 @@ impl Forge3dStudioApp {
             last_frame_instant: Instant::now(),
             fps: 60.0,
             frame_time_ms: 16.6,
+            gizmo_initial_transforms: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Creates a headless instance of the app (no GPU/eframe required) for automated integration testing.
+    pub fn new_headless() -> Self {
+        Self {
+            scene: Scene::create_default_scene(),
+            selection: SelectionState::new(),
+            editor_state: EditorState::default(),
+            camera: Camera::default(),
+            renderer: None,
+            gpu_info: None,
+            status_message: "Ready (Headless)".to_string(),
+            show_about_dialog: false,
+            show_gpu_dialog: false,
+            history: HistoryStack::new(),
+            gizmo_state: GizmoState::new(),
+            active_edit_mesh: None,
+            wgpu_render_state: None,
+            viewport_texture: None,
+            viewport_texture_view: None,
+            viewport_egui_texture_id: None,
+            viewport_pixel_size: (1280, 800),
+            last_frame_instant: Instant::now(),
+            fps: 60.0,
+            frame_time_ms: 16.6,
+            gizmo_initial_transforms: std::collections::HashMap::new(),
         }
     }
 
@@ -233,6 +270,20 @@ impl Forge3dStudioApp {
         }
     }
 
+    pub fn save_to_string(&self) -> forge_core::error::Result<String> {
+        let project = forge_scene::ForgeProject::new("Forge Project", self.scene.clone());
+        project.to_json()
+    }
+
+    pub fn load_from_string(&mut self, s: &str) -> forge_core::error::Result<()> {
+        let project = forge_scene::ForgeProject::from_json(s)?;
+        self.scene = project.scene;
+        self.selection.deselect();
+        self.scene.dirty = true;
+        self.status_message = format!("Loaded project: {}", project.name);
+        Ok(())
+    }
+
     pub fn duplicate_selected(&mut self) {
         if let Some(active_id) = self.selection.active_id
             && let Some(new_id) = self.scene.duplicate_object(active_id)
@@ -263,20 +314,102 @@ impl Forge3dStudioApp {
         }
     }
 
+    pub fn select_all(&mut self) {
+        let mut ids = std::collections::HashSet::new();
+        for (&id, obj) in &self.scene.objects {
+            if obj.visible {
+                ids.insert(id);
+            }
+        }
+        self.selection.selected_ids = ids;
+        self.selection.active_id = self.selection.selected_ids.iter().next().copied();
+        self.status_message = format!(
+            "Selected All ({} objects)",
+            self.selection.selected_ids.len()
+        );
+    }
+
+    pub fn deselect_all(&mut self) {
+        self.selection.deselect();
+        self.status_message = "Selection cleared".to_string();
+    }
+
+    pub fn invert_selection(&mut self) {
+        let all_ids: Vec<ObjectId> = self.scene.objects.keys().copied().collect();
+        let mut new_selection = std::collections::HashSet::new();
+        for id in all_ids {
+            if let Some(obj) = self.scene.get_object(id)
+                && obj.visible
+                && !self.selection.is_selected(id)
+            {
+                new_selection.insert(id);
+            }
+        }
+        self.selection.selected_ids = new_selection;
+        self.selection.active_id = self.selection.selected_ids.iter().next().copied();
+        self.status_message = format!(
+            "Inverted Selection ({} selected)",
+            self.selection.selected_ids.len()
+        );
+    }
+
+    pub fn box_select(
+        &mut self,
+        box_rect: egui::Rect,
+        view_proj: forge_math::Mat4,
+        viewport_rect: egui::Rect,
+        toggle: bool,
+    ) {
+        let mut hit_ids = std::collections::HashSet::new();
+        for (&id, obj) in &self.scene.objects {
+            if !obj.visible {
+                continue;
+            }
+            let world_tf = self.scene.world_transform(id);
+            let world_pos = world_tf.translation;
+            if let Some(screen_p) =
+                crate::ui::gizmo::world_to_screen_pos(world_pos, view_proj, viewport_rect)
+                && box_rect.contains(screen_p)
+            {
+                hit_ids.insert(id);
+            }
+        }
+
+        if toggle {
+            for id in hit_ids {
+                self.selection.toggle_selection(id);
+            }
+        } else if !hit_ids.is_empty() {
+            self.selection.selected_ids = hit_ids;
+            self.selection.active_id = self.selection.selected_ids.iter().next().copied();
+        } else {
+            self.selection.deselect();
+        }
+        self.status_message = format!(
+            "Box Selected ({} objects)",
+            self.selection.selected_ids.len()
+        );
+    }
+
     pub fn begin_modal_transform(
         &mut self,
         mode: forge_scene::TransformMode,
         mouse_pos: forge_math::Vec2,
     ) {
-        if self.selection.selected_ids.is_empty() {
-            return;
+        let mut ids = self.selection.selected_ids.clone();
+        if ids.is_empty() {
+            if let Some(aid) = self.selection.active_id {
+                ids.insert(aid);
+            } else {
+                return;
+            }
         }
 
         let mut initial_transforms = std::collections::HashMap::new();
         let mut center_sum = forge_math::Vec3::ZERO;
         let mut count = 0.0;
 
-        for &id in &self.selection.selected_ids {
+        for &id in &ids {
             if let Some(obj) = self.scene.get_object(id) {
                 initial_transforms.insert(id, obj.local_transform);
                 center_sum += obj.local_transform.translation;
@@ -540,6 +673,16 @@ impl eframe::App for Forge3dStudioApp {
             self.frame_time_ms = dt * 1000.0;
         }
 
+        // Safety: Window focus loss cancels modal operations safely
+        let window_focused = ui.input(|i| i.focused);
+        if !window_focused {
+            if self.editor_state.modal_transform.active {
+                self.cancel_modal_transform();
+            }
+            self.editor_state.pointer_state = forge_scene::PointerInteractionState::Idle;
+            self.gizmo_state.drag_state = None;
+        }
+
         // 2. Top Menu Bar
         egui::Panel::top("menu_bar").show(ui, |ui| {
             render_menu_bar(self, ui);
@@ -550,32 +693,202 @@ impl eframe::App for Forge3dStudioApp {
             render_status_bar(self, ui);
         });
 
-        // 4. Left Toolbar
-        egui::Panel::left("tools_panel")
-            .resizable(false)
-            .exact_size(68.0)
-            .show(ui, |ui| {
-                render_toolbar(self, ui);
-            });
+        // 4. Left Toolbar (Resizable with drag handle and auto mode switch)
+        if self.editor_state.panel_settings.toolbar_visible {
+            let toolbar_w = self.editor_state.panel_settings.toolbar_width;
+            egui::Panel::left("tools_panel")
+                .resizable(false)
+                .exact_size(toolbar_w)
+                .show(ui, |ui| {
+                    let total_h = ui.available_height();
+                    let content_w = (toolbar_w - 6.0).max(10.0);
+                    ui.horizontal(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(content_w, total_h),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                render_toolbar(self, ui);
+                            },
+                        );
 
-        // 5. Right Sidebar: Outliner (Top) and Properties (Bottom)
-        egui::Panel::right("outliner_properties_panel")
-            .default_size(300.0)
-            .show(ui, |ui| {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), ui.available_height() * 0.40),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        render_outliner(self, ui);
-                    },
-                );
-
-                ui.separator();
-
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    render_properties(self, ui);
+                        // Vertical drag splitter on right edge
+                        let (splitter_rect, response) = ui.allocate_exact_size(
+                            egui::vec2(6.0, total_h),
+                            egui::Sense::click_and_drag(),
+                        );
+                        if response.hovered() || response.dragged() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                        }
+                        if response.dragged() {
+                            let delta_x = response.drag_delta().x;
+                            let new_w = (self.editor_state.panel_settings.toolbar_width + delta_x)
+                                .clamp(48.0, 240.0);
+                            self.editor_state.panel_settings.toolbar_width = new_w;
+                            if new_w >= 90.0 {
+                                self.editor_state.panel_settings.toolbar_mode =
+                                    forge_scene::ToolbarDisplayMode::IconAndLabel;
+                            } else {
+                                self.editor_state.panel_settings.toolbar_mode =
+                                    forge_scene::ToolbarDisplayMode::IconOnly;
+                            }
+                            let _ = self.editor_state.panel_settings.save();
+                        }
+                        let col = if response.dragged() {
+                            egui::Color32::from_rgb(240, 144, 32) // #f09020 accent
+                        } else if response.hovered() {
+                            egui::Color32::from_rgb(255, 175, 50)
+                        } else {
+                            egui::Color32::from_rgb(38, 42, 50)
+                        };
+                        ui.painter().rect_filled(splitter_rect, 1.0, col);
+                    });
                 });
-            });
+        }
+
+        // 5. Bottom Timeline Panel (Optional / Resizable)
+        if self.editor_state.panel_settings.timeline_visible {
+            let timeline_h = self.editor_state.panel_settings.timeline_height;
+            egui::Panel::bottom("timeline_panel")
+                .resizable(false)
+                .exact_size(timeline_h)
+                .show(ui, |ui| {
+                    let total_w = ui.available_width();
+                    // Top horizontal drag splitter
+                    let (splitter_rect, response) = ui.allocate_exact_size(
+                        egui::vec2(total_w, 6.0),
+                        egui::Sense::click_and_drag(),
+                    );
+                    if response.hovered() || response.dragged() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    }
+                    if response.dragged() {
+                        let delta_y = response.drag_delta().y;
+                        self.editor_state.panel_settings.timeline_height =
+                            (self.editor_state.panel_settings.timeline_height - delta_y)
+                                .clamp(60.0, 350.0);
+                        let _ = self.editor_state.panel_settings.save();
+                    }
+                    let col = if response.dragged() {
+                        egui::Color32::from_rgb(240, 144, 32)
+                    } else if response.hovered() {
+                        egui::Color32::from_rgb(255, 175, 50)
+                    } else {
+                        egui::Color32::from_rgb(38, 42, 50)
+                    };
+                    ui.painter().rect_filled(splitter_rect, 1.0, col);
+
+                    ui.horizontal(|ui| {
+                        ui.label("⏱ Timeline");
+                        ui.separator();
+                        if ui
+                            .button("⏮")
+                            .on_hover_text("First Frame (Shift+Left)")
+                            .clicked()
+                        {
+                            self.status_message = "Timeline: Jump to Frame 1".to_string();
+                        }
+                        if ui
+                            .button("▶")
+                            .on_hover_text("Play / Pause (Space)")
+                            .clicked()
+                        {
+                            self.status_message = "Timeline: Play / Pause".to_string();
+                        }
+                        if ui
+                            .button("⏭")
+                            .on_hover_text("Last Frame (Shift+Right)")
+                            .clicked()
+                        {
+                            self.status_message = "Timeline: Jump to End".to_string();
+                        }
+                        ui.separator();
+                        ui.label("Frame: 1 / 250");
+                    });
+                });
+        }
+
+        // 6. Right Sidebar: Outliner (Top) and Properties (Bottom)
+        if self.editor_state.panel_settings.sidebar_visible {
+            let sidebar_w = self.editor_state.panel_settings.sidebar_width;
+            egui::Panel::right("outliner_properties_panel")
+                .resizable(false)
+                .exact_size(sidebar_w)
+                .show(ui, |ui| {
+                    let total_h = ui.available_height();
+                    let content_w = (sidebar_w - 6.0).max(10.0);
+                    ui.horizontal(|ui| {
+                        // Vertical drag splitter on left edge of right panel
+                        let (splitter_rect, response) = ui.allocate_exact_size(
+                            egui::vec2(6.0, total_h),
+                            egui::Sense::click_and_drag(),
+                        );
+                        if response.hovered() || response.dragged() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                        }
+                        if response.dragged() {
+                            let delta_x = response.drag_delta().x;
+                            // Dragging left (negative delta) increases sidebar width
+                            self.editor_state.panel_settings.sidebar_width =
+                                (self.editor_state.panel_settings.sidebar_width - delta_x)
+                                    .clamp(220.0, 600.0);
+                            let _ = self.editor_state.panel_settings.save();
+                        }
+                        let col = if response.dragged() {
+                            egui::Color32::from_rgb(240, 144, 32)
+                        } else if response.hovered() {
+                            egui::Color32::from_rgb(255, 175, 50)
+                        } else {
+                            egui::Color32::from_rgb(38, 42, 50)
+                        };
+                        ui.painter().rect_filled(splitter_rect, 1.0, col);
+
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(content_w, total_h),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                let outliner_h = (total_h
+                                    * self.editor_state.panel_settings.outliner_height_ratio)
+                                    .clamp(60.0, (total_h - 80.0).max(60.0));
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(ui.available_width(), outliner_h),
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    |ui| {
+                                        render_outliner(self, ui);
+                                    },
+                                );
+
+                                // Horizontal drag splitter between Outliner and Properties
+                                let (h_rect, h_resp) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), 6.0),
+                                    egui::Sense::click_and_drag(),
+                                );
+                                if h_resp.hovered() || h_resp.dragged() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                                }
+                                if h_resp.dragged() {
+                                    let delta_y = h_resp.drag_delta().y;
+                                    let new_ratio = (outliner_h + delta_y) / total_h.max(1.0);
+                                    self.editor_state.panel_settings.outliner_height_ratio =
+                                        new_ratio.clamp(0.15, 0.85);
+                                    let _ = self.editor_state.panel_settings.save();
+                                }
+                                let h_col = if h_resp.dragged() {
+                                    egui::Color32::from_rgb(240, 144, 32)
+                                } else if h_resp.hovered() {
+                                    egui::Color32::from_rgb(255, 175, 50)
+                                } else {
+                                    egui::Color32::from_rgb(45, 48, 55)
+                                };
+                                ui.painter().rect_filled(h_rect, 1.0, h_col);
+
+                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                    render_properties(self, ui);
+                                });
+                            },
+                        );
+                    });
+                });
+        }
 
         // 6. Central 3D Viewport Panel
         egui::CentralPanel::default()

@@ -5,6 +5,91 @@ All notable changes to Forge3D Rust Edition will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0-alpha.2] - 2026-10-31
+
+### Added
+- **Automatic Object Interaction & Unified Gizmo System**:
+  - Automatically display Transform Gizmo immediately upon selecting any object or multiple objects.
+  - Multi-axis & multi-plane gizmo support: 3 translation/scale axes, 3 planar handles (XY, XZ, YZ), and 3 rotation rings.
+  - Automatic rebinding when clicking another object.
+  - Pivot Point support: Median Center, Active Element, 3D Cursor, Individual Origins.
+  - Transform Orientation support: Global and Local coordinates.
+  - Multi-selection transform with compound undo action (`Action::MultiTransform`).
+- **Keyboard Transform System**:
+  - Direct G (Move), R (Rotate), S (Scale) modal transform activation.
+  - X, Y, Z axis constraints and Shift+X, Shift+Y, Shift+Z planar constraints.
+  - Real-time precision numeric input with backspace and decimal point support.
+  - Enter / LMB to confirm, Esc / RMB to cancel, Ctrl+Z Undo, Ctrl+Shift+Z Redo.
+  - Automatic cancellation on window focus loss.
+  - Full hotkey prioritization: typing in UI text fields suppresses viewport modal hotkeys.
+- **Resizable Workspace & Splitters**:
+  - Draggable splitters with hover/drag visual feedback (orange accent line `#f09020`, horizontal and vertical resize cursors).
+  - Left Toolbar: resizable (48–240 px), Icon Only vs Icon + Label modes, and collapse toggle.
+  - Right Sidebar: resizable (220–600 px) with adjustable Outliner vs Properties vertical split ratio (0.15–0.85).
+  - Bottom Timeline panel: resizable (60–350 px) with transport controls and visibility toggle.
+  - Clamped limits and session persistence via `forge3d_settings.json`.
+- **Categorized Toolbar**:
+  - Grouped into Selection, Transform, Modeling, Add Mesh, Utilities.
+  - Tooltips, icons, and keyboard shortcuts for all active tools.
+- **Add Object System Expansion**:
+  - Added procedural clean-room Capsule primitive (`generate_capsule`) and Monkey / Suzanne mascot head (`generate_monkey`) with validated outward normals and UV coordinates.
+  - Searchable Add Menu with category groupings (`Mesh Primitives`, `Scene Objects`) and dynamic query filtering.
+- **Automated Integration Test Suite**:
+  - Added `tests/alpha_0_2_ux_interaction.rs` with 7 end-to-end integration tests covering gizmo auto-display, multi-object transformation, modal constraints with numeric input, focus loss safety, panel persistence, and primitive generation (80/80 tests passing workspace-wide).
+
+## [0.4.2-alpha.6] - 2026-10-31
+
+### Added
+- **Master Project Audit & Traceability Matrix**:
+  - Authored comprehensive `docs/FEATURE_MATRIX.md` mapping all 31 specification sections to the codebase with granular status, priority, dependencies, acceptance criteria, test coverage, and known limitations.
+  - Formulated the 10-phase master development roadmap in `docs/ROADMAP.md` covering P0–P4 priority tiers and clear phase exit criteria.
+  - Documented ADR-0012 in `docs/DECISIONS.md` establishing architectural crate boundaries, clean-room standards, and next implementation cycles.
+  - Measured and published real-hardware performance baselines in `docs/BENCHMARKS.md` on Intel Core i5 Ivy Bridge + Intel HD Graphics 4000 under Linux (~603 ms startup, 110 MB idle RAM, 60 FPS viewport, 71/71 tests passing).
+
+## [0.4.1-alpha.5] - 2026-10-30
+
+### Added
+- **Left Mouse Viewport Navigation (LMB Orbit Navigation)**:
+  - Users can now orbit the 3D viewport camera by pressing and dragging LMB over empty viewport space.
+  - Reuses existing camera orbit mathematics without code duplication, preserving orbit pivot target and camera distance while enforcing $-89.4^\circ$ to $+89.4^\circ$ pitch limits to prevent camera flipping.
+  - Supports both Perspective and Orthographic projection modes.
+  - Existing Middle Mouse Button (MMB) Orbit, Shift+MMB Pan, Scroll Zoom, Alt+LMB Orbit, and Fly Navigation remain completely unaffected.
+- **Pointer Interaction State Machine**:
+  - Implemented `PointerInteractionState` (`Idle`, `ObjectPressed`, `GizmoDragging`, `BoxSelecting`, `ViewportOrbiting`, `UIInteraction`).
+  - Strict input priority hierarchy: UI Panels > Active Gizmos > Object Selection > Box Select > Empty Viewport Navigation.
+  - Disambiguated empty-space clicking and dragging: static clicks ($< 4.0$ px displacement) clear active selection, whereas drags ($\ge 4.0$ px) orbit the camera without clearing selection.
+  - Safety checks for pointer release outside the viewport and application focus loss to prevent stuck dragging/orbiting states.
+- **Viewport Debug Telemetry**:
+  - Integrated floating monospace telemetry card displaying Pointer Interaction State, Pointer Position, Viewport Bounds, Camera Mode, Orbit Target Pivot, and Camera Distance.
+  - Added "Show Viewport Debug Telemetry" toggle checkbox in the View menu.
+- **Dedicated Automated Integration Tests**:
+  - Added `apps/forge3d-studio/tests/lmb_orbit_interaction.rs` testing all 8 required pointer interaction scenarios (71/71 tests passing workspace-wide).
+
+## [0.4.0-alpha.4] - 2026-10-30
+
+### Fixed
+- **Critical Interaction Pipeline Disconnect**:
+  - Fixed pointer sampling in `apps/forge3d-studio/src/ui/viewport.rs` by replacing `interact_pos()` with `hover_pos().or(latest_pos())`, restoring cursor tracking, gizmo highlighting, mouse-look, and scroll zoom when mouse buttons are not held down.
+  - Resolved modal transform confirmation click collision where confirming a Grab/Rotate/Scale via LMB caused an immediate deselection or object reassignment in the same frame.
+  - Fixed zero-thickness AABB raycast failure in `crates/forge-math/src/bounds.rs` with minimum slab thickness padding ($\epsilon = 0.005$) and parallel ray containment checks, making flat planes and 2D ground meshes reliably selectable.
+  - Fixed gizmo single-frame undo bug in `apps/forge3d-studio/src/ui/gizmo.rs` by caching the drag start transform upon initial mouse capture and committing the full drag delta to the undo history stack upon release.
+
+### Added
+- **Selection Tools & Box Selection**:
+  - Rubber-band 2D Box Selection (выделение рамкой) in Select tool mode (`B` shortcut) with live visual bounding rectangle.
+  - Global selection commands: Select All (`A`), Deselect All (`Alt+A`), Invert Selection (`Ctrl+I`).
+- **Automated Interaction Flow Test Suite**:
+  - Added headless testing harness in `apps/forge3d-studio` (`Forge3dStudioApp::new_headless()`).
+  - Added 8 end-to-end integration tests simulating real user event sequences:
+    - Object picking and raycast selection.
+    - Modal move (`G` -> `X` -> `5` -> `Enter` -> `Undo` -> `Redo`).
+    - Modal rotate (`R` -> `Y` -> `90` -> `Enter` -> `Undo`).
+    - Modal scale (`S` -> `2` -> `Enter` -> `Undo`).
+    - Camera navigation (Orbit, Pan, Zoom, Presets, Ortho toggle, Reset).
+    - Selection tools (Select All, Deselect All, Invert, Box Select).
+    - Scene camera object manipulation and view alignment.
+    - Project serialization / persistence roundtrip.
+
 ## [0.3.0-alpha.3] - 2026-10-30
 
 ### Added

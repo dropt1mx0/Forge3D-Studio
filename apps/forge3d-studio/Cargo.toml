@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "forge3d-studio"
 path = "src/main.rs"
@@ -26,3 +29,5 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 pollster = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

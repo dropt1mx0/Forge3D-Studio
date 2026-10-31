@@ -140,6 +140,11 @@ impl Camera {
         self.right().cross(self.forward()).normalize_or_zero()
     }
 
+    /// Distance from the camera eye to its target pivot point.
+    pub fn distance(&self) -> f32 {
+        (self.eye - self.target).length()
+    }
+
     /// Orbit rotation around the target point.
     /// `delta_yaw`: horizontal rotation in radians (around world Y axis).
     /// `delta_pitch`: vertical rotation in radians (around camera right axis).
@@ -377,22 +382,17 @@ impl Camera {
 
         match self.projection {
             CameraProjection::Perspective => {
-                let near_ndc = glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
                 let far_ndc = glam::Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
-
-                let near_world_h = inv_view_proj * near_ndc;
                 let far_world_h = inv_view_proj * far_ndc;
-
-                let near_world = near_world_h.truncate() / near_world_h.w;
                 let far_world = far_world_h.truncate() / far_world_h.w;
 
-                let direction = (far_world - near_world).normalize_or_zero();
-                Ray::new(near_world, direction)
+                let direction = (far_world - self.eye).normalize_or_zero();
+                Ray::new(self.eye, direction)
             }
             CameraProjection::Orthographic => {
                 let near_ndc = glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
                 let near_world_h = inv_view_proj * near_ndc;
-                let ray_origin = near_world_h.truncate();
+                let ray_origin = near_world_h.truncate() / near_world_h.w;
                 let ray_dir = (self.target - self.eye).normalize_or_zero();
                 Ray::new(ray_origin, ray_dir)
             }
@@ -467,6 +467,13 @@ mod tests {
         assert!(ray.origin.is_finite());
         assert!(ray.direction.is_finite());
         assert!((ray.direction.length() - 1.0).abs() < 1e-4);
+        let expected_dir = (cam.target - cam.eye).normalize();
+        assert!(
+            (ray.direction - expected_dir).length() < 1e-3,
+            "Ray direction {:?} did not match expected {:?}",
+            ray.direction,
+            expected_dir
+        );
     }
 
     #[test]

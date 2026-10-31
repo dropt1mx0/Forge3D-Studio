@@ -130,3 +130,77 @@
 - **Consequences:**
   Completely eliminates inadvertent object modifications while typing text, and prevents navigation conflicts during transforms.
 
+---
+
+## ADR-0009: Decoupling Pointer Hover vs Drag State and Confirmation Click Consumption
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  `ui.input(|i| i.pointer.interact_pos())` was used for sampling mouse coordinates in the viewport. Because egui only sets `interact_pos` when a mouse button is actively held down, hover highlights, scroll zooming, and keyboard-driven modal transformations received `None` on every frame where the mouse was not pressed. Additionally, when a user clicked LMB to confirm a modal transform, `modal.active` transitioned to `false` on that frame, causing downstream object selection logic to treat the click as an object picking event.
+- **Decision:**
+  - Sample mouse position via `ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()))`.
+  - Introduce an explicit `modal_consumed_click = true` flag upon modal confirmation or cancellation via mouse click, preventing raycast selection on that frame.
+- **Consequences:**
+  Ensures smooth hover highlights, reliable mouse scroll wheel zooming, and guarantees that confirming an operation never unexpectedly deselects or reselects objects in the scene.
+
+---
+
+## ADR-0010: Inflation of Degenerate Slabs in AABB Raycasting
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  Flat 2D geometry (such as the Ground Plane where $min.y = max.y = 0.0$) produced ray intersection failures. The standard slab formula $t_1 = (min.y - orig.y) / dir.y$ and $t_2 = (max.y - orig.y) / dir.y$ resulted in $t_{min} > t_{max}$ due to floating-point rounding errors, and division by zero ($NaN$) for rays parallel to the plane.
+- **Decision:**
+  Enforce a minimum half-thickness $\epsilon = 0.005$ along any degenerate dimension ($max_i - min_i < \epsilon$) in `Aabb::intersect_ray`, accompanied by an explicit parallel ray containment check.
+- **Consequences:**
+  Eliminates selection glitches on planar geometry, ground grids, and thin panels, ensuring fast and robust raycasting broadphase tests.
+
+---
+
+## ADR-0011: LMB Orbit Viewport Navigation and Pointer Interaction State Machine
+- **Status:** Accepted
+- **Date:** 2026-10-30
+- **Context:**
+  Users expect natural 3D viewport navigation where dragging LMB over empty space rotates (orbits) the camera around the active pivot point. However, this must never interfere with existing interactions: UI panel clicks, active gizmo drags, object raycast picking, or box selection. Furthermore, a normal click on empty space must continue to clear the current selection.
+- **Decision:**
+  1. Define `PointerInteractionState` in `forge-scene`: `Idle`, `ObjectPressed`, `GizmoDragging`, `BoxSelecting`, `ViewportOrbiting`, and `UIInteraction`.
+  2. Implement an input priority hierarchy on pointer press:
+     - UI panels / widgets (`egui_wants_pointer_input()`) -> `UIInteraction`.
+     - Gizmo handles -> `GizmoDragging`.
+     - Box Select tool -> `BoxSelecting`.
+     - Scene object raycast hit -> `ObjectPressed` (selects object).
+     - Empty space -> `ViewportOrbiting`.
+  3. Reuse existing camera math (`Camera::orbit(yaw, pitch)`) ensuring pivot point and distance are preserved, and vertical pitch is clamped between $-89.4^\circ$ and $+89.4^\circ$.
+  4. Disambiguate empty-space clicking and dragging: record `pointer_press_pos`; on pointer release, if Euclidean displacement is $< 4.0$ px, clear selection; if $\ge 4.0$ px, keep selection and complete orbit.
+  5. Add safety reset: on focus loss or release outside the window, reset `pointer_state` to `Idle`.
+- **Consequences:**
+  Provides an intuitive and responsive camera orbit interaction over empty viewport space while preserving all existing gizmo transformations, object selection, box selection, MMB orbit, and Shift+MMB pan.
+
+---
+
+## ADR-0012: Master Project Audit & Strategic Roadmap Alignment
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Context:**
+  A comprehensive technical audit was conducted against the master specification (`FORGE3D_MASTER_SPEC.md` and the 31 production domains). The project has successfully established a high-performance, rock-solid Phase 1 foundation (71/71 tests passing, <600ms startup, ~110MB idle RAM, 60 FPS viewport on Intel HD 4000 legacy hardware). We must define the architectural strategy for progressing into Phase 2 (Polygonal Modeling) and Phase 4 (Materials, Lighting, and Asset I/O).
+- **Decision:**
+  1. **Preserve and extend existing crates**: Retain `forge-core`, `forge-math`, `forge-geometry`, `forge-scene`, `forge-gpu`, `forge-render`, `forge-modifiers`, and `apps/forge3d-studio`.
+  2. **Introduce `crates/forge-io`**: Dedicated crate for standard 3D asset interchange (Wavefront OBJ, glTF 2.0 / GLB, STL). It depends on `forge-core`, `forge-math`, `forge-geometry`, and `forge-scene`, keeping file parsing isolated from rendering and UI.
+  3. **Establish clean-room asset and parsing boundaries**: No proprietary libraries; use standard open specifications and pure Rust parsers with comprehensive round-trip tests.
+  4. **Next Implementation Cycle Selection**: Execute the immediate core modeling enhancement (Loop Cut & Slide and Bevel foundation in `forge-geometry`) and Asset I/O foundation (`forge-io`) to enable importing and refining real-world assets without external DCC tools.
+- **Consequences:**
+  Maintains clean crate boundaries, guarantees zero regression in existing tested interactions, and systematically addresses P0/P1 gaps identified in `docs/FEATURE_MATRIX.md`.
+
+## ADR-0013: Unified Interaction, Delta-Based Multi-Object Gizmo, and Resizable Workspace UX (Alpha 0.2)
+- **Status:** Accepted
+- **Date:** 2026-10-31
+- **Context:**
+  In Alpha 0.1, object manipulation required manually selecting tools on the left toolbar before interacting with objects. Users needed to select an object and immediately begin manipulating it with a unified transform gizmo or keyboard hotkeys (G, R, S) without toolbar friction. Furthermore, panels were fixed in width, lacking resizability, collapsibility, and persistent workspace settings.
+- **Decision:**
+  1. **Automatic Gizmo Activation & Rebinding:** When any object is selected (or multi-selection exists), the transform gizmo is automatically displayed in the viewport. Switching selection immediately rebinds the gizmo to the new target.
+  2. **Unified Gizmo Delta Interaction (`GizmoInteractionResult`):** The gizmo system calculates 3D transform deltas (`GizmoDelta::Translation`, `GizmoDelta::Rotation`, `GizmoDelta::Scale`) and emits lifecycle events (`drag_started`, `drag_ended`). Multi-object transformations apply deltas to all selected objects according to active `PivotPoint` (Median, Active, Cursor, Individual) and `TransformOrientation` (Global, Local), recording compound history undo actions (`Action::MultiTransform`).
+  3. **Modal Transform State Machine Integration:** Direct G/R/S modal transforms integrate seamlessly with gizmo mode, supporting X/Y/Z single-axis locks, Shift+X/Y/Z planar locks, precision numeric keyboard typing, and window focus loss safety. Hotkeys are strictly disabled when egui text inputs have focus.
+  4. **Resizable Workspace & Splitter Architecture:** Left Toolbar, Right Sidebar, Outliner/Inspector vertical ratio, and Bottom Timeline panel feature draggable splitters with `#f09020` accent lines and cursor feedback (`ResizeHorizontal`/`ResizeVertical`). Toolbar supports `IconOnly`, `IconAndLabel`, and collapse. Panel sizes are clamped and saved across sessions to `forge3d_settings.json`.
+  5. **Clean-room Primitive Expansion:** Added `Capsule` and `Monkey` (Suzanne procedural mascot) with outward normals and UV coordinates, validated through mesh topology checks.
+- **Consequences:**
+  Eliminates friction in object interaction. Users can select and manipulate immediately. Workspace layout is customizable and persists across launches. All 80 automated unit and integration tests pass cleanly with zero warnings under clippy.

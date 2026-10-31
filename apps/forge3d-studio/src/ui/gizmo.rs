@@ -1,6 +1,6 @@
 use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2 as EguiVec2};
-use forge_math::{Mat4, Quat, Ray, Transform, Vec2, Vec3};
-use forge_scene::{TransformMode, TransformOrientation};
+use forge_math::{Mat4, Quat, Ray, Vec2, Vec3};
+use forge_scene::{GizmoMode, TransformOrientation};
 
 /// Identifies an interactive component of the 3D transform gizmo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,12 +20,20 @@ pub enum GizmoPart {
     ScaleUniform,
 }
 
+/// Calculated transformation delta during an active gizmo drag.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GizmoDelta {
+    Translate(Vec3),
+    Rotate(Quat),
+    Scale(Vec3),
+}
+
 /// Active drag state for the gizmo.
 #[derive(Debug, Clone)]
 pub struct GizmoDragState {
     pub active_part: GizmoPart,
     pub start_mouse: Vec2,
-    pub start_transform: Transform,
+    pub start_pivot: Vec3,
     pub initial_hit_coord: f32,
     pub initial_hit_point: Vec3,
 }
@@ -47,6 +55,21 @@ impl GizmoState {
     }
 }
 
+/// Interaction result returned after rendering and hit-testing the gizmo.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GizmoInteractionResult {
+    /// True if the gizmo was hovered, clicked, or actively dragged, consuming pointer input.
+    pub consumed: bool,
+    /// True if the user is currently dragging a gizmo part.
+    pub is_dragging: bool,
+    /// Active transformation delta relative to drag start.
+    pub delta: Option<GizmoDelta>,
+    /// True on the first frame when drag begins.
+    pub drag_started: bool,
+    /// True on the frame when drag is released.
+    pub drag_ended: bool,
+}
+
 /// Helper function to project a 3D world position to 2D screen pixels within `rect`.
 pub fn world_to_screen_pos(world_pos: Vec3, view_proj: Mat4, rect: Rect) -> Option<Pos2> {
     let clip = view_proj * glam::Vec4::new(world_pos.x, world_pos.y, world_pos.z, 1.0);
@@ -63,7 +86,6 @@ pub fn world_to_screen_pos(world_pos: Vec3, view_proj: Mat4, rect: Rect) -> Opti
 }
 
 /// Renders the transform gizmo and handles interactive drag manipulation.
-/// Returns `true` if the gizmo was interacted with or dragged (consuming the pointer).
 #[allow(clippy::too_many_arguments)]
 pub fn render_and_interact_gizmo(
     gizmo_state: &mut GizmoState,
@@ -73,26 +95,26 @@ pub fn render_and_interact_gizmo(
     camera_screen_to_ray: impl Fn(Vec2) -> Ray,
     viewport_rect: Rect,
     pivot_world: Vec3,
-    active_transform: &mut Transform,
-    mode: TransformMode,
+    mode: GizmoMode,
     orientation: TransformOrientation,
+    orientation_quat: Quat,
     mouse_pos: Option<Pos2>,
     lmb_pressed: bool,
     lmb_down: bool,
     lmb_released: bool,
     snap_enabled: bool,
     grid_increment: f32,
-) -> bool {
-    if mode == TransformMode::Select {
-        gizmo_state.hovered_part = None;
-        gizmo_state.drag_state = None;
-        return false;
-    }
-
+) -> GizmoInteractionResult {
     let Some(center_screen) = world_to_screen_pos(pivot_world, camera_view_proj, viewport_rect)
     else {
         gizmo_state.hovered_part = None;
-        return false;
+        return GizmoInteractionResult {
+            consumed: false,
+            is_dragging: false,
+            delta: None,
+            drag_started: false,
+            drag_ended: false,
+        };
     };
 
     // Calculate dynamic 3D scale so gizmo maintains a comfortable screen size (~90 pixels)
@@ -102,14 +124,11 @@ pub fn render_and_interact_gizmo(
     // Orientation basis vectors
     let (axis_x, axis_y, axis_z) = match orientation {
         TransformOrientation::Global => (Vec3::X, Vec3::Y, Vec3::Z),
-        TransformOrientation::Local => {
-            let rot = active_transform.rotation;
-            (
-                rot.mul_vec3(Vec3::X),
-                rot.mul_vec3(Vec3::Y),
-                rot.mul_vec3(Vec3::Z),
-            )
-        }
+        TransformOrientation::Local => (
+            orientation_quat.mul_vec3(Vec3::X),
+            orientation_quat.mul_vec3(Vec3::Y),
+            orientation_quat.mul_vec3(Vec3::Z),
+        ),
     };
 
     let p_x = pivot_world + axis_x * gizmo_3d_len;
@@ -125,69 +144,99 @@ pub fn render_and_interact_gizmo(
     let hit_dist_threshold = 12.0;
 
     if let Some(mouse) = mouse_pos {
-        // A. Translation Gizmo
-        if mode == TransformMode::Translate {
-            // Plane handles
-            let p_xy = pivot_world + (axis_x + axis_y) * (gizmo_3d_len * 0.35);
-            let p_xz = pivot_world + (axis_x + axis_z) * (gizmo_3d_len * 0.35);
-            let p_yz = pivot_world + (axis_y + axis_z) * (gizmo_3d_len * 0.35);
+        match mode {
+            GizmoMode::Translate => {
+                // Planar handles
+                let p_xy = pivot_world + (axis_x + axis_y) * (gizmo_3d_len * 0.35);
+                let p_xz = pivot_world + (axis_x + axis_z) * (gizmo_3d_len * 0.35);
+                let p_yz = pivot_world + (axis_y + axis_z) * (gizmo_3d_len * 0.35);
 
-            if let Some(s_xz) = world_to_screen_pos(p_xz, camera_view_proj, viewport_rect)
-                && mouse.distance(s_xz) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::PlaneXZ);
-            } else if let Some(s_xy) = world_to_screen_pos(p_xy, camera_view_proj, viewport_rect)
-                && mouse.distance(s_xy) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::PlaneXY);
-            } else if let Some(s_yz) = world_to_screen_pos(p_yz, camera_view_proj, viewport_rect)
-                && mouse.distance(s_yz) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::PlaneYZ);
-            } else if let Some(sx) = screen_x
-                && dist_to_segment_2d(mouse, center_screen, sx) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::AxisX);
-            } else if let Some(sy) = screen_y
-                && dist_to_segment_2d(mouse, center_screen, sy) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::AxisY);
-            } else if let Some(sz) = screen_z
-                && dist_to_segment_2d(mouse, center_screen, sz) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::AxisZ);
+                if let Some(s_xz) = world_to_screen_pos(p_xz, camera_view_proj, viewport_rect)
+                    && mouse.distance(s_xz) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::PlaneXZ);
+                } else if let Some(s_xy) =
+                    world_to_screen_pos(p_xy, camera_view_proj, viewport_rect)
+                    && mouse.distance(s_xy) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::PlaneXY);
+                } else if let Some(s_yz) =
+                    world_to_screen_pos(p_yz, camera_view_proj, viewport_rect)
+                    && mouse.distance(s_yz) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::PlaneYZ);
+                } else if let Some(sx) = screen_x
+                    && dist_to_segment_2d(mouse, center_screen, sx) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::AxisX);
+                } else if let Some(sy) = screen_y
+                    && dist_to_segment_2d(mouse, center_screen, sy) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::AxisY);
+                } else if let Some(sz) = screen_z
+                    && dist_to_segment_2d(mouse, center_screen, sz) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::AxisZ);
+                }
             }
-        } else if mode == TransformMode::Scale {
-            // Center uniform scale box
-            if mouse.distance(center_screen) < 14.0 {
-                hovered = Some(GizmoPart::ScaleUniform);
-            } else if let Some(sx) = screen_x
-                && dist_to_segment_2d(mouse, center_screen, sx) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::ScaleX);
-            } else if let Some(sy) = screen_y
-                && dist_to_segment_2d(mouse, center_screen, sy) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::ScaleY);
-            } else if let Some(sz) = screen_z
-                && dist_to_segment_2d(mouse, center_screen, sz) < hit_dist_threshold
-            {
-                hovered = Some(GizmoPart::ScaleZ);
+            GizmoMode::Scale => {
+                // Center uniform scale box
+                if mouse.distance(center_screen) < 14.0 {
+                    hovered = Some(GizmoPart::ScaleUniform);
+                } else if let Some(sx) = screen_x
+                    && dist_to_segment_2d(mouse, center_screen, sx) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::ScaleX);
+                } else if let Some(sy) = screen_y
+                    && dist_to_segment_2d(mouse, center_screen, sy) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::ScaleY);
+                } else if let Some(sz) = screen_z
+                    && dist_to_segment_2d(mouse, center_screen, sz) < hit_dist_threshold
+                {
+                    hovered = Some(GizmoPart::ScaleZ);
+                }
             }
-        } else if mode == TransformMode::Rotate {
-            // Check rotation rings
-            if let Some(sx) = screen_x
-                && mouse.distance(sx) < hit_dist_threshold * 1.5
-            {
-                hovered = Some(GizmoPart::RotateX);
-            } else if let Some(sy) = screen_y
-                && mouse.distance(sy) < hit_dist_threshold * 1.5
-            {
-                hovered = Some(GizmoPart::RotateY);
-            } else if let Some(sz) = screen_z
-                && mouse.distance(sz) < hit_dist_threshold * 1.5
-            {
-                hovered = Some(GizmoPart::RotateZ);
+            GizmoMode::Rotate => {
+                // Accurate 3D ring hit-testing along circle circumferences
+                let d_x = dist_to_projected_ring(
+                    mouse,
+                    camera_view_proj,
+                    viewport_rect,
+                    pivot_world,
+                    axis_y,
+                    axis_z,
+                    gizmo_3d_len,
+                );
+                let d_y = dist_to_projected_ring(
+                    mouse,
+                    camera_view_proj,
+                    viewport_rect,
+                    pivot_world,
+                    axis_z,
+                    axis_x,
+                    gizmo_3d_len,
+                );
+                let d_z = dist_to_projected_ring(
+                    mouse,
+                    camera_view_proj,
+                    viewport_rect,
+                    pivot_world,
+                    axis_x,
+                    axis_y,
+                    gizmo_3d_len,
+                );
+
+                let min_d = d_x.min(d_y).min(d_z);
+                if min_d < hit_dist_threshold * 1.25 {
+                    if (min_d - d_x).abs() < 1e-3 {
+                        hovered = Some(GizmoPart::RotateX);
+                    } else if (min_d - d_y).abs() < 1e-3 {
+                        hovered = Some(GizmoPart::RotateY);
+                    } else {
+                        hovered = Some(GizmoPart::RotateZ);
+                    }
+                }
             }
         }
     }
@@ -197,6 +246,7 @@ pub fn render_and_interact_gizmo(
     }
 
     // 2. Drag Start
+    let mut drag_started = false;
     if lmb_pressed
         && let Some(part) = gizmo_state.hovered_part
         && let Some(mouse) = mouse_pos
@@ -205,9 +255,9 @@ pub fn render_and_interact_gizmo(
         let ray = camera_screen_to_ray(mouse_vec);
 
         let initial_hit_coord = match part {
-            GizmoPart::AxisX => ray.closest_point_on_line(pivot_world, axis_x),
-            GizmoPart::AxisY => ray.closest_point_on_line(pivot_world, axis_y),
-            GizmoPart::AxisZ => ray.closest_point_on_line(pivot_world, axis_z),
+            GizmoPart::AxisX | GizmoPart::ScaleX => ray.closest_point_on_line(pivot_world, axis_x),
+            GizmoPart::AxisY | GizmoPart::ScaleY => ray.closest_point_on_line(pivot_world, axis_y),
+            GizmoPart::AxisZ | GizmoPart::ScaleZ => ray.closest_point_on_line(pivot_world, axis_z),
             _ => 0.0,
         };
 
@@ -242,14 +292,15 @@ pub fn render_and_interact_gizmo(
         gizmo_state.drag_state = Some(GizmoDragState {
             active_part: part,
             start_mouse: Vec2::new(mouse.x, mouse.y),
-            start_transform: *active_transform,
+            start_pivot: pivot_world,
             initial_hit_coord,
             initial_hit_point,
         });
+        drag_started = true;
     }
 
-    // 3. Dragging Execution
-    let is_interacting = gizmo_state.is_dragging();
+    // 3. Dragging Delta Calculation
+    let mut delta = None;
     if let Some(drag) = &gizmo_state.drag_state
         && lmb_down
         && let Some(mouse) = mouse_pos
@@ -259,84 +310,99 @@ pub fn render_and_interact_gizmo(
 
         match drag.active_part {
             GizmoPart::AxisX => {
-                let current_coord = ray.closest_point_on_line(pivot_world, axis_x);
-                let mut delta = current_coord - drag.initial_hit_coord;
+                let current_coord = ray.closest_point_on_line(drag.start_pivot, axis_x);
+                let mut d = current_coord - drag.initial_hit_coord;
                 if snap_enabled && grid_increment > 0.0 {
-                    delta = (delta / grid_increment).round() * grid_increment;
+                    d = (d / grid_increment).round() * grid_increment;
                 }
-                active_transform.translation = drag.start_transform.translation + axis_x * delta;
+                delta = Some(GizmoDelta::Translate(axis_x * d));
             }
             GizmoPart::AxisY => {
-                let current_coord = ray.closest_point_on_line(pivot_world, axis_y);
-                let mut delta = current_coord - drag.initial_hit_coord;
+                let current_coord = ray.closest_point_on_line(drag.start_pivot, axis_y);
+                let mut d = current_coord - drag.initial_hit_coord;
                 if snap_enabled && grid_increment > 0.0 {
-                    delta = (delta / grid_increment).round() * grid_increment;
+                    d = (d / grid_increment).round() * grid_increment;
                 }
-                active_transform.translation = drag.start_transform.translation + axis_y * delta;
+                delta = Some(GizmoDelta::Translate(axis_y * d));
             }
             GizmoPart::AxisZ => {
-                let current_coord = ray.closest_point_on_line(pivot_world, axis_z);
-                let mut delta = current_coord - drag.initial_hit_coord;
+                let current_coord = ray.closest_point_on_line(drag.start_pivot, axis_z);
+                let mut d = current_coord - drag.initial_hit_coord;
                 if snap_enabled && grid_increment > 0.0 {
-                    delta = (delta / grid_increment).round() * grid_increment;
+                    d = (d / grid_increment).round() * grid_increment;
                 }
-                active_transform.translation = drag.start_transform.translation + axis_z * delta;
+                delta = Some(GizmoDelta::Translate(axis_z * d));
             }
             GizmoPart::PlaneXZ => {
-                if let Some(t) = ray.intersect_plane(pivot_world, axis_y) {
-                    let mut delta = ray.point_at(t) - drag.initial_hit_point;
+                if let Some(t) = ray.intersect_plane(drag.start_pivot, axis_y) {
+                    let mut d = ray.point_at(t) - drag.initial_hit_point;
                     if snap_enabled && grid_increment > 0.0 {
-                        delta.x = (delta.x / grid_increment).round() * grid_increment;
-                        delta.z = (delta.z / grid_increment).round() * grid_increment;
+                        d.x = (d.x / grid_increment).round() * grid_increment;
+                        d.z = (d.z / grid_increment).round() * grid_increment;
                     }
-                    active_transform.translation = drag.start_transform.translation + delta;
+                    delta = Some(GizmoDelta::Translate(d));
                 }
             }
             GizmoPart::PlaneXY => {
-                if let Some(t) = ray.intersect_plane(pivot_world, axis_z) {
-                    let mut delta = ray.point_at(t) - drag.initial_hit_point;
+                if let Some(t) = ray.intersect_plane(drag.start_pivot, axis_z) {
+                    let mut d = ray.point_at(t) - drag.initial_hit_point;
                     if snap_enabled && grid_increment > 0.0 {
-                        delta.x = (delta.x / grid_increment).round() * grid_increment;
-                        delta.y = (delta.y / grid_increment).round() * grid_increment;
+                        d.x = (d.x / grid_increment).round() * grid_increment;
+                        d.y = (d.y / grid_increment).round() * grid_increment;
                     }
-                    active_transform.translation = drag.start_transform.translation + delta;
+                    delta = Some(GizmoDelta::Translate(d));
                 }
             }
             GizmoPart::PlaneYZ => {
-                if let Some(t) = ray.intersect_plane(pivot_world, axis_x) {
-                    let mut delta = ray.point_at(t) - drag.initial_hit_point;
+                if let Some(t) = ray.intersect_plane(drag.start_pivot, axis_x) {
+                    let mut d = ray.point_at(t) - drag.initial_hit_point;
                     if snap_enabled && grid_increment > 0.0 {
-                        delta.y = (delta.y / grid_increment).round() * grid_increment;
-                        delta.z = (delta.z / grid_increment).round() * grid_increment;
+                        d.y = (d.y / grid_increment).round() * grid_increment;
+                        d.z = (d.z / grid_increment).round() * grid_increment;
                     }
-                    active_transform.translation = drag.start_transform.translation + delta;
+                    delta = Some(GizmoDelta::Translate(d));
                 }
             }
             GizmoPart::RotateX => {
-                if let Some(t) = ray.intersect_plane(pivot_world, axis_x) {
-                    let v0 = (drag.initial_hit_point - pivot_world).normalize_or_zero();
-                    let v1 = (ray.point_at(t) - pivot_world).normalize_or_zero();
-                    let angle = v0.cross(v1).dot(axis_x).atan2(v0.dot(v1));
-                    let rot_delta = Quat::from_axis_angle(axis_x, angle);
-                    active_transform.rotation = rot_delta * drag.start_transform.rotation;
+                if let Some(t) = ray.intersect_plane(drag.start_pivot, axis_x) {
+                    let v0 = (drag.initial_hit_point - drag.start_pivot).normalize_or_zero();
+                    let v1 = (ray.point_at(t) - drag.start_pivot).normalize_or_zero();
+                    if v0.length_squared() > 1e-4 && v1.length_squared() > 1e-4 {
+                        let mut angle = v0.cross(v1).dot(axis_x).atan2(v0.dot(v1));
+                        if snap_enabled {
+                            let step = 15.0_f32.to_radians();
+                            angle = (angle / step).round() * step;
+                        }
+                        delta = Some(GizmoDelta::Rotate(Quat::from_axis_angle(axis_x, angle)));
+                    }
                 }
             }
             GizmoPart::RotateY => {
-                if let Some(t) = ray.intersect_plane(pivot_world, axis_y) {
-                    let v0 = (drag.initial_hit_point - pivot_world).normalize_or_zero();
-                    let v1 = (ray.point_at(t) - pivot_world).normalize_or_zero();
-                    let angle = v0.cross(v1).dot(axis_y).atan2(v0.dot(v1));
-                    let rot_delta = Quat::from_axis_angle(axis_y, angle);
-                    active_transform.rotation = rot_delta * drag.start_transform.rotation;
+                if let Some(t) = ray.intersect_plane(drag.start_pivot, axis_y) {
+                    let v0 = (drag.initial_hit_point - drag.start_pivot).normalize_or_zero();
+                    let v1 = (ray.point_at(t) - drag.start_pivot).normalize_or_zero();
+                    if v0.length_squared() > 1e-4 && v1.length_squared() > 1e-4 {
+                        let mut angle = v0.cross(v1).dot(axis_y).atan2(v0.dot(v1));
+                        if snap_enabled {
+                            let step = 15.0_f32.to_radians();
+                            angle = (angle / step).round() * step;
+                        }
+                        delta = Some(GizmoDelta::Rotate(Quat::from_axis_angle(axis_y, angle)));
+                    }
                 }
             }
             GizmoPart::RotateZ => {
-                if let Some(t) = ray.intersect_plane(pivot_world, axis_z) {
-                    let v0 = (drag.initial_hit_point - pivot_world).normalize_or_zero();
-                    let v1 = (ray.point_at(t) - pivot_world).normalize_or_zero();
-                    let angle = v0.cross(v1).dot(axis_z).atan2(v0.dot(v1));
-                    let rot_delta = Quat::from_axis_angle(axis_z, angle);
-                    active_transform.rotation = rot_delta * drag.start_transform.rotation;
+                if let Some(t) = ray.intersect_plane(drag.start_pivot, axis_z) {
+                    let v0 = (drag.initial_hit_point - drag.start_pivot).normalize_or_zero();
+                    let v1 = (ray.point_at(t) - drag.start_pivot).normalize_or_zero();
+                    if v0.length_squared() > 1e-4 && v1.length_squared() > 1e-4 {
+                        let mut angle = v0.cross(v1).dot(axis_z).atan2(v0.dot(v1));
+                        if snap_enabled {
+                            let step = 15.0_f32.to_radians();
+                            angle = (angle / step).round() * step;
+                        }
+                        delta = Some(GizmoDelta::Rotate(Quat::from_axis_angle(axis_z, angle)));
+                    }
                 }
             }
             GizmoPart::ScaleUniform => {
@@ -346,36 +412,50 @@ pub fn render_and_interact_gizmo(
                 let curr_d = (Vec2::new(mouse.x, mouse.y)
                     - Vec2::new(center_screen.x, center_screen.y))
                 .length();
-                let factor = (curr_d / start_d).clamp(0.01, 100.0);
-                active_transform.scale = drag.start_transform.scale * factor;
+                let mut factor = (curr_d / start_d).clamp(0.01, 100.0);
+                if snap_enabled && grid_increment > 0.0 {
+                    factor = (factor / grid_increment).round() * grid_increment;
+                }
+                delta = Some(GizmoDelta::Scale(Vec3::splat(factor)));
             }
             GizmoPart::ScaleX => {
-                let current_coord = ray.closest_point_on_line(pivot_world, axis_x);
+                let current_coord = ray.closest_point_on_line(drag.start_pivot, axis_x);
                 let initial_coord = drag.initial_hit_coord.abs().max(0.1);
-                let factor = (current_coord / initial_coord).clamp(0.01, 100.0);
-                active_transform.scale.x = drag.start_transform.scale.x * factor;
+                let mut factor = (current_coord / initial_coord).clamp(0.01, 100.0);
+                if snap_enabled && grid_increment > 0.0 {
+                    factor = (factor / grid_increment).round() * grid_increment;
+                }
+                delta = Some(GizmoDelta::Scale(Vec3::new(factor, 1.0, 1.0)));
             }
             GizmoPart::ScaleY => {
-                let current_coord = ray.closest_point_on_line(pivot_world, axis_y);
+                let current_coord = ray.closest_point_on_line(drag.start_pivot, axis_y);
                 let initial_coord = drag.initial_hit_coord.abs().max(0.1);
-                let factor = (current_coord / initial_coord).clamp(0.01, 100.0);
-                active_transform.scale.y = drag.start_transform.scale.y * factor;
+                let mut factor = (current_coord / initial_coord).clamp(0.01, 100.0);
+                if snap_enabled && grid_increment > 0.0 {
+                    factor = (factor / grid_increment).round() * grid_increment;
+                }
+                delta = Some(GizmoDelta::Scale(Vec3::new(1.0, factor, 1.0)));
             }
             GizmoPart::ScaleZ => {
-                let current_coord = ray.closest_point_on_line(pivot_world, axis_z);
+                let current_coord = ray.closest_point_on_line(drag.start_pivot, axis_z);
                 let initial_coord = drag.initial_hit_coord.abs().max(0.1);
-                let factor = (current_coord / initial_coord).clamp(0.01, 100.0);
-                active_transform.scale.z = drag.start_transform.scale.z * factor;
+                let mut factor = (current_coord / initial_coord).clamp(0.01, 100.0);
+                if snap_enabled && grid_increment > 0.0 {
+                    factor = (factor / grid_increment).round() * grid_increment;
+                }
+                delta = Some(GizmoDelta::Scale(Vec3::new(1.0, 1.0, factor)));
             }
         }
     }
 
     // 4. Drag End
-    if lmb_released {
+    let mut drag_ended = false;
+    if lmb_released && gizmo_state.drag_state.is_some() {
+        drag_ended = true;
         gizmo_state.drag_state = None;
     }
 
-    // 5. Drawing Gizmo Graphics with Anti-Aliased Lines & Colors
+    // 5. Drawing Gizmo Graphics
     let active_part = gizmo_state
         .drag_state
         .as_ref()
@@ -383,7 +463,7 @@ pub fn render_and_interact_gizmo(
         .or(gizmo_state.hovered_part);
 
     let col_x = if active_part == Some(GizmoPart::AxisX) || active_part == Some(GizmoPart::ScaleX) {
-        Color32::from_rgb(255, 230, 80) // Bright yellow highlight
+        Color32::from_rgb(255, 230, 80) // Yellow highlight
     } else {
         Color32::from_rgb(235, 65, 65) // Red
     };
@@ -402,108 +482,159 @@ pub fn render_and_interact_gizmo(
 
     let thickness = 3.5;
 
-    // Draw Translation
-    if mode == TransformMode::Translate {
-        // Axis lines & arrows
-        if let Some(sx) = screen_x {
-            painter.line_segment([center_screen, sx], Stroke::new(thickness, col_x));
-            draw_arrowhead(painter, center_screen, sx, col_x);
-        }
-        if let Some(sy) = screen_y {
-            painter.line_segment([center_screen, sy], Stroke::new(thickness, col_y));
-            draw_arrowhead(painter, center_screen, sy, col_y);
-        }
-        if let Some(sz) = screen_z {
-            painter.line_segment([center_screen, sz], Stroke::new(thickness, col_z));
-            draw_arrowhead(painter, center_screen, sz, col_z);
-        }
+    match mode {
+        GizmoMode::Translate => {
+            // Draw axis lines and arrowheads
+            if let Some(sx) = screen_x {
+                painter.line_segment([center_screen, sx], Stroke::new(thickness, col_x));
+                draw_arrowhead(painter, center_screen, sx, col_x);
+            }
+            if let Some(sy) = screen_y {
+                painter.line_segment([center_screen, sy], Stroke::new(thickness, col_y));
+                draw_arrowhead(painter, center_screen, sy, col_y);
+            }
+            if let Some(sz) = screen_z {
+                painter.line_segment([center_screen, sz], Stroke::new(thickness, col_z));
+                draw_arrowhead(painter, center_screen, sz, col_z);
+            }
 
-        // Draw planar square handles
-        let p_xz = pivot_world + (axis_x + axis_z) * (gizmo_3d_len * 0.35);
-        if let Some(sxz) = world_to_screen_pos(p_xz, camera_view_proj, viewport_rect) {
-            let col = if active_part == Some(GizmoPart::PlaneXZ) {
+            // Draw all three planar handles (PlaneXY, PlaneXZ, PlaneYZ)
+            let p_xy = pivot_world + (axis_x + axis_y) * (gizmo_3d_len * 0.35);
+            let p_xz = pivot_world + (axis_x + axis_z) * (gizmo_3d_len * 0.35);
+            let p_yz = pivot_world + (axis_y + axis_z) * (gizmo_3d_len * 0.35);
+
+            if let Some(sxy) = world_to_screen_pos(p_xy, camera_view_proj, viewport_rect) {
+                let col = if active_part == Some(GizmoPart::PlaneXY) {
+                    Color32::from_rgb(255, 230, 80)
+                } else {
+                    Color32::from_rgba_unmultiplied(65, 130, 245, 190)
+                };
+                let r = Rect::from_center_size(sxy, EguiVec2::splat(11.0));
+                painter.rect_filled(r, 2.0, col);
+                painter.rect_stroke(
+                    r,
+                    2.0,
+                    Stroke::new(1.0, Color32::WHITE),
+                    egui::StrokeKind::Outside,
+                );
+            }
+
+            if let Some(sxz) = world_to_screen_pos(p_xz, camera_view_proj, viewport_rect) {
+                let col = if active_part == Some(GizmoPart::PlaneXZ) {
+                    Color32::from_rgb(255, 230, 80)
+                } else {
+                    Color32::from_rgba_unmultiplied(65, 225, 75, 190)
+                };
+                let r = Rect::from_center_size(sxz, EguiVec2::splat(11.0));
+                painter.rect_filled(r, 2.0, col);
+                painter.rect_stroke(
+                    r,
+                    2.0,
+                    Stroke::new(1.0, Color32::WHITE),
+                    egui::StrokeKind::Outside,
+                );
+            }
+
+            if let Some(syz) = world_to_screen_pos(p_yz, camera_view_proj, viewport_rect) {
+                let col = if active_part == Some(GizmoPart::PlaneYZ) {
+                    Color32::from_rgb(255, 230, 80)
+                } else {
+                    Color32::from_rgba_unmultiplied(235, 65, 65, 190)
+                };
+                let r = Rect::from_center_size(syz, EguiVec2::splat(11.0));
+                painter.rect_filled(r, 2.0, col);
+                painter.rect_stroke(
+                    r,
+                    2.0,
+                    Stroke::new(1.0, Color32::WHITE),
+                    egui::StrokeKind::Outside,
+                );
+            }
+        }
+        GizmoMode::Scale => {
+            // Draw scale sticks and cube endpoints
+            if let Some(sx) = screen_x {
+                painter.line_segment([center_screen, sx], Stroke::new(thickness, col_x));
+                painter.rect_filled(Rect::from_center_size(sx, EguiVec2::splat(9.0)), 1.5, col_x);
+            }
+            if let Some(sy) = screen_y {
+                painter.line_segment([center_screen, sy], Stroke::new(thickness, col_y));
+                painter.rect_filled(Rect::from_center_size(sy, EguiVec2::splat(9.0)), 1.5, col_y);
+            }
+            if let Some(sz) = screen_z {
+                painter.line_segment([center_screen, sz], Stroke::new(thickness, col_z));
+                painter.rect_filled(Rect::from_center_size(sz, EguiVec2::splat(9.0)), 1.5, col_z);
+            }
+
+            // Central uniform scale box
+            let center_col = if active_part == Some(GizmoPart::ScaleUniform) {
                 Color32::from_rgb(255, 230, 80)
             } else {
-                Color32::from_rgba_unmultiplied(65, 225, 75, 160)
+                Color32::from_gray(220)
             };
-            painter.rect_filled(Rect::from_center_size(sxz, EguiVec2::splat(10.0)), 2.0, col);
+            painter.rect_filled(
+                Rect::from_center_size(center_screen, EguiVec2::splat(13.0)),
+                2.0,
+                center_col,
+            );
         }
-    } else if mode == TransformMode::Scale {
-        // Draw scale sticks & cubes
-        if let Some(sx) = screen_x {
-            painter.line_segment([center_screen, sx], Stroke::new(thickness, col_x));
-            painter.rect_filled(Rect::from_center_size(sx, EguiVec2::splat(8.0)), 1.5, col_x);
+        GizmoMode::Rotate => {
+            // Draw projected rotation rings
+            draw_projected_ring(
+                painter,
+                camera_view_proj,
+                viewport_rect,
+                pivot_world,
+                axis_y,
+                axis_z,
+                gizmo_3d_len,
+                if active_part == Some(GizmoPart::RotateX) {
+                    Color32::from_rgb(255, 230, 80)
+                } else {
+                    col_x
+                },
+            );
+            draw_projected_ring(
+                painter,
+                camera_view_proj,
+                viewport_rect,
+                pivot_world,
+                axis_z,
+                axis_x,
+                gizmo_3d_len,
+                if active_part == Some(GizmoPart::RotateY) {
+                    Color32::from_rgb(255, 230, 80)
+                } else {
+                    col_y
+                },
+            );
+            draw_projected_ring(
+                painter,
+                camera_view_proj,
+                viewport_rect,
+                pivot_world,
+                axis_x,
+                axis_y,
+                gizmo_3d_len,
+                if active_part == Some(GizmoPart::RotateZ) {
+                    Color32::from_rgb(255, 230, 80)
+                } else {
+                    col_z
+                },
+            );
         }
-        if let Some(sy) = screen_y {
-            painter.line_segment([center_screen, sy], Stroke::new(thickness, col_y));
-            painter.rect_filled(Rect::from_center_size(sy, EguiVec2::splat(8.0)), 1.5, col_y);
-        }
-        if let Some(sz) = screen_z {
-            painter.line_segment([center_screen, sz], Stroke::new(thickness, col_z));
-            painter.rect_filled(Rect::from_center_size(sz, EguiVec2::splat(8.0)), 1.5, col_z);
-        }
-
-        // Central uniform scale box
-        let center_col = if active_part == Some(GizmoPart::ScaleUniform) {
-            Color32::from_rgb(255, 230, 80)
-        } else {
-            Color32::from_gray(220)
-        };
-        painter.rect_filled(
-            Rect::from_center_size(center_screen, EguiVec2::splat(12.0)),
-            2.0,
-            center_col,
-        );
-    } else if mode == TransformMode::Rotate {
-        // Draw rotation circle arcs
-        draw_projected_ring(
-            painter,
-            camera_view_proj,
-            viewport_rect,
-            pivot_world,
-            axis_x,
-            axis_y,
-            axis_z,
-            gizmo_3d_len,
-            if active_part == Some(GizmoPart::RotateX) {
-                Color32::from_rgb(255, 230, 80)
-            } else {
-                col_x
-            },
-        );
-        draw_projected_ring(
-            painter,
-            camera_view_proj,
-            viewport_rect,
-            pivot_world,
-            axis_y,
-            axis_z,
-            axis_x,
-            gizmo_3d_len,
-            if active_part == Some(GizmoPart::RotateY) {
-                Color32::from_rgb(255, 230, 80)
-            } else {
-                col_y
-            },
-        );
-        draw_projected_ring(
-            painter,
-            camera_view_proj,
-            viewport_rect,
-            pivot_world,
-            axis_z,
-            axis_x,
-            axis_y,
-            gizmo_3d_len,
-            if active_part == Some(GizmoPart::RotateZ) {
-                Color32::from_rgb(255, 230, 80)
-            } else {
-                col_z
-            },
-        );
     }
 
-    is_interacting || hovered.is_some()
+    let is_interacting = gizmo_state.is_dragging();
+    let consumed = is_interacting || hovered.is_some();
+
+    GizmoInteractionResult {
+        consumed,
+        is_dragging: is_interacting,
+        delta,
+        drag_started,
+        drag_ended,
+    }
 }
 
 fn dist_to_segment_2d(p: Pos2, a: Pos2, b: Pos2) -> f32 {
@@ -515,6 +646,36 @@ fn dist_to_segment_2d(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let t = ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0);
     let proj = a + ab * t;
     p.distance(proj)
+}
+
+fn dist_to_projected_ring(
+    mouse: Pos2,
+    view_proj: Mat4,
+    viewport_rect: Rect,
+    center: Vec3,
+    u_axis: Vec3,
+    v_axis: Vec3,
+    radius: f32,
+) -> f32 {
+    let segments = 32;
+    let mut min_dist = f32::MAX;
+    let mut prev_pt = None;
+    for i in 0..=segments {
+        let theta = (i as f32 / segments as f32) * std::f32::consts::TAU;
+        let pos = center + (u_axis * theta.cos() + v_axis * theta.sin()) * radius;
+        if let Some(screen_p) = world_to_screen_pos(pos, view_proj, viewport_rect) {
+            if let Some(prev) = prev_pt {
+                let d = dist_to_segment_2d(mouse, prev, screen_p);
+                if d < min_dist {
+                    min_dist = d;
+                }
+            }
+            prev_pt = Some(screen_p);
+        } else {
+            prev_pt = None;
+        }
+    }
+    min_dist
 }
 
 fn draw_arrowhead(painter: &Painter, start: Pos2, end: Pos2, color: Color32) {
@@ -540,7 +701,6 @@ fn draw_projected_ring(
     view_proj: Mat4,
     viewport_rect: Rect,
     center: Vec3,
-    _axis_normal: Vec3,
     u_axis: Vec3,
     v_axis: Vec3,
     radius: f32,

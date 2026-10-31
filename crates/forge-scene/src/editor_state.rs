@@ -17,9 +17,31 @@ pub enum EditMode {
 pub enum TransformMode {
     #[default]
     Select,
+    BoxSelect,
     Translate,
     Rotate,
     Scale,
+}
+
+/// Active transformation gizmo visualization mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GizmoMode {
+    #[default]
+    Translate,
+    Rotate,
+    Scale,
+}
+
+/// Pointer interaction state machine for viewport input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PointerInteractionState {
+    #[default]
+    Idle,
+    ObjectPressed,
+    GizmoDragging,
+    BoxSelecting,
+    ViewportOrbiting,
+    UIInteraction,
 }
 
 /// Mesh component selection type in Edit Mode.
@@ -77,6 +99,76 @@ impl Default for SnapSettings {
             snap_to_vertex: false,
             grid_increment: 1.0,
         }
+    }
+}
+
+/// Display mode for the left toolbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ToolbarDisplayMode {
+    #[default]
+    IconOnly,
+    IconAndLabel,
+}
+
+/// Persistent workspace panel configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PanelSettings {
+    pub toolbar_width: f32,
+    pub toolbar_visible: bool,
+    pub toolbar_mode: ToolbarDisplayMode,
+    pub sidebar_width: f32,
+    pub sidebar_visible: bool,
+    pub outliner_height_ratio: f32,
+    pub timeline_height: f32,
+    pub timeline_visible: bool,
+}
+
+impl Default for PanelSettings {
+    fn default() -> Self {
+        Self {
+            toolbar_width: 52.0,
+            toolbar_visible: true,
+            toolbar_mode: ToolbarDisplayMode::IconOnly,
+            sidebar_width: 300.0,
+            sidebar_visible: true,
+            outliner_height_ratio: 0.45,
+            timeline_height: 100.0,
+            timeline_visible: false,
+        }
+    }
+}
+
+impl PanelSettings {
+    pub const SETTINGS_FILE: &'static str = "forge3d_settings.json";
+
+    /// Returns clamped panel settings within safe minimum and maximum bounds.
+    pub fn clamped(&self) -> Self {
+        Self {
+            toolbar_width: self.toolbar_width.clamp(48.0, 240.0),
+            toolbar_visible: self.toolbar_visible,
+            toolbar_mode: self.toolbar_mode,
+            sidebar_width: self.sidebar_width.clamp(220.0, 600.0),
+            sidebar_visible: self.sidebar_visible,
+            outliner_height_ratio: self.outliner_height_ratio.clamp(0.15, 0.85),
+            timeline_height: self.timeline_height.clamp(60.0, 350.0),
+            timeline_visible: self.timeline_visible,
+        }
+    }
+
+    /// Loads settings from disk if available, otherwise returns default settings.
+    pub fn load_or_default() -> Self {
+        let Ok(contents) = std::fs::read_to_string(Self::SETTINGS_FILE) else {
+            return Self::default();
+        };
+        serde_json::from_str::<Self>(&contents)
+            .map(|s| s.clamped())
+            .unwrap_or_default()
+    }
+
+    /// Saves settings to disk as formatted JSON.
+    pub fn save(&self) -> Result<(), std::io::Error> {
+        let json = serde_json::to_string_pretty(&self.clamped()).map_err(std::io::Error::other)?;
+        std::fs::write(Self::SETTINGS_FILE, json)
     }
 }
 
@@ -173,10 +265,12 @@ impl ModalTransformState {
 pub struct EditorState {
     pub edit_mode: EditMode,
     pub transform_mode: TransformMode,
+    pub active_gizmo_mode: GizmoMode,
     pub selection_element: SelectionElement,
     pub transform_orientation: TransformOrientation,
     pub pivot_point: PivotPoint,
     pub snap_settings: SnapSettings,
+    pub panel_settings: PanelSettings,
     pub cursor_3d: Vec3,
     pub show_grid: bool,
     pub show_axes: bool,
@@ -195,6 +289,14 @@ pub struct EditorState {
     pub modal_transform: ModalTransformState,
     #[serde(skip)]
     pub transform_clipboard: Option<Transform>,
+    #[serde(skip)]
+    pub box_select_start: Option<Vec2>,
+    #[serde(skip)]
+    pub pointer_state: PointerInteractionState,
+    #[serde(skip)]
+    pub pointer_press_pos: Option<Vec2>,
+    #[serde(skip)]
+    pub show_debug_info: bool,
 }
 
 impl Default for EditorState {
@@ -202,10 +304,12 @@ impl Default for EditorState {
         Self {
             edit_mode: EditMode::Object,
             transform_mode: TransformMode::Select,
+            active_gizmo_mode: GizmoMode::Translate,
             selection_element: SelectionElement::Vertex,
             transform_orientation: TransformOrientation::Global,
             pivot_point: PivotPoint::MedianPoint,
             snap_settings: SnapSettings::default(),
+            panel_settings: PanelSettings::default(),
             cursor_3d: Vec3::ZERO,
             show_grid: true,
             show_axes: true,
@@ -218,6 +322,10 @@ impl Default for EditorState {
             is_camera_view: false,
             modal_transform: ModalTransformState::default(),
             transform_clipboard: None,
+            box_select_start: None,
+            pointer_state: PointerInteractionState::Idle,
+            pointer_press_pos: None,
+            show_debug_info: false,
         }
     }
 }

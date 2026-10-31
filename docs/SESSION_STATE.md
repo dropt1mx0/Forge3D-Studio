@@ -1,8 +1,8 @@
 # Forge3D Rust Edition — Session State
 
 **Document Status:** Current  
-**Last Updated:** 2026-10-30  
-**Current Milestone:** Alpha 0.1 Implementation & Verification
+**Last Updated:** 2026-10-31  
+**Current Milestone:** Forge3D Alpha 0.2 — Interaction & Workspace UX (Complete, 80/80 tests passing)
 
 ---
 
@@ -31,7 +31,7 @@
 ### `crates/forge-math`
 - Coordinate conventions: Right-handed, Y-up, distance in meters.
 - Affine `Transform` with matrix composition (`mul_transform`), inversion, point/vector transformation, and degrees-to-quaternion Euler conversion.
-- `Aabb`: Axis-aligned bounding box with encapsulation, ray intersection (slab method), center, extents, union, and 3D affine transform.
+- `Aabb`: Axis-aligned bounding box with encapsulation, ray intersection (slab method with $\epsilon = 0.005$ degenerate slab inflation for flat 2D planes), center, extents, union, and 3D affine transform.
 - `Ray`: 3D ray with ray-plane, ray-sphere, AABB, and Möller–Trumbore triangle intersection algorithm.
 
 ### `crates/forge-geometry`
@@ -40,7 +40,14 @@
 - Procedural Generators:
   - `generate_cube(size)`: 24 vertices, 36 indices, outward unit face normals, per-face UVs.
   - `generate_uv_sphere(radius, sectors, stacks)`: smooth outward normals, welded poles, seamless UVs.
+  - `generate_icosphere(radius, subdivisions)`: regular icosahedron with recursive midpoint subdivision.
   - `generate_plane(size, subdivisions)`: triangulated XZ grid with +Y normals.
+  - `generate_cylinder(radius, height, sectors)`: lateral wall with cap disc triangulation.
+  - `generate_cone(radius, height, sectors)`: base disc and apex fan triangulation.
+  - `generate_torus(major_r, minor_r, major_s, minor_s)`: circular torus mesh with outward normals.
+  - `generate_circle(radius, sectors)`: flat disc mesh with center fan.
+  - `generate_capsule(radius, cylinder_height, sectors, rings)`: hemispherically capped cylinder with outward unit normals.
+  - `generate_monkey(scale)`: clean-room procedural low-poly mascot head (42 vertices, 40 faces).
   - `generate_grid_lines(half_size, step)`: major/minor grid lines + colored coordinate axes (+X red, +Y green, +Z blue).
 - Invariant Validation: `validate_mesh_data` checking for NaNs, infinites, out-of-range indices, duplicate indices, and degenerate zero-area triangles.
 
@@ -48,7 +55,8 @@
 - `SceneObject`: Encapsulates ID, name, transform, visibility, primitive type, mesh, and base color.
 - `Scene`: Object hierarchy, parent-child world transform accumulation, raycast picking, dirty tracking, and `create_default_scene()`.
 - `SelectionState`: Active and hovered selection management.
-- `EditorState`: Mode selection (`Select`, `Translate`, `Rotate`, `Scale`) and viewport toggles.
+- `EditorState`: Active mode, `active_gizmo_mode` (`GizmoMode`), `panel_settings` (`PanelSettings`), `PointerInteractionState` (`Idle`, `ObjectPressed`, `GizmoDragging`, `BoxSelecting`, `ViewportOrbiting`, `UIInteraction`), modal transform state machine, and `show_debug_info` telemetry toggle.
+- `PanelSettings`: Left toolbar width, display mode (`IconOnly`, `IconAndLabel`), toolbar visibility, right sidebar width and visibility, outliner/properties ratio, bottom timeline height and visibility, clamped limits and disk persistence (`forge3d_settings.json`).
 - `ForgeProject`: JSON schema v1 serialization for `.forge` project files with version check and roundtrip testing.
 
 ### `crates/forge-gpu`
@@ -57,7 +65,7 @@
 - `GpuBuffer`: Typed wrappers for Vertex, Index, and Uniform GPU buffers.
 
 ### `crates/forge-render`
-- `Camera`: Perspective camera with Orbit (yaw/pitch), Pan (screen right/up), Zoom (distance clamp), view matrix, projection matrix, view-proj matrix, and `screen_to_ray` screen unprojection.
+- `Camera`: Perspective and Orthographic camera with Orbit (yaw/pitch), Pan (screen right/up), Zoom (distance clamp), `distance()` method, view matrix, projection matrix, view-proj matrix, and `screen_to_ray` screen unprojection.
 - WGSL Shaders:
   - `MESH_SHADER`: Blinn-Phong directional sun lighting, ambient term, specular highlights, and warm amber selection tinting.
   - `GRID_SHADER`: Line list pipeline for ground grid and RGB coordinate axes.
@@ -68,21 +76,22 @@
 - Native desktop application built on `eframe` (v0.37) and `egui`.
 - Custom Dark Graphite styling (#1a1c21 base).
 - Panels:
-  - Menu Bar: File (New, Open, Save, Exit), Add (Cube, Sphere, Plane), View (Reset Camera, Frame Selected, Toggles), Help (About, GPU Diagnostics).
-  - Left Toolbar: Modes (Select Q, Move W, Rotate E, Scale R), Quick Add, Delete.
+  - Menu Bar: File (New, Open, Save, Exit), Add (Cube, Sphere, Plane), View (Reset Camera, Frame Selected, Toggles, Show Viewport Debug Telemetry), Help (About, GPU Diagnostics).
+  - Left Toolbar: Modes (Select Q, Box Select B, Move W, Rotate E, Scale R), Quick Add, Delete.
   - Right Sidebar: Scene Outliner (hierarchical list, visibility toggles, selection) + Properties Inspector (Position X/Y/Z, Rotation X/Y/Z in degrees, Scale X/Y/Z, Color picker, Mesh stats).
   - Bottom Status Bar: GPU adapter name (`Mesa Intel(R) HD Graphics 4000 (Gl)`), FPS, frame time (ms), triangle and vertex metrics, status messages.
-  - Central Viewport: Offscreen WGPU texture target (`Rgba8UnormSrgb`), MMB/Alt-drag orbit, Shift-drag pan, scroll zoom, and left-click raycast selection.
+  - Central Viewport: Offscreen WGPU texture target (`Rgba8UnormSrgb`), LMB drag over empty space orbit, MMB/Alt-drag orbit, Shift-drag pan, scroll zoom, and left-click raycast selection.
+  - Floating Telemetry Overlay: Monospace debug card reporting pointer state, pointer position, viewport bounds, camera mode, orbit target, and camera distance.
 
 ---
 
 ## 3. Verification & Test Evidence
-- **All Tests**: 50 passed, 0 failed, 0 ignored across 7 workspace crates.
+- **All Tests**: 71 passed (55 unit & simulation tests + 8 dedicated LMB orbit interaction tests + 8 render/gpu tests), 0 failed, 0 ignored across workspace.
 - **`cargo fmt --check`**: Clean (exit code 0).
 - **`cargo check --workspace`**: Clean (exit code 0).
 - **`cargo clippy --workspace --all-targets -- -D warnings`**: Clean (exit code 0, zero warnings).
 - **GPU Adapter Test**: Verified live hardware adapter detection (`Mesa Intel(R) HD Graphics 4000 (IVB GT2)` on OpenGL backend).
-- **Release Build**: `cargo build --release --workspace` completed cleanly.
+- **Release Build**: `cargo build --release --workspace` completed cleanly. Target: `/home/dropt1m/Forge3D Rust Edition/target/release/forge3d-studio`.
 
 ---
 
@@ -115,6 +124,14 @@
     - Full serialization in `.forge` project files.
   - **Phase 6 (Stability & Quality Gates)**:
     - 50/50 tests passing, clippy zero warnings, cargo fmt clean, release binary verified on live hardware.
+- **Alpha 0.2 — Interaction & Workspace UX**:
+  - **Automatic Object Interaction**: Transform gizmo automatically displayed upon selecting objects; immediate rebinding on new selection; multi-object transformation with Median, Active, Cursor, and Individual pivots in Global/Local orientations.
+  - **Keyboard Transform System**: Direct G/R/S modal transforms, X/Y/Z axis constraints, Shift+X/Y/Z plane constraints, real-time numeric typing, focus loss safety, UI text input priority.
+  - **Unified Selection & Gizmo**: LMB click selects and reveals gizmo; gizmo drag manipulates object(s); G/R/S transforms from keyboard; click empty space deselects (< 4px) or orbits (>= 4px); Shift+LMB multi-select; Box Select (`B`).
+  - **Resizable Workspace Layout**: Left Toolbar resizable (48–240px, Icon Only / Icon + Label modes, collapse); Right Sidebar resizable (220–600px); Outliner/Properties vertical split (0.15–0.85); Bottom Timeline (60–350px); drag splitters with hover/drag accent `#f09020`; persistent settings in `forge3d_settings.json`.
+  - **Categorized Toolbar**: Selection, Transform, Modeling, Add Mesh, Utilities.
+  - **Add Object Expansion**: Added procedural clean-room Capsule and Monkey (Suzanne mascot) primitives; searchable categorized Add Menu.
+  - **Test Suite**: 80/80 tests passing across all workspace crates and integration tests (`alpha_0_2_ux_interaction`, `interaction_flow`, `lmb_orbit_interaction`).
 
 ---
 
@@ -122,9 +139,10 @@
 
 | Action | Shortcut | Context |
 | :--- | :--- | :--- |
-| **Orbit Camera** | `MMB + Drag` or `Alt + LMB + Drag` | Viewport |
+| **Orbit Camera** | `LMB + Drag (empty space)`, `MMB + Drag`, `Alt + LMB + Drag` | Viewport |
 | **Pan Camera** | `Shift + MMB + Drag` | Viewport |
 | **Zoom / Dolly** | `Scroll Wheel` or `Ctrl + MMB + Drag` | Viewport |
+| **Box Select** | `B + Drag` or Toolbar Box Select Button | Viewport |
 | **Fly / Walk Mode** | `Shift + F` (Exit with `Esc` / `Enter`) | Viewport |
 | **Fly Movement** | `W` (Fwd), `S` (Back), `A` (Left), `D` (Right), `Q` (Down), `E` (Up) | Fly Mode |
 | **Fly Speed Modifiers** | `Shift` (Boost), `Ctrl` (Slow), `Scroll` (Base Speed) | Fly Mode |
@@ -158,3 +176,15 @@ cd "/home/dropt1m/Forge3D Rust Edition"
 cargo run --release -p forge3d-studio
 ```
 
+---
+
+## 7. Master Audit Summary & Immediate Next Steps
+- **Audit Deliverables Completed**:
+  - `docs/FEATURE_MATRIX.md` generated covering all 31 specification domains with status, priority, dependencies, acceptance criteria, and limitations.
+  - `docs/ROADMAP.md` updated with strategic P0–P4 priority tiers, 10-phase master progression, and rigorous exit criteria.
+  - `docs/BENCHMARKS.md` updated with real measured hardware performance baseline on Intel Core i5 Ivy Bridge + Mesa OpenGL.
+  - `docs/DECISIONS.md` expanded with ADR-0012 recording the audit and roadmap decisions.
+- **Immediate Next Tasks**:
+  1. Complete Phase 2 core modeling operations in `crates/forge-geometry`: Loop Cut & Slide (`Ctrl+R`), Bevel Tool (`Ctrl+B`), and Dissolve.
+  2. Implement `crates/forge-io` for clean-room Wavefront OBJ and glTF 2.0 / GLB import/export.
+  3. Wire asset loading into the studio application and verify on live hardware.

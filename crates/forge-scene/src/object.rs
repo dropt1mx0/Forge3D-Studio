@@ -16,6 +16,8 @@ pub enum PrimitiveType {
     Cone,
     Torus,
     Grid,
+    Capsule,
+    Monkey,
     Camera,
     Custom,
 }

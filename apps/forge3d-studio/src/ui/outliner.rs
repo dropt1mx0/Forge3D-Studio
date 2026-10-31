@@ -167,6 +167,8 @@ fn render_object_node(
                 PrimitiveType::Cylinder => "🛢",
                 PrimitiveType::Cone => "▲",
                 PrimitiveType::Torus => "🍩",
+                PrimitiveType::Capsule => "💊",
+                PrimitiveType::Monkey => "🐵",
                 PrimitiveType::Camera => "📷",
                 PrimitiveType::Custom => "📐",
             };
