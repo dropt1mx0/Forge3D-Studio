@@ -799,10 +799,7 @@ impl Forge3dStudioApp {
         self.camera.frame_box(&bbox);
         self.status_message = "Framed All".to_string();
     }
-}
-
-impl eframe::App for Forge3dStudioApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    pub fn render_app_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 
         // 1. Measure frame delta and FPS
@@ -1175,6 +1172,12 @@ impl eframe::App for Forge3dStudioApp {
                     }
                 });
         }
+    }
+}
+
+impl eframe::App for Forge3dStudioApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.render_app_ui(ui);
     }
 }
 

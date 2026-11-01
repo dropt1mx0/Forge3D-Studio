@@ -791,3 +791,283 @@ fn test_drag_camera_change_during_drag() {
         .translation;
     assert!(cube_pos.is_finite());
 }
+
+fn make_test_input() -> egui::RawInput {
+    egui::RawInput {
+        focused: true,
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 720.0),
+        )),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_egui_render_viewport_live_drag() {
+    let mut app = Forge3dStudioApp::new_headless();
+    let ctx = egui::Context::default();
+
+    // Screen center for default 1280x720 window
+    let center = egui::pos2(640.0, 360.0);
+
+    // Frame 1: Move mouse to center
+    let mut raw_input = make_test_input();
+    raw_input.events.push(egui::Event::PointerMoved(center));
+
+    let mut out1 = ctx.run_ui(raw_input.clone(), |ui| {
+        forge3d_studio::ui::viewport::render_viewport(&mut app, ui);
+    });
+    out1.textures_delta.clear();
+
+    println!(
+        "After Frame 1: pointer_state = {:?}",
+        app.editor_state.pointer_state
+    );
+
+    // Frame 2: Press Primary mouse button at center (over the Cube)
+    let mut raw_input2 = make_test_input();
+    raw_input2.events.push(egui::Event::PointerMoved(center));
+    raw_input2.events.push(egui::Event::PointerButton {
+        pos: center,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::default(),
+    });
+
+    let mut out2 = ctx.run_ui(raw_input2, |ui| {
+        forge3d_studio::ui::viewport::render_viewport(&mut app, ui);
+    });
+    out2.textures_delta.clear();
+
+    println!(
+        "After Frame 2 (press): pointer_state = {:?}",
+        app.editor_state.pointer_state
+    );
+    println!(
+        "object_drag_state is_some = {}",
+        app.object_drag_state.is_some()
+    );
+
+    // Frame 3: Drag mouse by 50px
+    let moved_pos = egui::pos2(690.0, 360.0);
+    let mut raw_input3 = make_test_input();
+    raw_input3.events.push(egui::Event::PointerMoved(moved_pos));
+
+    let mut out3 = ctx.run_ui(raw_input3, |ui| {
+        forge3d_studio::ui::viewport::render_viewport(&mut app, ui);
+    });
+    out3.textures_delta.clear();
+
+    println!(
+        "After Frame 3 (drag): pointer_state = {:?}",
+        app.editor_state.pointer_state
+    );
+    assert_eq!(
+        app.editor_state.pointer_state,
+        PointerInteractionState::ObjectDragging
+    );
+
+    let cube_id = app.selection.active_id.expect("Cube must be selected");
+    let moved_translation = app
+        .scene
+        .get_object(cube_id)
+        .unwrap()
+        .local_transform
+        .translation;
+    println!(
+        "Initial pos: (0.0, 0.5, 0.0), Moved pos: {:?}",
+        moved_translation
+    );
+    assert!(
+        (moved_translation - Vec3::new(0.0, 0.5, 0.0)).length() > 0.01,
+        "Cube must have moved"
+    );
+
+    // Frame 4: Release mouse button
+    let mut raw_input4 = make_test_input();
+    raw_input4.events.push(egui::Event::PointerMoved(moved_pos));
+    raw_input4.events.push(egui::Event::PointerButton {
+        pos: moved_pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::default(),
+    });
+
+    let mut out4 = ctx.run_ui(raw_input4, |ui| {
+        forge3d_studio::ui::viewport::render_viewport(&mut app, ui);
+    });
+    out4.textures_delta.clear();
+
+    assert_eq!(
+        app.editor_state.pointer_state,
+        PointerInteractionState::Idle
+    );
+    assert!(
+        app.object_drag_state.is_none(),
+        "Drag state cleared on release"
+    );
+    assert!(
+        app.history.can_undo(),
+        "Undo stack must contain the drag transform"
+    );
+
+    // Frame 5: Undo (Ctrl + Z)
+    app.undo();
+    let undone_pos = app
+        .scene
+        .get_object(cube_id)
+        .unwrap()
+        .local_transform
+        .translation;
+    assert!(
+        (undone_pos - Vec3::new(0.0, 0.5, 0.0)).length() < 1e-4,
+        "Undo must restore initial position"
+    );
+}
+
+#[test]
+fn test_full_app_ui_live_drag_and_ui_isolation() {
+    let mut app = Forge3dStudioApp::new_headless();
+    let ctx = egui::Context::default();
+
+    // 1. First test: Clicking on Toolbar (UI element at x=25, y=150) must set UIInteraction
+    let toolbar_pos = egui::pos2(25.0, 150.0);
+    let mut raw_toolbar = make_test_input();
+    raw_toolbar
+        .events
+        .push(egui::Event::PointerMoved(toolbar_pos));
+    raw_toolbar.events.push(egui::Event::PointerButton {
+        pos: toolbar_pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::default(),
+    });
+
+    let mut out_tb = ctx.run_ui(raw_toolbar, |ui| {
+        app.render_app_ui(ui);
+    });
+    out_tb.textures_delta.clear();
+
+    assert_eq!(
+        app.editor_state.pointer_state,
+        PointerInteractionState::UIInteraction,
+        "Clicking on toolbar must be UIInteraction"
+    );
+    assert!(
+        app.object_drag_state.is_none(),
+        "Toolbar click must not start object drag"
+    );
+
+    // Release on toolbar
+    let mut raw_tb_rel = make_test_input();
+    raw_tb_rel.events.push(egui::Event::PointerButton {
+        pos: toolbar_pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::default(),
+    });
+    let mut out_tb_rel = ctx.run_ui(raw_tb_rel, |ui| {
+        app.render_app_ui(ui);
+    });
+    out_tb_rel.textures_delta.clear();
+    assert_eq!(
+        app.editor_state.pointer_state,
+        PointerInteractionState::Idle
+    );
+
+    // 2. Second test: Click on the 3D Cube inside the Central Viewport!
+    // Viewport center in full app: toolbar is ~48px left, sidebar is ~220px right
+    let vp_center = egui::pos2(550.0, 360.0);
+
+    // Frame 1: Hover over Cube
+    let mut raw_app1 = make_test_input();
+    raw_app1.events.push(egui::Event::PointerMoved(vp_center));
+    let mut out_app1 = ctx.run_ui(raw_app1, |ui| {
+        app.render_app_ui(ui);
+    });
+    out_app1.textures_delta.clear();
+
+    // Frame 2: Press Primary mouse button on Cube
+    let mut raw_app2 = make_test_input();
+    raw_app2.events.push(egui::Event::PointerMoved(vp_center));
+    raw_app2.events.push(egui::Event::PointerButton {
+        pos: vp_center,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::default(),
+    });
+
+    let mut out_app2 = ctx.run_ui(raw_app2, |ui| {
+        app.render_app_ui(ui);
+    });
+    out_app2.textures_delta.clear();
+
+    assert_eq!(
+        app.editor_state.pointer_state,
+        PointerInteractionState::ObjectPressed
+    );
+    assert!(
+        app.object_drag_state.is_some(),
+        "Drag state must be created on Cube press"
+    );
+
+    // Frame 3: Drag mouse by 40px
+    let moved_vp = egui::pos2(590.0, 360.0);
+    let mut raw_app3 = make_test_input();
+    raw_app3.events.push(egui::Event::PointerMoved(moved_vp));
+
+    let mut out_app3 = ctx.run_ui(raw_app3, |ui| {
+        app.render_app_ui(ui);
+    });
+    out_app3.textures_delta.clear();
+
+    assert_eq!(
+        app.editor_state.pointer_state,
+        PointerInteractionState::ObjectDragging
+    );
+
+    let cube_id = app.selection.active_id.expect("Cube is selected");
+    let moved_pos = app
+        .scene
+        .get_object(cube_id)
+        .unwrap()
+        .local_transform
+        .translation;
+    assert!(
+        (moved_pos - Vec3::new(0.0, 0.5, 0.0)).length() > 0.01,
+        "Cube translated in full app"
+    );
+
+    // Frame 4: Release mouse
+    let mut raw_app4 = make_test_input();
+    raw_app4.events.push(egui::Event::PointerMoved(moved_vp));
+    raw_app4.events.push(egui::Event::PointerButton {
+        pos: moved_vp,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::default(),
+    });
+
+    let mut out_app4 = ctx.run_ui(raw_app4, |ui| {
+        app.render_app_ui(ui);
+    });
+    out_app4.textures_delta.clear();
+
+    assert_eq!(
+        app.editor_state.pointer_state,
+        PointerInteractionState::Idle
+    );
+    assert!(app.object_drag_state.is_none());
+    assert!(app.history.can_undo());
+
+    // Frame 5: Undo
+    app.undo();
+    let undone = app
+        .scene
+        .get_object(cube_id)
+        .unwrap()
+        .local_transform
+        .translation;
+    assert!((undone - Vec3::new(0.0, 0.5, 0.0)).length() < 1e-4);
+}

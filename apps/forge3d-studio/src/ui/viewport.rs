@@ -824,14 +824,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         ui.ctx().request_repaint();
     }
 
-    let ui_captures_pointer = !is_pointer_in_viewport
-        || ui.ctx().egui_wants_pointer_input()
-        || app.editor_state.pointer_state == PointerInteractionState::UIInteraction;
-
-    // UI Interaction tracking: if pointer was pressed outside viewport (or egui captured it)
-    if input.pointer.button_pressed(PointerButton::Primary) && ui_captures_pointer {
+    // UI Interaction tracking: if pointer was pressed outside viewport (or obscured by higher UI window)
+    if input.pointer.button_pressed(PointerButton::Primary)
+        && (!is_pointer_in_viewport || !response.hovered())
+    {
         app.editor_state.pointer_state = PointerInteractionState::UIInteraction;
     }
+
+    let is_ui_interacting =
+        app.editor_state.pointer_state == PointerInteractionState::UIInteraction;
 
     let view_proj = app.camera.view_proj_matrix();
     let eye = app.camera.eye;
@@ -904,8 +905,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.transform_orientation,
                     orientation_quat,
                     mouse_pos,
-                    lmb_pressed && !input.modifiers.alt && !ui_captures_pointer,
-                    lmb_down && !input.modifiers.alt && !ui_captures_pointer,
+                    lmb_pressed && !input.modifiers.alt && !is_ui_interacting,
+                    lmb_down && !input.modifiers.alt && !is_ui_interacting,
                     lmb_released,
                     app.editor_state.snap_settings.enabled,
                     app.editor_state.snap_settings.grid_increment,
@@ -1052,8 +1053,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.transform_orientation,
                     Quat::IDENTITY,
                     mouse_pos,
-                    lmb_pressed && !input.modifiers.alt && !ui_captures_pointer,
-                    lmb_down && !input.modifiers.alt && !ui_captures_pointer,
+                    lmb_pressed && !input.modifiers.alt && !is_ui_interacting,
+                    lmb_down && !input.modifiers.alt && !is_ui_interacting,
                     lmb_released,
                     app.editor_state.snap_settings.enabled,
                     app.editor_state.snap_settings.grid_increment,
@@ -1073,7 +1074,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     }
 
     // Update hover target under cursor
-    if !ui_captures_pointer
+    if !is_ui_interacting
         && is_pointer_in_viewport
         && !lmb_down
         && !app.editor_state.fly_nav_active
@@ -1086,7 +1087,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
         let hover_hit = app.scene.raycast(&ray).map(|(id, _)| id);
         app.selection.set_hovered(hover_hit);
-    } else if ui_captures_pointer {
+    } else if is_ui_interacting {
         app.selection.set_hovered(None);
     }
 
@@ -1101,7 +1102,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // A. Pointer Press Transition (Determine interaction state)
         if lmb_pressed
             && is_pointer_in_viewport
-            && !ui_captures_pointer
+            && !is_ui_interacting
             && let Some(pos) = mouse_pos
         {
             if gizmo_consumed {

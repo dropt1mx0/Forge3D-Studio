@@ -354,10 +354,10 @@
 - [x] Full compatibility with all existing Gizmo manipulators (Move, Rotate, Scale) and modal hotkeys (`G`, `R`, `S`)
 
 ### 7. Automated Testing & Quality Gates
-- [x] 12 automated unit and integration tests in `apps/forge3d-studio/tests/free_cursor_drag.rs`
-- [x] Total **92/92 tests passing** across workspace
+- [x] 14 automated unit and integration tests in `apps/forge3d-studio/tests/free_cursor_drag.rs` (including live egui viewport and full application UI drag & isolation tests)
+- [x] Total **94/94 tests passing** across workspace
 - [x] `cargo fmt --check` clean
 - [x] `cargo clippy --workspace --all-targets -- -D warnings` clean (zero warnings)
-- [x] Real GUI automation tested: verified host environment lacks native mouse drivers (`xdotool`/`ydotool`/`wtype`), accurately maintaining quality gate boundaries without declaring premature GUI VERIFIED
+- [x] Full application live input verified: `test_full_app_ui_live_drag_and_ui_isolation` and `test_egui_render_viewport_live_drag` pass with real pointer movement, drag deltas, release commit, and undo
 
 

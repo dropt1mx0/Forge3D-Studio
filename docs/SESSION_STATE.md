@@ -2,7 +2,7 @@
 
 **Document Status:** Current  
 **Last Updated:** 2026-11-01  
-**Current Milestone:** Forge3D Alpha 0.2.1 — Free Cursor Object Dragging (Complete, 92/92 tests passing)
+**Current Milestone:** Forge3D Alpha 0.2.1 — Free Cursor Object Dragging (Complete, 94/94 tests passing)
 
 ---
 
@@ -86,7 +86,7 @@
 ---
 
 ## 3. Verification & Test Evidence
-- **All Tests**: 92 passed (55 unit & simulation tests + 8 dedicated LMB orbit interaction tests + 8 render/gpu tests + 7 Alpha 0.2 UX tests + 12 Free Cursor Drag tests + 2 other tests), 0 failed, 0 ignored across workspace.
+- **All Tests**: 94 passed (55 unit & simulation tests + 8 dedicated LMB orbit interaction tests + 8 render/gpu tests + 7 Alpha 0.2 UX tests + 14 Free Cursor Drag tests + 2 other tests), 0 failed, 0 ignored across workspace.
 - **`cargo fmt --check`**: Clean (exit code 0).
 - **`cargo check --workspace`**: Clean (exit code 0).
 - **`cargo clippy --workspace --all-targets -- -D warnings`**: Clean (exit code 0, zero warnings).
@@ -136,9 +136,9 @@
   - **World-Space Drag Calculation**: Camera-aligned working plane passing through initial grab point with normal opposing camera forward (`-camera.forward().normalize()`). Ray-plane projection tracking cursor movement with zero perspective skewing.
   - **Zero-Jump Grab Point Preservation**: Initial offset between grab point and each object centroid retained throughout drag (`initial_offset = obj.translation - hit_point`).
   - **Multi-Object Synchronization**: Dragging any selected object synchronously translates all selected objects, preserving their relative positions, recorded as a single atomic `Action::MultiTransform` in undo history.
-  - **Input Priority Enforcement**: Strict priority order: UI Interaction (`egui_wants_pointer_input`) > Gizmo Handles (`gizmo_consumed`) > Object Drag > Selection > Box Selection > Viewport Orbit. No accidental drag on UI or Gizmo clicks.
+  - **Input Priority Enforcement**: Strict priority order: UI Interaction (`!response.hovered()`) > Gizmo Handles (`gizmo_consumed`) > Object Drag > Selection > Box Selection > Viewport Orbit. Viewport canvas widget is correctly identified via `response.hovered()`, avoiding spurious self-capture by `egui_wants_pointer_input()`.
   - **Edge Case Protection**: Safe rejection of parallel rays (`|denom| < 1e-4`), distance clamp ($t \le 10000.0$), delta clamp ($|\Delta| \le 5000.0$), window focus loss cancellation, and `Escape` key rollback.
-  - **Test Suite**: 12 dedicated automated tests in `tests/free_cursor_drag.rs`, bringing workspace total to **92/92 tests passing**.
+  - **Test Suite**: 14 dedicated automated tests in `tests/free_cursor_drag.rs`, bringing workspace total to **94/94 tests passing**.
 
 ---
 
