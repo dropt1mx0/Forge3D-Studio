@@ -116,4 +116,44 @@ When `ViewportOrbiting` is active, pointer release measures the Euclidean distan
 **Focus Loss & Release Safety**:
 If `lmb_down` is false while the state is not `Idle` (e.g. pointer released outside viewport or window lost focus), the state machine immediately resets to `Idle`, clearing press positions and active drag states.
 
+### 7. Free Cursor Object Dragging Pipeline
+To enable direct, unconstrained manipulation of 3D objects across the viewport, Forge3D implements free cursor dragging via camera-aligned ray-plane projection:
+
+```text
+[LMB Down on Mesh Geometry]
+         ↓
+1. Construct Camera Ray from Pointer Pos
+2. Create Working Plane at Grab Point:
+   - plane_point = hit_point
+   - plane_normal = -camera.forward().normalize()
+3. Compute Grab Offsets:
+   - initial_offset_i = obj_i.translation - hit_point
+4. Transition to PointerInteractionState::ObjectPressed
+         ↓
+[Pointer Dragging (distance >= 3.0 px)]
+         ↓
+5. Transition to PointerInteractionState::ObjectDragging
+6. Per-frame Camera Ray:
+   - current_hit = Ray ∩ Working Plane
+   - delta = current_hit - hit_point (with bounds & finite validation)
+7. Update Translations:
+   - obj_i.translation = current_hit + initial_offset_i
+   - (or initial_translation_i + delta)
+         ↓
+[LMB Released]
+         ↓
+8. Commit single atomic Action::MultiTransform to HistoryStack
+9. Transition back to PointerInteractionState::Idle
+```
+
+- **Camera-Aligned Working Plane**: Constructing the plane normal as `-camera.forward().normalize()` ensures the working plane is perfectly parallel to the camera sensor. This provides natural 1:1 mouse movement mapping in world units, avoiding perspective distortion or projection collapse.
+- **Grab Point Offset Retention**: Storing `initial_offsets` for all selected entities guarantees the object never jumps on frame 0 ($\Delta = 0$ at the initial hit point). The cursor stays anchored to the exact surface point clicked.
+- **Multi-Object Synchronous Drag**: When multiple objects are selected, the single calculated world-space delta $\Delta$ is applied to all selected objects, preserving their relative positions.
+- **Edge Case Robustness**:
+  - Rays parallel to plane: Denominator threshold $|ray.dir \cdot plane.normal| < 10^{-4}$ safely returns early with no transform mutation.
+  - Backward rays ($t \le 0.0$): Discarded.
+  - Horizon / divergent rays ($t > 10000.0$ or $|\Delta| > 5000.0$): Clamped to prevent float overflow or NaN corruption.
+  - Escape key / Focus loss: Reverts all selected objects to their `initial_transforms` without polluting the undo stack.
+
+
 

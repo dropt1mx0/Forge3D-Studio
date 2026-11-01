@@ -4,7 +4,7 @@ use eframe::egui;
 use forge_core::id::ObjectId;
 use forge_geometry::{EditSelectionMode, EditableMesh};
 use forge_gpu::GpuAdapterInfo;
-use forge_math::Transform;
+use forge_math::{Ray, Transform, Vec2, Vec3};
 use forge_render::{Camera, ViewportRenderer};
 use forge_scene::{Action, EditMode, EditorState, HistoryStack, Scene, SelectionState};
 
@@ -15,6 +15,29 @@ use crate::ui::properties::render_properties;
 use crate::ui::status_bar::render_status_bar;
 use crate::ui::toolbar::render_toolbar;
 use crate::ui::viewport::render_viewport;
+
+/// Active state for free cursor object dragging in world space.
+#[derive(Debug, Clone)]
+pub struct ObjectDragState {
+    /// Initial 3D intersection point on the object's surface where dragging started.
+    pub initial_hit_point: Vec3,
+    /// Working plane point through which the camera ray will intersect during drag.
+    pub plane_point: Vec3,
+    /// Working plane normal facing the camera.
+    pub plane_normal: Vec3,
+    /// Initial local transforms of all selected objects before drag began.
+    pub initial_transforms: std::collections::HashMap<ObjectId, Transform>,
+    /// Initial offsets from initial hit point to each selected object's translation.
+    pub initial_offsets: std::collections::HashMap<ObjectId, Vec3>,
+    /// Screen-space pointer position when pressed.
+    pub initial_pointer_pos: Vec2,
+    /// Whether the drag threshold has been exceeded and active moving is happening.
+    pub is_active_drag: bool,
+    /// The object that was clicked on.
+    pub pressed_object_id: Option<ObjectId>,
+    /// Whether this click started on an already selected object.
+    pub was_already_selected: bool,
+}
 
 pub struct Forge3dStudioApp {
     pub scene: Scene,
@@ -52,6 +75,9 @@ pub struct Forge3dStudioApp {
 
     // Multi-object transformation initial transforms cache
     pub gizmo_initial_transforms: std::collections::HashMap<ObjectId, Transform>,
+
+    // Free cursor object dragging state
+    pub object_drag_state: Option<ObjectDragState>,
 }
 
 impl Forge3dStudioApp {
@@ -110,6 +136,7 @@ impl Forge3dStudioApp {
             fps: 60.0,
             frame_time_ms: 16.6,
             gizmo_initial_transforms: std::collections::HashMap::new(),
+            object_drag_state: None,
         }
     }
 
@@ -137,6 +164,7 @@ impl Forge3dStudioApp {
             fps: 60.0,
             frame_time_ms: 16.6,
             gizmo_initial_transforms: std::collections::HashMap::new(),
+            object_drag_state: None,
         }
     }
 
@@ -480,6 +508,120 @@ impl Forge3dStudioApp {
         self.status_message = "Transform Cancelled".to_string();
     }
 
+    /// Initiates a free cursor object drag on the current selection.
+    pub fn start_object_drag(
+        &mut self,
+        hit_point: Vec3,
+        hit_id: ObjectId,
+        pointer_pos: Vec2,
+        was_already_selected: bool,
+    ) {
+        let mut plane_normal = -self.camera.forward();
+        if plane_normal.length_squared() < 1e-4 {
+            plane_normal = (self.camera.eye - hit_point).normalize_or_zero();
+        } else {
+            plane_normal = plane_normal.normalize();
+        }
+
+        let mut initial_transforms = std::collections::HashMap::new();
+        let mut initial_offsets = std::collections::HashMap::new();
+        for &id in &self.selection.selected_ids {
+            if let Some(obj) = self.scene.get_object(id) {
+                initial_transforms.insert(id, obj.local_transform);
+                initial_offsets.insert(id, obj.local_transform.translation - hit_point);
+            }
+        }
+
+        self.object_drag_state = Some(ObjectDragState {
+            initial_hit_point: hit_point,
+            plane_point: hit_point,
+            plane_normal,
+            initial_transforms,
+            initial_offsets,
+            initial_pointer_pos: pointer_pos,
+            is_active_drag: false,
+            pressed_object_id: Some(hit_id),
+            was_already_selected,
+        });
+        self.editor_state.pointer_state = forge_scene::PointerInteractionState::ObjectPressed;
+        self.editor_state.pointer_press_pos = Some(pointer_pos);
+    }
+
+    /// Updates active free cursor object dragging given the current camera ray.
+    /// Returns the world-space delta if successfully computed and applied.
+    pub fn update_object_drag(&mut self, curr_ray: &Ray) -> Option<Vec3> {
+        if let Some(drag) = &mut self.object_drag_state
+            && let Some(mut delta) = calculate_drag_delta(
+                curr_ray,
+                drag.plane_point,
+                drag.plane_normal,
+                drag.initial_hit_point,
+            )
+        {
+            if self.editor_state.snap_settings.enabled
+                && self.editor_state.snap_settings.grid_increment > 0.0
+            {
+                let inc = self.editor_state.snap_settings.grid_increment;
+                delta = Vec3::new(
+                    (delta.x / inc).round() * inc,
+                    (delta.y / inc).round() * inc,
+                    (delta.z / inc).round() * inc,
+                );
+            }
+
+            for (&id, &init_tf) in &drag.initial_transforms {
+                if let Some(obj) = self.scene.get_object_mut(id) {
+                    obj.local_transform.translation = init_tf.translation + delta;
+                }
+            }
+            self.scene.dirty = true;
+            return Some(delta);
+        }
+        None
+    }
+
+    /// Commits the active object drag operation into the Undo history stack.
+    pub fn commit_object_drag(&mut self, drag: &ObjectDragState) {
+        let mut changed = Vec::new();
+        for (&id, &init_tf) in &drag.initial_transforms {
+            if let Some(obj) = self.scene.get_object(id)
+                && obj.local_transform.translation != init_tf.translation
+            {
+                changed.push((id, init_tf, obj.local_transform));
+            }
+        }
+        if changed.len() == 1 {
+            let (id, old_transform, new_transform) = changed[0];
+            self.history.push(Action::Transform {
+                id,
+                old_transform,
+                new_transform,
+            });
+            self.status_message = "Object moved".to_string();
+        } else if changed.len() > 1 {
+            self.history.push(Action::MultiTransform {
+                transforms: changed,
+            });
+            self.status_message = "Multiple objects moved".to_string();
+        }
+        self.scene.dirty = true;
+    }
+
+    /// Cancels the active object drag operation, reverting all transformed objects to their initial positions.
+    pub fn cancel_object_drag(&mut self) {
+        if let Some(drag) = self.object_drag_state.take() {
+            for (&id, &init_tf) in &drag.initial_transforms {
+                if let Some(obj) = self.scene.get_object_mut(id) {
+                    obj.local_transform = init_tf;
+                }
+            }
+            self.editor_state.pointer_state = forge_scene::PointerInteractionState::Idle;
+            self.editor_state.pointer_press_pos = None;
+            self.scene.dirty = true;
+            self.status_message = "Object drag cancelled".to_string();
+        }
+    }
+
     pub fn toggle_fly_navigation(&mut self) {
         self.editor_state.fly_nav_active = !self.editor_state.fly_nav_active;
         if self.editor_state.fly_nav_active {
@@ -678,6 +820,9 @@ impl eframe::App for Forge3dStudioApp {
         if !window_focused {
             if self.editor_state.modal_transform.active {
                 self.cancel_modal_transform();
+            }
+            if self.object_drag_state.is_some() {
+                self.cancel_object_drag();
             }
             self.editor_state.pointer_state = forge_scene::PointerInteractionState::Idle;
             self.gizmo_state.drag_state = None;
@@ -1031,4 +1176,53 @@ impl eframe::App for Forge3dStudioApp {
                 });
         }
     }
+}
+
+/// Intersects a 3D ray with a plane defined by a point and a normal vector.
+///
+/// Returns `Some(hit_point)` if the ray safely intersects the plane in front of the camera,
+/// or `None` if the ray is parallel, pointing away, behind the ray origin, or degenerate.
+pub fn intersect_ray_plane(ray: &Ray, plane_point: Vec3, plane_normal: Vec3) -> Option<Vec3> {
+    if !ray.origin.is_finite()
+        || !ray.direction.is_finite()
+        || !plane_point.is_finite()
+        || !plane_normal.is_finite()
+    {
+        return None;
+    }
+    let normal_len_sq = plane_normal.length_squared();
+    if normal_len_sq < 1e-4 {
+        return None;
+    }
+    let normal = plane_normal / normal_len_sq.sqrt();
+    let denom = normal.dot(ray.direction);
+    if denom.abs() < 1e-4 {
+        return None;
+    }
+    let t = (plane_point - ray.origin).dot(normal) / denom;
+    if t <= 0.0 || t > 10000.0 || !t.is_finite() {
+        return None;
+    }
+    let point = ray.point_at(t);
+    if point.is_finite() { Some(point) } else { None }
+}
+
+/// Calculates the world-space translation delta for a ray-plane intersection.
+///
+/// Returns `None` if the ray is nearly parallel to the plane, behind the camera, produces non-finite values,
+/// or exceeds the maximum allowable delta threshold.
+pub fn calculate_drag_delta(
+    ray: &Ray,
+    plane_point: Vec3,
+    plane_normal: Vec3,
+    initial_hit_point: Vec3,
+) -> Option<Vec3> {
+    intersect_ray_plane(ray, plane_point, plane_normal).and_then(|current_hit| {
+        let delta = current_hit - initial_hit_point;
+        if delta.is_finite() && delta.length() <= 5000.0 {
+            Some(delta)
+        } else {
+            None
+        }
+    })
 }

@@ -311,4 +311,53 @@
 - [x] `cargo clippy --workspace --all-targets -- -D warnings` clean (zero warnings)
 - [x] `cargo build --workspace` clean
 
+---
+
+## Forge3D — Free Cursor Object Dragging (P0)
+
+### 1. World-Space Drag Calculation
+- [x] Construct camera ray from mouse position through working viewport camera
+- [x] Establish camera-aligned working plane passing through initial grab point (`plane_normal = -camera.forward().normalize()`)
+- [x] Intersect ray with working plane to establish initial hit point
+- [x] Compute ray-plane intersection on every pointer movement frame
+- [x] Calculate world-space delta between current and initial hit points
+
+### 2. Grab Point Offset Retention (Zero-Jump Guarantee)
+- [x] Store `initial_offset = obj.translation - hit_point` for every selected object at drag initiation
+- [x] Apply translation as `obj.translation = current_hit + initial_offset`
+- [x] Zero-delta identity at frame 0 preventing sudden object jumps or snap-to-cursor behavior
+
+### 3. Multi-Object Drag Support
+- [x] Detect multiple selected objects and track all initial transforms in `ObjectDragState`
+- [x] Apply single calculated world-space delta to all selected objects simultaneously
+- [x] Preserve exact relative distances and configuration between objects
+- [x] Record group translation as a single atomic `Action::MultiTransform` in undo history on mouse release
+
+### 4. Input Priority Hierarchy
+- [x] Strict hierarchy enforced: UI Interaction > Gizmo Interaction > Object Drag > Object Selection > Box Selection > Viewport Navigation
+- [x] Protected against accidental drag when clicking on UI panels (`ui_captures_pointer`)
+- [x] Protected against accidental drag when clicking Gizmo handles (`gizmo_consumed`)
+- [x] Viewport navigation (MMB Orbit, Shift+MMB Pan, Scroll Zoom, empty space LMB orbit) remains completely functional
+
+### 5. Edge Cases & Robustness
+- [x] Safe parallel ray rejection (`|ray_dir · plane_normal| < 1e-4`)
+- [x] Positive distance check ($t > 0.0$) preventing negative/behind-camera intersection
+- [x] Distance clamping ($t \le 10000.0$) preventing coordinate divergence near horizon
+- [x] Maximum delta clamp ($|\Delta| \le 5000.0$) preventing warp spikes
+- [x] Window focus loss cancellation restoring initial object transforms
+- [x] `Escape` key cancellation restoring initial object transforms
+- [x] Viewport boundary exit handling
+
+### 6. Undo / Redo & Gizmo Compatibility
+- [x] Single undo command created only upon mouse release
+- [x] `Ctrl+Z` reverses the complete drag movement in one step
+- [x] Full compatibility with all existing Gizmo manipulators (Move, Rotate, Scale) and modal hotkeys (`G`, `R`, `S`)
+
+### 7. Automated Testing & Quality Gates
+- [x] 12 automated unit and integration tests in `apps/forge3d-studio/tests/free_cursor_drag.rs`
+- [x] Total **92/92 tests passing** across workspace
+- [x] `cargo fmt --check` clean
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` clean (zero warnings)
+- [x] Real GUI automation tested: verified host environment lacks native mouse drivers (`xdotool`/`ydotool`/`wtype`), accurately maintaining quality gate boundaries without declaring premature GUI VERIFIED
+
 

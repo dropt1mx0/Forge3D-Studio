@@ -204,3 +204,27 @@
   5. **Clean-room Primitive Expansion:** Added `Capsule` and `Monkey` (Suzanne procedural mascot) with outward normals and UV coordinates, validated through mesh topology checks.
 - **Consequences:**
   Eliminates friction in object interaction. Users can select and manipulate immediately. Workspace layout is customizable and persists across launches. All 80 automated unit and integration tests pass cleanly with zero warnings under clippy.
+
+## ADR-0014: Free Cursor Object Dragging via Camera-Aligned Ray-Plane Intersection and Grab Offset Retention
+- **Status:** Accepted
+- **Date:** 2026-11-01
+- **Context:**
+  Previously in Forge3D, translating objects required interacting with the Gizmo's 1D axis arrows or 2D planar quads, or pressing `G` for modal movement. Direct, unconstrained click-and-drag translation directly on object geometry was missing. Users require a free drag interaction mode where clicking and holding on any object geometry translates the object freely across the viewport in world space, tracking the cursor naturally without axis restriction, without jumping, and with support for multi-object groups and unified Undo/Redo.
+- **Decision:**
+  1. **Camera-Aligned World Working Plane:**
+     On mouse press on geometry (`hit_point` via raycast), establish a working plane passing through `hit_point` whose normal opposes the camera's forward vector (`plane_normal = -camera.forward().normalize()`). This plane is parallel to the camera sensor / viewport plane, providing intuitive 1:1 screen-to-world mapping without perspective skewing across the field of view.
+  2. **Grab Point Offset Retention (Zero-Jump Guarantee):**
+     At drag start, the initial ray through the cursor intersects the working plane at exactly `initial_hit_point`. The initial offset between the hit point and each object's translation is recorded: `initial_offset = obj.local_transform.translation - hit_point`. On subsequent mouse frames, the current camera ray intersects the plane at `current_hit`, computing `delta = current_hit - initial_hit_point`. Object translations are updated as `obj.translation = initial_translation + delta = current_hit + initial_offset`. When drag starts, `delta == 0`, ensuring zero jump.
+  3. **Multi-Object Synchronous Drag:**
+     When multiple objects are selected, dragging any selected object applies the exact same world-space `delta` to all selected objects simultaneously, maintaining their exact relative distances and configuration. Upon mouse release, the group translation is recorded as a single atomic `Action::MultiTransform` in the undo history stack.
+  4. **Input Priority Hierarchy Protection:**
+     Enforce strict input priority: (1) UI Interaction (`egui_wants_pointer_input()`), (2) Gizmo Interaction (`gizmo_consumed`), (3) Object Drag, (4) Object Selection, (5) Box Selection, (6) Viewport Navigation. When the pointer is over UI or gizmo handles, object drag is completely inhibited.
+  5. **Edge Case & Numeric Robustness:**
+     Implement `intersect_ray_plane` and `calculate_drag_delta` with comprehensive safety checks:
+     - Finite checks on ray origin, ray direction, plane point, and normal.
+     - Rejection of rays nearly parallel to the plane (`|denom| < 1e-4`).
+     - Rejection of rays directed backwards or behind the camera (`t <= 0.0`).
+     - Range bounds checking (`t <= 10000.0`, `|delta| <= 5000.0`) preventing coordinate explosion near viewport horizons.
+     - Window focus loss and `Escape` key cancellation restoring initial object transforms cleanly.
+- **Consequences:**
+  Provides a fluid, responsive DCC-standard direct manipulation experience. Preserves existing Gizmo, modal transform, and camera navigation workflows without regressions. Verified by 12 dedicated automated tests and 92/92 total passing tests across the workspace.

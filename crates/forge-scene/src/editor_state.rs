@@ -38,6 +38,7 @@ pub enum PointerInteractionState {
     #[default]
     Idle,
     ObjectPressed,
+    ObjectDragging,
     GizmoDragging,
     BoxSelecting,
     ViewportOrbiting,

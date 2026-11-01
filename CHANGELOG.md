@@ -5,6 +5,19 @@ All notable changes to Forge3D Rust Edition will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1-alpha.3] - 2026-11-01
+
+### Added
+- **Free Cursor Object Dragging (Free Drag)**:
+  - Direct LMB click-and-hold on 3D geometry initiates free world-space dragging following the mouse cursor without requiring axis selection.
+  - Camera-aligned working plane dynamically constructed through the initial grab point with normal opposing camera forward (`-camera.forward().normalize()`), delivering intuitive 1:1 screen-to-world mapping.
+  - Grab point offset retention (`initial_offset = obj.translation - hit_point`) ensuring zero object jumps or teleportation upon drag initiation.
+  - Multi-object synchronous drag: dragging any selected object applies the exact same delta to all selected objects, preserving group configuration.
+  - Single atomic undo command (`Action::MultiTransform`) committed to the history stack upon mouse release (`Ctrl+Z` reverts full drag in one step).
+  - Strict input priority protection: UI Interaction (`egui_wants_pointer_input`) > Gizmo Handles (`gizmo_consumed`) > Object Drag > Selection > Box Selection > Viewport Orbit. No accidental drag on UI or Gizmo clicks.
+  - Robust edge case handling: safe parallel ray rejection (`|denom| < 1e-4`), distance clamp ($t \le 10000.0$), delta displacement clamp ($|\Delta| \le 5000.0$), focus loss restoration, and `Escape` key rollback.
+  - 12 automated unit and integration tests in `apps/forge3d-studio/tests/free_cursor_drag.rs` (92/92 workspace tests passing).
+
 ## [0.5.0-alpha.2] - 2026-10-31
 
 ### Added

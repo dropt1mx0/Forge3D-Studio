@@ -807,16 +807,29 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
     // Safety & Focus Loss handling: if primary mouse button is released, reset interaction state
     if !lmb_down && app.editor_state.pointer_state != PointerInteractionState::Idle {
+        if let Some(drag) = app.object_drag_state.take()
+            && drag.is_active_drag
+        {
+            app.commit_object_drag(&drag);
+        }
         app.editor_state.pointer_state = PointerInteractionState::Idle;
         app.editor_state.pointer_press_pos = None;
         app.editor_state.box_select_start = None;
         app.gizmo_state.drag_state = None;
     }
 
+    // Cancel active free object drag on Escape
+    if input.key_pressed(Key::Escape) && app.object_drag_state.is_some() {
+        app.cancel_object_drag();
+        ui.ctx().request_repaint();
+    }
+
+    let ui_captures_pointer = !is_pointer_in_viewport
+        || ui.ctx().egui_wants_pointer_input()
+        || app.editor_state.pointer_state == PointerInteractionState::UIInteraction;
+
     // UI Interaction tracking: if pointer was pressed outside viewport (or egui captured it)
-    if input.pointer.button_pressed(PointerButton::Primary)
-        && (!is_pointer_in_viewport || ui.ctx().egui_wants_pointer_input())
-    {
+    if input.pointer.button_pressed(PointerButton::Primary) && ui_captures_pointer {
         app.editor_state.pointer_state = PointerInteractionState::UIInteraction;
     }
 
@@ -891,8 +904,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.transform_orientation,
                     orientation_quat,
                     mouse_pos,
-                    lmb_pressed && !input.modifiers.alt,
-                    lmb_down && !input.modifiers.alt,
+                    lmb_pressed && !input.modifiers.alt && !ui_captures_pointer,
+                    lmb_down && !input.modifiers.alt && !ui_captures_pointer,
                     lmb_released,
                     app.editor_state.snap_settings.enabled,
                     app.editor_state.snap_settings.grid_increment,
@@ -1039,8 +1052,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.transform_orientation,
                     Quat::IDENTITY,
                     mouse_pos,
-                    lmb_pressed && !input.modifiers.alt,
-                    lmb_down && !input.modifiers.alt,
+                    lmb_pressed && !input.modifiers.alt && !ui_captures_pointer,
+                    lmb_down && !input.modifiers.alt && !ui_captures_pointer,
                     lmb_released,
                     app.editor_state.snap_settings.enabled,
                     app.editor_state.snap_settings.grid_increment,
@@ -1060,7 +1073,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     }
 
     // Update hover target under cursor
-    if is_pointer_in_viewport
+    if !ui_captures_pointer
+        && is_pointer_in_viewport
         && !lmb_down
         && !app.editor_state.fly_nav_active
         && !app.editor_state.modal_transform.active
@@ -1072,6 +1086,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
         let hover_hit = app.scene.raycast(&ray).map(|(id, _)| id);
         app.selection.set_hovered(hover_hit);
+    } else if ui_captures_pointer {
+        app.selection.set_hovered(None);
     }
 
     // =========================================================================
@@ -1085,6 +1101,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // A. Pointer Press Transition (Determine interaction state)
         if lmb_pressed
             && is_pointer_in_viewport
+            && !ui_captures_pointer
             && let Some(pos) = mouse_pos
         {
             if gizmo_consumed {
@@ -1099,14 +1116,25 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
 
                 if app.editor_state.edit_mode == EditMode::Object {
-                    if let Some((hit_id, _dist)) = app.scene.raycast(&ray) {
-                        app.editor_state.pointer_state = PointerInteractionState::ObjectPressed;
-                        app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
-                        if input.modifiers.shift {
-                            app.selection.toggle_selection(hit_id);
-                        } else {
-                            app.selection.select(hit_id);
+                    if let Some((hit_id, dist)) = app.scene.raycast(&ray) {
+                        let hit_point = ray.point_at(dist);
+                        let was_already_selected = app.selection.is_selected(hit_id);
+
+                        if !was_already_selected {
+                            if input.modifiers.shift {
+                                app.selection.toggle_selection(hit_id);
+                            } else {
+                                app.selection.select(hit_id);
+                            }
                         }
+
+                        app.start_object_drag(
+                            hit_point,
+                            hit_id,
+                            Vec2::new(pos.x, pos.y),
+                            was_already_selected,
+                        );
+
                         if let Some(obj) = app.scene.get_object(hit_id) {
                             app.status_message = format!("Selected: {}", obj.name);
                         }
@@ -1155,16 +1183,49 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
 
         // B. Active Dragging by State
-        if lmb_down && is_pointer_in_viewport {
+        if lmb_down {
             match app.editor_state.pointer_state {
+                PointerInteractionState::ObjectPressed
+                | PointerInteractionState::ObjectDragging => {
+                    if let Some(pos) = mouse_pos
+                        && let Some(drag) = &mut app.object_drag_state
+                    {
+                        let curr_pos = Vec2::new(pos.x, pos.y);
+                        let moved_px = (curr_pos - drag.initial_pointer_pos).length();
+
+                        if !drag.is_active_drag && moved_px >= 3.0 {
+                            drag.is_active_drag = true;
+                            app.editor_state.pointer_state =
+                                PointerInteractionState::ObjectDragging;
+                        }
+
+                        if drag.is_active_drag {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                            let local_pos = pos - rect.min;
+                            let screen_pos = Vec2::new(local_pos.x, local_pos.y);
+                            let viewport_size = Vec2::new(rect.width(), rect.height());
+                            let curr_ray = app.camera.screen_to_ray(screen_pos, viewport_size);
+
+                            if let Some(delta) = app.update_object_drag(&curr_ray) {
+                                ui.ctx().request_repaint();
+                                app.status_message = format!(
+                                    "Dragging: Δ({:.2}, {:.2}, {:.2})",
+                                    delta.x, delta.y, delta.z
+                                );
+                            }
+                        }
+                    }
+                }
                 PointerInteractionState::ViewportOrbiting => {
-                    let delta = input.pointer.delta();
-                    if delta.length_sq() > 0.0 {
-                        app.camera.orbit(
-                            delta.x * app.camera.settings.orbit_sensitivity,
-                            delta.y * app.camera.settings.orbit_sensitivity,
-                        );
-                        ui.ctx().request_repaint();
+                    if is_pointer_in_viewport {
+                        let delta = input.pointer.delta();
+                        if delta.length_sq() > 0.0 {
+                            app.camera.orbit(
+                                delta.x * app.camera.settings.orbit_sensitivity,
+                                delta.y * app.camera.settings.orbit_sensitivity,
+                            );
+                            ui.ctx().request_repaint();
+                        }
                     }
                 }
                 PointerInteractionState::BoxSelecting => {
@@ -1196,6 +1257,31 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // C. Pointer Release Handling
         if lmb_released {
             match app.editor_state.pointer_state {
+                PointerInteractionState::ObjectDragging => {
+                    if let Some(drag) = app.object_drag_state.take()
+                        && drag.is_active_drag
+                    {
+                        app.commit_object_drag(&drag);
+                    }
+                    app.editor_state.pointer_state = PointerInteractionState::Idle;
+                    app.editor_state.pointer_press_pos = None;
+                    ui.ctx().request_repaint();
+                }
+                PointerInteractionState::ObjectPressed => {
+                    if let Some(drag) = app.object_drag_state.take()
+                        && drag.was_already_selected
+                        && !input.modifiers.shift
+                        && let Some(pressed_id) = drag.pressed_object_id
+                    {
+                        app.selection.select(pressed_id);
+                        if let Some(obj) = app.scene.get_object(pressed_id) {
+                            app.status_message = format!("Selected: {}", obj.name);
+                        }
+                    }
+                    app.editor_state.pointer_state = PointerInteractionState::Idle;
+                    app.editor_state.pointer_press_pos = None;
+                    ui.ctx().request_repaint();
+                }
                 PointerInteractionState::ViewportOrbiting => {
                     let moved_dist = if let (Some(press), Some(curr)) =
                         (app.editor_state.pointer_press_pos, mouse_pos)
@@ -1232,6 +1318,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.pointer_state = PointerInteractionState::Idle;
                 }
                 _ => {
+                    app.object_drag_state = None;
                     app.editor_state.pointer_state = PointerInteractionState::Idle;
                     app.editor_state.pointer_press_pos = None;
                 }

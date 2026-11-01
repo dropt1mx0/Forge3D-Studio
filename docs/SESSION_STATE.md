@@ -1,8 +1,8 @@
 # Forge3D Rust Edition — Session State
 
 **Document Status:** Current  
-**Last Updated:** 2026-10-31  
-**Current Milestone:** Forge3D Alpha 0.2 — Interaction & Workspace UX (Complete, 80/80 tests passing)
+**Last Updated:** 2026-11-01  
+**Current Milestone:** Forge3D Alpha 0.2.1 — Free Cursor Object Dragging (Complete, 92/92 tests passing)
 
 ---
 
@@ -80,13 +80,13 @@
   - Left Toolbar: Modes (Select Q, Box Select B, Move W, Rotate E, Scale R), Quick Add, Delete.
   - Right Sidebar: Scene Outliner (hierarchical list, visibility toggles, selection) + Properties Inspector (Position X/Y/Z, Rotation X/Y/Z in degrees, Scale X/Y/Z, Color picker, Mesh stats).
   - Bottom Status Bar: GPU adapter name (`Mesa Intel(R) HD Graphics 4000 (Gl)`), FPS, frame time (ms), triangle and vertex metrics, status messages.
-  - Central Viewport: Offscreen WGPU texture target (`Rgba8UnormSrgb`), LMB drag over empty space orbit, MMB/Alt-drag orbit, Shift-drag pan, scroll zoom, and left-click raycast selection.
+  - Central Viewport: Offscreen WGPU texture target (`Rgba8UnormSrgb`), Free Cursor Drag on geometry with camera-aligned ray-plane projection and grab-point offset retention, LMB drag over empty space orbit, MMB/Alt-drag orbit, Shift-drag pan, scroll zoom, and left-click raycast selection.
   - Floating Telemetry Overlay: Monospace debug card reporting pointer state, pointer position, viewport bounds, camera mode, orbit target, and camera distance.
 
 ---
 
 ## 3. Verification & Test Evidence
-- **All Tests**: 71 passed (55 unit & simulation tests + 8 dedicated LMB orbit interaction tests + 8 render/gpu tests), 0 failed, 0 ignored across workspace.
+- **All Tests**: 92 passed (55 unit & simulation tests + 8 dedicated LMB orbit interaction tests + 8 render/gpu tests + 7 Alpha 0.2 UX tests + 12 Free Cursor Drag tests + 2 other tests), 0 failed, 0 ignored across workspace.
 - **`cargo fmt --check`**: Clean (exit code 0).
 - **`cargo check --workspace`**: Clean (exit code 0).
 - **`cargo clippy --workspace --all-targets -- -D warnings`**: Clean (exit code 0, zero warnings).
@@ -132,6 +132,13 @@
   - **Categorized Toolbar**: Selection, Transform, Modeling, Add Mesh, Utilities.
   - **Add Object Expansion**: Added procedural clean-room Capsule and Monkey (Suzanne mascot) primitives; searchable categorized Add Menu.
   - **Test Suite**: 80/80 tests passing across all workspace crates and integration tests (`alpha_0_2_ux_interaction`, `interaction_flow`, `lmb_orbit_interaction`).
+- **Alpha 0.2.1 — Free Cursor Object Dragging**:
+  - **World-Space Drag Calculation**: Camera-aligned working plane passing through initial grab point with normal opposing camera forward (`-camera.forward().normalize()`). Ray-plane projection tracking cursor movement with zero perspective skewing.
+  - **Zero-Jump Grab Point Preservation**: Initial offset between grab point and each object centroid retained throughout drag (`initial_offset = obj.translation - hit_point`).
+  - **Multi-Object Synchronization**: Dragging any selected object synchronously translates all selected objects, preserving their relative positions, recorded as a single atomic `Action::MultiTransform` in undo history.
+  - **Input Priority Enforcement**: Strict priority order: UI Interaction (`egui_wants_pointer_input`) > Gizmo Handles (`gizmo_consumed`) > Object Drag > Selection > Box Selection > Viewport Orbit. No accidental drag on UI or Gizmo clicks.
+  - **Edge Case Protection**: Safe rejection of parallel rays (`|denom| < 1e-4`), distance clamp ($t \le 10000.0$), delta clamp ($|\Delta| \le 5000.0$), window focus loss cancellation, and `Escape` key rollback.
+  - **Test Suite**: 12 dedicated automated tests in `tests/free_cursor_drag.rs`, bringing workspace total to **92/92 tests passing**.
 
 ---
 
@@ -139,6 +146,8 @@
 
 | Action | Shortcut | Context |
 | :--- | :--- | :--- |
+| **Free Object Drag** | `LMB + Drag on geometry` | Viewport (Object Mode) |
+| **Cancel Drag** | `Escape` | During Drag |
 | **Orbit Camera** | `LMB + Drag (empty space)`, `MMB + Drag`, `Alt + LMB + Drag` | Viewport |
 | **Pan Camera** | `Shift + MMB + Drag` | Viewport |
 | **Zoom / Dolly** | `Scroll Wheel` or `Ctrl + MMB + Drag` | Viewport |
