@@ -3,9 +3,7 @@ use forge_core::id::ObjectId;
 use forge_modifiers::{
     ArrayModifier, MirrorModifier, ModifierType, SolidifyModifier, SubdivisionModifier,
 };
-use forge_scene::{
-    CameraData, CameraProjectionType, PivotPoint, PrimitiveType, TransformOrientation,
-};
+use forge_scene::{CameraData, CameraProjectionType, PrimitiveType, TransformOrientation};
 
 use crate::app::Forge3dStudioApp;
 
@@ -61,318 +59,285 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.add_space(6.0);
             ui.separator();
 
-            // Transform Section
-            ui.label(egui::RichText::new("Transform").strong());
-
-            // Orientation & Pivot options
+            // Top Tab Pills: [ Object Name ]  Basic  Coord  Object
             ui.horizontal(|ui| {
-                ui.label("Orientation:");
-                egui::ComboBox::from_id_salt("transform_orientation")
-                    .selected_text(format!("{:?}", app.editor_state.transform_orientation))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut app.editor_state.transform_orientation,
-                            TransformOrientation::Global,
-                            "Global",
-                        );
-                        ui.selectable_value(
-                            &mut app.editor_state.transform_orientation,
-                            TransformOrientation::Local,
-                            "Local",
-                        );
-                    });
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Pivot Point:");
-                egui::ComboBox::from_id_salt("pivot_point")
-                    .selected_text(format!("{:?}", app.editor_state.pivot_point))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut app.editor_state.pivot_point,
-                            PivotPoint::MedianPoint,
-                            "Median Point",
-                        );
-                        ui.selectable_value(
-                            &mut app.editor_state.pivot_point,
-                            PivotPoint::ActiveElement,
-                            "Active Element",
-                        );
-                        ui.selectable_value(
-                            &mut app.editor_state.pivot_point,
-                            PivotPoint::Cursor3D,
-                            "3D Cursor",
-                        );
-                        ui.selectable_value(
-                            &mut app.editor_state.pivot_point,
-                            PivotPoint::IndividualOrigins,
-                            "Individual Origins",
-                        );
-                    });
+                ui.spacing_mut().item_spacing = egui::vec2(4.0, 2.0);
+                let _ = ui.add(
+                    egui::Button::new(
+                        egui::RichText::new(&obj.name)
+                            .strong()
+                            .size(11.0)
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(egui::Color32::from_rgb(37, 99, 235))
+                    .corner_radius(egui::CornerRadius::same(5)),
+                );
+                let _ = ui.small_button("Basic");
+                let _ = ui.add(
+                    egui::Button::new("Coord")
+                        .fill(egui::Color32::from_rgb(34, 38, 50))
+                        .corner_radius(egui::CornerRadius::same(5)),
+                );
+                let _ = ui.small_button("Object");
             });
 
             ui.add_space(4.0);
 
-            // 1. Position (Translation)
-            ui.label("Position (m):");
-            ui.horizontal(|ui| {
-                // X
-                let lock_x = obj.locks.lock_pos[0];
-                if ui
-                    .selectable_label(lock_x, if lock_x { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock X Position")
-                    .clicked()
-                {
-                    obj.locks.lock_pos[0] = !lock_x;
-                }
-                ui.label("X:");
-                ui.add_enabled(
-                    !lock_x,
-                    DragValue::new(&mut obj.local_transform.translation.x).speed(0.05),
-                );
-                if ui.button("↺").on_hover_text("Reset X to 0.0").clicked() {
-                    obj.local_transform.translation.x = 0.0;
-                }
-
-                // Y
-                let lock_y = obj.locks.lock_pos[1];
-                if ui
-                    .selectable_label(lock_y, if lock_y { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock Y Position")
-                    .clicked()
-                {
-                    obj.locks.lock_pos[1] = !lock_y;
-                }
-                ui.label("Y:");
-                ui.add_enabled(
-                    !lock_y,
-                    DragValue::new(&mut obj.local_transform.translation.y).speed(0.05),
-                );
-                if ui.button("↺").on_hover_text("Reset Y to 0.0").clicked() {
-                    obj.local_transform.translation.y = 0.0;
-                }
-
-                // Z
-                let lock_z = obj.locks.lock_pos[2];
-                if ui
-                    .selectable_label(lock_z, if lock_z { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock Z Position")
-                    .clicked()
-                {
-                    obj.locks.lock_pos[2] = !lock_z;
-                }
-                ui.label("Z:");
-                ui.add_enabled(
-                    !lock_z,
-                    DragValue::new(&mut obj.local_transform.translation.z).speed(0.05),
-                );
-                if ui.button("↺").on_hover_text("Reset Z to 0.0").clicked() {
-                    obj.local_transform.translation.z = 0.0;
-                }
-            });
-
-            // 2. Rotation (Degrees)
-            let mut rot_deg = obj.local_transform.euler_angles_deg();
-            ui.label("Rotation (deg):");
-            let mut rot_changed = false;
-            ui.horizontal(|ui| {
-                // X
-                let lock_rx = obj.locks.lock_rot[0];
-                if ui
-                    .selectable_label(lock_rx, if lock_rx { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock X Rotation")
-                    .clicked()
-                {
-                    obj.locks.lock_rot[0] = !lock_rx;
-                }
-                ui.label("X:");
-                if ui
-                    .add_enabled(!lock_rx, DragValue::new(&mut rot_deg.x).speed(1.0))
-                    .changed()
-                {
-                    rot_changed = true;
-                }
-                if ui
-                    .button("↺")
-                    .on_hover_text("Reset X rotation to 0°")
-                    .clicked()
-                {
-                    rot_deg.x = 0.0;
-                    rot_changed = true;
-                }
-
-                // Y
-                let lock_ry = obj.locks.lock_rot[1];
-                if ui
-                    .selectable_label(lock_ry, if lock_ry { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock Y Rotation")
-                    .clicked()
-                {
-                    obj.locks.lock_rot[1] = !lock_ry;
-                }
-                ui.label("Y:");
-                if ui
-                    .add_enabled(!lock_ry, DragValue::new(&mut rot_deg.y).speed(1.0))
-                    .changed()
-                {
-                    rot_changed = true;
-                }
-                if ui
-                    .button("↺")
-                    .on_hover_text("Reset Y rotation to 0°")
-                    .clicked()
-                {
-                    rot_deg.y = 0.0;
-                    rot_changed = true;
-                }
-
-                // Z
-                let lock_rz = obj.locks.lock_rot[2];
-                if ui
-                    .selectable_label(lock_rz, if lock_rz { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock Z Rotation")
-                    .clicked()
-                {
-                    obj.locks.lock_rot[2] = !lock_rz;
-                }
-                ui.label("Z:");
-                if ui
-                    .add_enabled(!lock_rz, DragValue::new(&mut rot_deg.z).speed(1.0))
-                    .changed()
-                {
-                    rot_changed = true;
-                }
-                if ui
-                    .button("↺")
-                    .on_hover_text("Reset Z rotation to 0°")
-                    .clicked()
-                {
-                    rot_deg.z = 0.0;
-                    rot_changed = true;
-                }
-            });
-            if rot_changed {
-                obj.local_transform.set_euler_angles_deg(rot_deg);
-            }
-
-            // 3. Scale
-            ui.label("Scale:");
-            ui.horizontal(|ui| {
-                // X
-                let lock_sx = obj.locks.lock_scale[0];
-                if ui
-                    .selectable_label(lock_sx, if lock_sx { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock X Scale")
-                    .clicked()
-                {
-                    obj.locks.lock_scale[0] = !lock_sx;
-                }
-                ui.label("X:");
-                ui.add_enabled(
-                    !lock_sx,
-                    DragValue::new(&mut obj.local_transform.scale.x)
-                        .speed(0.05)
-                        .range(0.001..=100.0),
-                );
-                if ui
-                    .button("↺")
-                    .on_hover_text("Reset X scale to 1.0")
-                    .clicked()
-                {
-                    obj.local_transform.scale.x = 1.0;
-                }
-
-                // Y
-                let lock_sy = obj.locks.lock_scale[1];
-                if ui
-                    .selectable_label(lock_sy, if lock_sy { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock Y Scale")
-                    .clicked()
-                {
-                    obj.locks.lock_scale[1] = !lock_sy;
-                }
-                ui.label("Y:");
-                ui.add_enabled(
-                    !lock_sy,
-                    DragValue::new(&mut obj.local_transform.scale.y)
-                        .speed(0.05)
-                        .range(0.001..=100.0),
-                );
-                if ui
-                    .button("↺")
-                    .on_hover_text("Reset Y scale to 1.0")
-                    .clicked()
-                {
-                    obj.local_transform.scale.y = 1.0;
-                }
-
-                // Z
-                let lock_sz = obj.locks.lock_scale[2];
-                if ui
-                    .selectable_label(lock_sz, if lock_sz { "🔒" } else { "🔓" })
-                    .on_hover_text("Lock Z Scale")
-                    .clicked()
-                {
-                    obj.locks.lock_scale[2] = !lock_sz;
-                }
-                ui.label("Z:");
-                ui.add_enabled(
-                    !lock_sz,
-                    DragValue::new(&mut obj.local_transform.scale.z)
-                        .speed(0.05)
-                        .range(0.001..=100.0),
-                );
-                if ui
-                    .button("↺")
-                    .on_hover_text("Reset Z scale to 1.0")
-                    .clicked()
-                {
-                    obj.local_transform.scale.z = 1.0;
-                }
-            });
-
-            // 4. Dimensions
             let base_size = obj.mesh.aabb.size();
             let mut current_dim = base_size * obj.local_transform.scale.abs();
-            ui.label("Dimensions (m):");
-            ui.horizontal(|ui| {
-                ui.label("X:");
-                if ui
-                    .add(
-                        DragValue::new(&mut current_dim.x)
-                            .speed(0.05)
-                            .range(0.001..=1000.0),
-                    )
-                    .changed()
-                    && base_size.x > 1e-4
-                {
-                    obj.local_transform.scale.x = current_dim.x / base_size.x;
-                }
-                ui.label("Y:");
-                if ui
-                    .add(
-                        DragValue::new(&mut current_dim.y)
-                            .speed(0.05)
-                            .range(0.001..=1000.0),
-                    )
-                    .changed()
-                    && base_size.y > 1e-4
-                {
-                    obj.local_transform.scale.y = current_dim.y / base_size.y;
-                }
-                ui.label("Z:");
-                if ui
-                    .add(
-                        DragValue::new(&mut current_dim.z)
-                            .speed(0.05)
-                            .range(0.001..=1000.0),
-                    )
-                    .changed()
-                    && base_size.z > 1e-4
-                {
-                    obj.local_transform.scale.z = current_dim.z / base_size.z;
-                }
-            });
+            let mut rot_deg = obj.local_transform.euler_angles_deg();
+            let mut rot_changed = false;
+            let mut dim_changed = false;
+
+            // 3-Column Studio Coordinate Card (Position | Size | Rotation)
+            egui::Frame::canvas(ui.style())
+                .fill(egui::Color32::from_rgb(20, 22, 28))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 42, 54)))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(8.0)
+                .show(ui, |ui| {
+                    ui.columns(3, |cols| {
+                        // Column 0: Position
+                        cols[0].vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("Position")
+                                    .strong()
+                                    .size(11.5)
+                                    .color(egui::Color32::from_rgb(180, 190, 210)),
+                            );
+                            ui.add_space(2.0);
+
+                            // Row X
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• X")
+                                        .color(egui::Color32::from_rgb(239, 68, 68))
+                                        .strong(),
+                                );
+                                ui.add(
+                                    DragValue::new(&mut obj.local_transform.translation.x)
+                                        .speed(0.05)
+                                        .suffix(" m"),
+                                );
+                            });
+
+                            // Row Y
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• Y")
+                                        .color(egui::Color32::from_rgb(34, 197, 94))
+                                        .strong(),
+                                );
+                                ui.add(
+                                    DragValue::new(&mut obj.local_transform.translation.y)
+                                        .speed(0.05)
+                                        .suffix(" m"),
+                                );
+                            });
+
+                            // Row Z
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• Z")
+                                        .color(egui::Color32::from_rgb(59, 130, 246))
+                                        .strong(),
+                                );
+                                ui.add(
+                                    DragValue::new(&mut obj.local_transform.translation.z)
+                                        .speed(0.05)
+                                        .suffix(" m"),
+                                );
+                            });
+                        });
+
+                        // Column 1: Size
+                        cols[1].vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("Size")
+                                    .strong()
+                                    .size(11.5)
+                                    .color(egui::Color32::from_rgb(180, 190, 210)),
+                            );
+                            ui.add_space(2.0);
+
+                            // Row X
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• X")
+                                        .color(egui::Color32::from_rgb(239, 68, 68))
+                                        .strong(),
+                                );
+                                if ui
+                                    .add(
+                                        DragValue::new(&mut current_dim.x)
+                                            .speed(0.05)
+                                            .range(0.001..=1000.0)
+                                            .suffix(" m"),
+                                    )
+                                    .changed()
+                                {
+                                    dim_changed = true;
+                                }
+                            });
+
+                            // Row Y
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• Y")
+                                        .color(egui::Color32::from_rgb(34, 197, 94))
+                                        .strong(),
+                                );
+                                if ui
+                                    .add(
+                                        DragValue::new(&mut current_dim.y)
+                                            .speed(0.05)
+                                            .range(0.001..=1000.0)
+                                            .suffix(" m"),
+                                    )
+                                    .changed()
+                                {
+                                    dim_changed = true;
+                                }
+                            });
+
+                            // Row Z
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• Z")
+                                        .color(egui::Color32::from_rgb(59, 130, 246))
+                                        .strong(),
+                                );
+                                if ui
+                                    .add(
+                                        DragValue::new(&mut current_dim.z)
+                                            .speed(0.05)
+                                            .range(0.001..=1000.0)
+                                            .suffix(" m"),
+                                    )
+                                    .changed()
+                                {
+                                    dim_changed = true;
+                                }
+                            });
+                        });
+
+                        // Column 2: Rotation
+                        cols[2].vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("Rotation")
+                                    .strong()
+                                    .size(11.5)
+                                    .color(egui::Color32::from_rgb(180, 190, 210)),
+                            );
+                            ui.add_space(2.0);
+
+                            // Row X
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• X")
+                                        .color(egui::Color32::from_rgb(239, 68, 68))
+                                        .strong(),
+                                );
+                                if ui
+                                    .add(DragValue::new(&mut rot_deg.x).speed(1.0).suffix("°"))
+                                    .changed()
+                                {
+                                    rot_changed = true;
+                                }
+                            });
+
+                            // Row Y
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• Y")
+                                        .color(egui::Color32::from_rgb(34, 197, 94))
+                                        .strong(),
+                                );
+                                if ui
+                                    .add(DragValue::new(&mut rot_deg.y).speed(1.0).suffix("°"))
+                                    .changed()
+                                {
+                                    rot_changed = true;
+                                }
+                            });
+
+                            // Row Z
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("• Z")
+                                        .color(egui::Color32::from_rgb(59, 130, 246))
+                                        .strong(),
+                                );
+                                if ui
+                                    .add(DragValue::new(&mut rot_deg.z).speed(1.0).suffix("°"))
+                                    .changed()
+                                {
+                                    rot_changed = true;
+                                }
+                            });
+                        });
+                    });
+
+                    if dim_changed {
+                        if base_size.x > 1e-4 {
+                            obj.local_transform.scale.x = current_dim.x / base_size.x;
+                        }
+                        if base_size.y > 1e-4 {
+                            obj.local_transform.scale.y = current_dim.y / base_size.y;
+                        }
+                        if base_size.z > 1e-4 {
+                            obj.local_transform.scale.z = current_dim.z / base_size.z;
+                        }
+                    }
+
+                    if rot_changed {
+                        obj.local_transform.set_euler_angles_deg(rot_deg);
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    // Bottom card actions matching reference image: [ Object ▾ ]  [ Size ▾ ]  [ Apply ]
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt("coord_mode_dropdown")
+                            .selected_text("Object ▾")
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut app.editor_state.transform_orientation,
+                                    TransformOrientation::Local,
+                                    "Object (Local)",
+                                );
+                                ui.selectable_value(
+                                    &mut app.editor_state.transform_orientation,
+                                    TransformOrientation::Global,
+                                    "World (Global)",
+                                );
+                            });
+
+                        egui::ComboBox::from_id_salt("size_mode_dropdown")
+                            .selected_text("Size ▾")
+                            .show_ui(ui, |ui| {
+                                let _ = ui.selectable_label(true, "World Bounding Size");
+                                let _ = ui.selectable_label(false, "Local Scale Factor");
+                            });
+
+                        if ui
+                            .button("Apply")
+                            .on_hover_text("Apply Transform to Object Geometry")
+                            .clicked()
+                        {
+                            apply_tf = true;
+                        }
+
+                        if ui
+                            .button("↺ Reset")
+                            .on_hover_text("Reset Transform")
+                            .clicked()
+                        {
+                            reset_tf = true;
+                        }
+                    });
+                });
 
             // Origin operations
             ui.horizontal(|ui| {

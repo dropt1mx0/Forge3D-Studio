@@ -11,6 +11,12 @@ use crate::app::Forge3dStudioApp;
 
 pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     egui::MenuBar::new().ui(ui, |ui| {
+        ui.label(
+            egui::RichText::new("⬡")
+                .strong()
+                .size(15.0)
+                .color(egui::Color32::from_rgb(59, 130, 246)),
+        );
         // ---------------- File Menu ----------------
         ui.menu_button("File", |ui| {
             if ui.button("📄 New Scene").clicked() {
@@ -132,8 +138,8 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         });
 
-        // ---------------- Add Menu ----------------
-        ui.menu_button("Add", |ui| {
+        // ---------------- Create Menu ----------------
+        ui.menu_button("Create", |ui| {
             let cursor = app.editor_state.cursor_3d;
 
             // Search filter field
@@ -387,8 +393,8 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         });
 
-        // ---------------- Object Menu ----------------
-        ui.menu_button("Object", |ui| {
+        // ---------------- Tools Menu ----------------
+        ui.menu_button("Tools", |ui| {
             let has_sel = !app.selection.is_empty();
 
             if ui
@@ -519,45 +525,88 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         });
 
-        // ---------------- Mesh Menu (Edit Mode Tools) ----------------
-        if app.editor_state.edit_mode == EditMode::Edit {
-            ui.menu_button("Mesh", |ui| {
-                if ui.button("⏏ Extrude (E)").clicked() {
-                    app.extrude_selected_geometry(0.5);
-                    ui.close();
+        // ---------------- Mesh Menu ----------------
+        ui.menu_button("Mesh", |ui| {
+            if ui.button("⏏ Extrude (E)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
                 }
+                app.extrude_selected_geometry(0.5);
+                ui.close();
+            }
 
-                if ui.button("⇲ Inset (I)").clicked() {
-                    app.inset_selected_geometry(0.15);
-                    ui.close();
+            if ui.button("⇲ Inset (I)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
                 }
+                app.inset_selected_geometry(0.15);
+                ui.close();
+            }
 
-                if ui.button("⊞ Subdivide").clicked() {
-                    app.subdivide_selected_geometry();
-                    ui.close();
+            if ui.button("⊞ Subdivide").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
                 }
+                app.subdivide_selected_geometry();
+                ui.close();
+            }
 
-                if ui.button("⨁ Merge at Center (M)").clicked() {
-                    app.merge_selected_geometry();
-                    ui.close();
+            if ui.button("⨁ Merge at Center (M)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
                 }
+                app.merge_selected_geometry();
+                ui.close();
+            }
 
-                if ui.button("▱ Fill Face/Edge (F)").clicked() {
-                    app.fill_selected_geometry();
-                    ui.close();
+            if ui.button("▱ Fill Face/Edge (F)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
                 }
+                app.fill_selected_geometry();
+                ui.close();
+            }
 
-                ui.separator();
+            ui.separator();
 
-                if ui.button("🗑 Delete Selected").clicked() {
-                    app.delete_selected();
-                    ui.close();
-                }
-            });
-        }
+            if ui.button("🗑 Delete Selected").clicked() {
+                app.delete_selected();
+                ui.close();
+            }
+        });
 
-        // ---------------- View Menu ----------------
-        ui.menu_button("View", |ui| {
+        // ---------------- Render Menu ----------------
+        ui.menu_button("Render", |ui| {
+            if ui.button("⚡ Live Viewer (WGPU Viewport)").clicked() {
+                app.status_message = "Live Viewer Active".to_string();
+                ui.close();
+            }
+            if ui.button("🖼 Render Image (F12)").clicked() {
+                app.status_message = "Render Frame Complete".to_string();
+                ui.close();
+            }
+            ui.separator();
+            ui.label(egui::RichText::new("Octane / PBR Engine").weak().size(11.0));
+            if ui.button("⚙ Viewport Shading: Lit PBR").clicked() {
+                app.status_message = "PBR Forward Shading Active".to_string();
+                ui.close();
+            }
+        });
+
+        // ---------------- Plugins Menu ----------------
+        ui.menu_button("Plugins", |ui| {
+            if ui.button("🔌 Plugin Manager...").clicked() {
+                app.status_message = "Plugins: 0 loaded".to_string();
+                ui.close();
+            }
+            if ui.button("🔗 Cinema 4D / Octane Bridge").clicked() {
+                app.status_message = "Bridge Ready".to_string();
+                ui.close();
+            }
+        });
+
+        // ---------------- Windows Menu ----------------
+        ui.menu_button("Windows", |ui| {
             let cam_view_text = if app.editor_state.is_camera_view {
                 "📷 Exit Camera View (Numpad 0)"
             } else {
@@ -740,6 +789,10 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             {
                 let _ = app.editor_state.panel_settings.save();
             }
+            ui.checkbox(
+                &mut app.show_material_editor,
+                "Show Material Inspector (Octane Style)",
+            );
             if ui.button("↺ Reset Workspace Layout").clicked() {
                 app.editor_state.panel_settings = forge_scene::PanelSettings::default();
                 let _ = app.editor_state.panel_settings.save();
@@ -758,6 +811,214 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             if ui.button("🖥 GPU Diagnostics").clicked() {
                 app.show_gpu_dialog = true;
                 ui.close();
+            }
+        });
+
+        // ---------------- Right-aligned Layout Mode Dropdown ----------------
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            egui::ComboBox::from_id_salt("layout_mode_selector")
+                .selected_text("Layout: Model ▾")
+                .show_ui(ui, |ui| {
+                    let _ = ui.selectable_label(true, "Model");
+                    let _ = ui.selectable_label(false, "Animate");
+                    let _ = ui.selectable_label(false, "Sculpt");
+                    let _ = ui.selectable_label(false, "Render / UV");
+                });
+        });
+    });
+
+    // ---------------- Secondary Quick Tool Shelf ----------------
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
+
+        // Undo / Redo
+        if ui
+            .add_enabled(app.history.can_undo(), egui::Button::new("⤺"))
+            .on_hover_text("Undo (Ctrl+Z)")
+            .clicked()
+        {
+            app.undo();
+        }
+        if ui
+            .add_enabled(app.history.can_redo(), egui::Button::new("⤼"))
+            .on_hover_text("Redo (Ctrl+Shift+Z)")
+            .clicked()
+        {
+            app.redo();
+        }
+        ui.separator();
+
+        // Selection modes
+        let is_pointer = app.editor_state.transform_mode != forge_scene::TransformMode::BoxSelect;
+        if ui
+            .selectable_label(is_pointer, "↖")
+            .on_hover_text("Pointer Selection (LMB Click/Drag)")
+            .clicked()
+        {
+            app.editor_state.transform_mode = forge_scene::TransformMode::Translate;
+        }
+        let is_box = app.editor_state.transform_mode == forge_scene::TransformMode::BoxSelect;
+        if ui
+            .selectable_label(is_box, "⬚")
+            .on_hover_text("Box Selection (B)")
+            .clicked()
+        {
+            app.editor_state.transform_mode = forge_scene::TransformMode::BoxSelect;
+        }
+        ui.separator();
+
+        // Transform Gizmo modes
+        let is_trans = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Translate;
+        if ui
+            .selectable_label(is_trans, "✥ Move")
+            .on_hover_text("Translate Tool (G / Move Gizmo)")
+            .clicked()
+        {
+            app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Translate;
+            app.editor_state.transform_mode = forge_scene::TransformMode::Translate;
+        }
+        let is_rot = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Rotate;
+        if ui
+            .selectable_label(is_rot, "⟲ Rotate")
+            .on_hover_text("Rotate Tool (R / Rotate Gizmo)")
+            .clicked()
+        {
+            app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Rotate;
+            app.editor_state.transform_mode = forge_scene::TransformMode::Rotate;
+        }
+        let is_scale = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Scale;
+        if ui
+            .selectable_label(is_scale, "⤡ Scale")
+            .on_hover_text("Scale Tool (S / Scale Gizmo)")
+            .clicked()
+        {
+            app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Scale;
+            app.editor_state.transform_mode = forge_scene::TransformMode::Scale;
+        }
+        ui.separator();
+
+        // Primitives Quick Add
+        let cursor = app.editor_state.cursor_3d;
+        if ui
+            .button("⬡ Cube")
+            .on_hover_text("Add Cube at 3D Cursor")
+            .clicked()
+        {
+            let mesh = generate_cube(1.0);
+            let id = app.scene.add_object(
+                SceneObject::new("Cube", PrimitiveType::Cube, mesh)
+                    .with_color([0.35, 0.65, 0.95, 1.0])
+                    .with_transform(Transform::from_translation(
+                        cursor + Vec3::new(0.0, 0.5, 0.0),
+                    )),
+            );
+            if let Some(obj) = app.scene.get_object(id) {
+                app.history.push(Action::AddObject {
+                    object: obj.clone(),
+                });
+            }
+            app.selection.select(id);
+            app.status_message = "Added Cube".to_string();
+        }
+        if ui
+            .button("◯ Sphere")
+            .on_hover_text("Add UV Sphere at 3D Cursor")
+            .clicked()
+        {
+            let mesh = generate_uv_sphere(0.75, 24, 16);
+            let id = app.scene.add_object(
+                SceneObject::new("Sphere", PrimitiveType::Sphere, mesh)
+                    .with_color([0.90, 0.45, 0.35, 1.0])
+                    .with_transform(Transform::from_translation(
+                        cursor + Vec3::new(0.0, 0.75, 0.0),
+                    )),
+            );
+            if let Some(obj) = app.scene.get_object(id) {
+                app.history.push(Action::AddObject {
+                    object: obj.clone(),
+                });
+            }
+            app.selection.select(id);
+            app.status_message = "Added UV Sphere".to_string();
+        }
+        if ui
+            .button("💡 Light")
+            .on_hover_text("Add Light Object")
+            .clicked()
+        {
+            let mesh = generate_uv_sphere(0.25, 12, 8);
+            let id = app.scene.add_object(
+                SceneObject::new("Light", PrimitiveType::Sphere, mesh)
+                    .with_color([1.0, 0.95, 0.70, 1.0])
+                    .with_transform(Transform::from_translation(
+                        cursor + Vec3::new(2.0, 4.0, 2.0),
+                    )),
+            );
+            if let Some(obj) = app.scene.get_object(id) {
+                app.history.push(Action::AddObject {
+                    object: obj.clone(),
+                });
+            }
+            app.selection.select(id);
+            app.status_message = "Added Light".to_string();
+        }
+        if ui
+            .button("📷 Camera")
+            .on_hover_text("Add Camera Object")
+            .clicked()
+        {
+            let mesh = generate_cone(0.4, 0.6, 12);
+            let mut cam_obj = SceneObject::new("Camera", PrimitiveType::Camera, mesh)
+                .with_color([0.2, 0.8, 0.4, 1.0])
+                .with_transform(Transform::from_translation(
+                    cursor + Vec3::new(0.0, 2.0, 4.0),
+                ));
+            cam_obj.camera_data = Some(forge_scene::CameraData::default());
+            let id = app.scene.add_object(cam_obj);
+            if let Some(obj) = app.scene.get_object(id) {
+                app.history.push(Action::AddObject {
+                    object: obj.clone(),
+                });
+            }
+            app.selection.select(id);
+            app.status_message = "Added Camera".to_string();
+        }
+        ui.separator();
+
+        // Snapping & Grid Toggles
+        let snap_on = app.editor_state.snap_settings.enabled;
+        if ui
+            .selectable_label(snap_on, "🧲 Snap")
+            .on_hover_text("Toggle Snapping to Grid")
+            .clicked()
+        {
+            app.editor_state.snap_settings.enabled = !snap_on;
+        }
+        let grid_on = app.editor_state.show_grid;
+        if ui
+            .selectable_label(grid_on, "▦ Grid")
+            .on_hover_text("Toggle Viewport Ground Grid")
+            .clicked()
+        {
+            app.editor_state.show_grid = !grid_on;
+        }
+        ui.separator();
+
+        // Right-aligned Live Viewer status pill
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("⚡ Live Viewer")
+                            .color(egui::Color32::from_rgb(180, 220, 255)),
+                    )
+                    .fill(egui::Color32::from_rgb(28, 38, 56)),
+                )
+                .on_hover_text("Cinema 4D / Octane Live Viewport Renderer")
+                .clicked()
+            {
+                app.status_message = "Live Viewer Active (WGPU Viewport)".to_string();
             }
         });
     });

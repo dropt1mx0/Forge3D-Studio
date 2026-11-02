@@ -49,6 +49,7 @@ pub struct Forge3dStudioApp {
     pub status_message: String,
     pub show_about_dialog: bool,
     pub show_gpu_dialog: bool,
+    pub show_material_editor: bool,
 
     // Undo / Redo Command History
     pub history: HistoryStack,
@@ -82,15 +83,32 @@ pub struct Forge3dStudioApp {
 
 impl Forge3dStudioApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
-        // Set distinctive Dark Graphite Visual styling (#1a1c21 base)
+        // Set Cinema 4D / Octane dark studio aesthetic (#121316 base, #2563eb selection)
         let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = egui::Color32::from_rgb(26, 28, 33);
-        visuals.window_fill = egui::Color32::from_rgb(30, 33, 38);
-        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(36, 39, 46);
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(42, 45, 54);
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(52, 56, 68);
-        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(64, 70, 84);
-        visuals.selection.bg_fill = egui::Color32::from_rgb(220, 120, 30); // Warm Forge amber
+        visuals.panel_fill = egui::Color32::from_rgb(19, 20, 25);
+        visuals.window_fill = egui::Color32::from_rgb(24, 25, 32);
+        visuals.faint_bg_color = egui::Color32::from_rgb(16, 17, 21);
+        visuals.extreme_bg_color = egui::Color32::from_rgb(12, 13, 16);
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(26, 28, 36);
+        visuals.widgets.noninteractive.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(36, 39, 49));
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(32, 35, 44);
+        visuals.widgets.inactive.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 46, 58));
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(44, 48, 62);
+        visuals.widgets.hovered.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 66, 84));
+        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(37, 99, 235);
+        visuals.widgets.active.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 165, 250));
+        visuals.selection.bg_fill = egui::Color32::from_rgb(37, 99, 235); // Studio Electric Blue
+        visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 165, 250));
+        visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
+        visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
+        visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+        visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
+        visuals.window_corner_radius = egui::CornerRadius::same(8);
+        visuals.menu_corner_radius = egui::CornerRadius::same(6);
         cc.egui_ctx.set_visuals(visuals);
 
         let mut renderer = None;
@@ -129,6 +147,7 @@ impl Forge3dStudioApp {
             status_message: "Ready. Welcome to Forge3D Rust Edition.".to_string(),
             show_about_dialog: false,
             show_gpu_dialog: false,
+            show_material_editor: false,
             history: HistoryStack::new(),
             gizmo_state: GizmoState::new(),
             active_edit_mesh: None,
@@ -163,6 +182,7 @@ impl Forge3dStudioApp {
             status_message: "Ready (Headless)".to_string(),
             show_about_dialog: false,
             show_gpu_dialog: false,
+            show_material_editor: false,
             history: HistoryStack::new(),
             gizmo_state: GizmoState::new(),
             active_edit_mesh: None,
@@ -930,15 +950,130 @@ impl Forge3dStudioApp {
                     };
                     ui.painter().rect_filled(splitter_rect, 1.0, col);
 
+                    let frame_id = ui.make_persistent_id("studio_timeline_frame");
+                    let mut current_frame: i32 =
+                        ui.data_mut(|d| *d.get_temp_mut_or_default(frame_id));
+                    if current_frame == 0 {
+                        current_frame = 20; // Default matching reference screenshot
+                    }
+
+                    // 1. Frame Ruler Row (0 ... 30 F with ticks)
                     ui.horizontal(|ui| {
-                        ui.label("⏱ Timeline");
-                        ui.separator();
+                        ui.spacing_mut().item_spacing = egui::vec2(10.0, 2.0);
+                        let frames = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30];
+                        for f in frames {
+                            if f == current_frame {
+                                let _ = ui.add(
+                                    egui::Button::new(
+                                        egui::RichText::new(format!("■ {f}"))
+                                            .strong()
+                                            .size(10.5)
+                                            .color(egui::Color32::from_rgb(34, 197, 94)),
+                                    )
+                                    .fill(egui::Color32::from_rgb(26, 42, 32))
+                                    .corner_radius(egui::CornerRadius::same(3)),
+                                );
+                            } else if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(format!("{f}"))
+                                            .size(10.0)
+                                            .color(egui::Color32::from_rgb(140, 150, 170)),
+                                    )
+                                    .fill(egui::Color32::TRANSPARENT),
+                                )
+                                .clicked()
+                            {
+                                current_frame = f;
+                            }
+                        }
+                        ui.label(
+                            egui::RichText::new("30 F")
+                                .strong()
+                                .size(10.5)
+                                .color(egui::Color32::from_rgb(170, 180, 200)),
+                        );
+                    });
+
+                    ui.add_space(2.0);
+
+                    // 2. Transport Scrubber Row with Red Bar
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
+                        ui.label(
+                            egui::RichText::new("0 F :")
+                                .monospace()
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(160, 170, 190)),
+                        );
+
+                        // Red Scrub Progress Bar
+                        let bar_w = (ui.available_width() - 240.0).max(120.0);
+                        let (bar_rect, bar_resp) = ui.allocate_exact_size(
+                            egui::vec2(bar_w, 14.0),
+                            egui::Sense::click_and_drag(),
+                        );
+                        let progress = (current_frame as f32 / 30.0).clamp(0.0, 1.0);
+
+                        // Background track
+                        ui.painter().rect_filled(
+                            bar_rect,
+                            egui::CornerRadius::same(3),
+                            egui::Color32::from_rgb(28, 30, 38),
+                        );
+                        // Red filled active progress
+                        let filled_w = bar_rect.width() * progress;
+                        let filled_rect = egui::Rect::from_min_size(
+                            bar_rect.min,
+                            egui::vec2(filled_w, bar_rect.height()),
+                        );
+                        ui.painter().rect_filled(
+                            filled_rect,
+                            egui::CornerRadius::same(3),
+                            egui::Color32::from_rgb(239, 68, 68), // Octane Red
+                        );
+                        // Playhead handle
+                        let handle_x = bar_rect.min.x + filled_w;
+                        let handle_rect = egui::Rect::from_center_size(
+                            egui::pos2(handle_x, bar_rect.center().y),
+                            egui::vec2(6.0, 18.0),
+                        );
+                        ui.painter().rect_filled(
+                            handle_rect,
+                            egui::CornerRadius::same(2),
+                            egui::Color32::WHITE,
+                        );
+
+                        if (bar_resp.clicked() || bar_resp.dragged())
+                            && let Some(mouse) = bar_resp.interact_pointer_pos()
+                        {
+                            let norm =
+                                ((mouse.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
+                            current_frame = (norm * 30.0).round() as i32;
+                        }
+
+                        ui.label(
+                            egui::RichText::new(format!("{current_frame} F :"))
+                                .monospace()
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(160, 170, 190)),
+                        );
+
+                        // Transport playback buttons
                         if ui
                             .button("⏮")
-                            .on_hover_text("First Frame (Shift+Left)")
+                            .on_hover_text("Jump to First Frame (Shift+Left)")
                             .clicked()
                         {
-                            self.status_message = "Timeline: Jump to Frame 1".to_string();
+                            current_frame = 0;
+                            self.status_message = "Timeline: Jump to Frame 0".to_string();
+                        }
+                        if ui
+                            .button("◀")
+                            .on_hover_text("Step Back 1 Frame (Left)")
+                            .clicked()
+                        {
+                            current_frame = (current_frame - 1).max(0);
                         }
                         if ui
                             .button("▶")
@@ -948,14 +1083,122 @@ impl Forge3dStudioApp {
                             self.status_message = "Timeline: Play / Pause".to_string();
                         }
                         if ui
-                            .button("⏭")
-                            .on_hover_text("Last Frame (Shift+Right)")
+                            .button("▶|")
+                            .on_hover_text("Jump to End Frame (Shift+Right)")
                             .clicked()
                         {
+                            current_frame = 30;
                             self.status_message = "Timeline: Jump to End".to_string();
                         }
+                        if ui
+                            .button("🔁")
+                            .on_hover_text("Toggle Loop Playback")
+                            .clicked()
+                        {
+                            self.status_message = "Timeline: Loop Active".to_string();
+                        }
+                    });
+
+                    ui.data_mut(|d| *d.get_temp_mut_or_default(frame_id) = current_frame);
+
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    // 3. Bottom Material Shelf preview
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(8.0, 2.0);
+                        let link_col = egui::Color32::from_rgb(150, 160, 180);
+                        if ui
+                            .button(egui::RichText::new("Create").size(11.0).color(link_col))
+                            .clicked()
+                        {
+                            self.show_material_editor = true;
+                        }
+                        if ui
+                            .button(egui::RichText::new("Edit").size(11.0).color(link_col))
+                            .clicked()
+                        {
+                            self.show_material_editor = !self.show_material_editor;
+                        }
+                        if ui
+                            .button(egui::RichText::new("Function").size(11.0).color(link_col))
+                            .clicked()
+                        {
+                            self.show_material_editor = true;
+                        }
+                        if ui
+                            .button(egui::RichText::new("Texture").size(11.0).color(link_col))
+                            .clicked()
+                        {
+                            self.show_material_editor = true;
+                        }
                         ui.separator();
-                        ui.label("Frame: 1 / 250");
+
+                        // Material spheres preview pills
+                        if ui
+                            .button(
+                                egui::RichText::new("🟡 Gold")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(255, 215, 80)),
+                            )
+                            .on_hover_text("Assign Gold Material to Selected Object")
+                            .clicked()
+                            && let Some(id) = self.selection.active_id
+                        {
+                            let mut updated = None;
+                            if let Some(obj) = self.scene.get_object_mut(id) {
+                                obj.color = [1.0, 0.85, 0.25, 1.0];
+                                updated = Some(obj.name.clone());
+                            }
+                            if let Some(name) = updated {
+                                self.scene.dirty = true;
+                                self.status_message = format!("Assigned Gold material to {}", name);
+                            }
+                        }
+
+                        if ui
+                            .button(
+                                egui::RichText::new("⚪ Diffuse")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(230, 235, 245)),
+                            )
+                            .on_hover_text("Assign Diffuse Material to Selected Object")
+                            .clicked()
+                            && let Some(id) = self.selection.active_id
+                        {
+                            let mut updated = None;
+                            if let Some(obj) = self.scene.get_object_mut(id) {
+                                obj.color = [0.8, 0.8, 0.85, 1.0];
+                                updated = Some(obj.name.clone());
+                            }
+                            if let Some(name) = updated {
+                                self.scene.dirty = true;
+                                self.status_message =
+                                    format!("Assigned Diffuse material to {}", name);
+                            }
+                        }
+
+                        if ui
+                            .button(
+                                egui::RichText::new("🔘 Metal")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(190, 205, 225)),
+                            )
+                            .on_hover_text("Assign Brushed Metal Material to Selected Object")
+                            .clicked()
+                            && let Some(id) = self.selection.active_id
+                        {
+                            let mut updated = None;
+                            if let Some(obj) = self.scene.get_object_mut(id) {
+                                obj.color = [0.65, 0.70, 0.75, 1.0];
+                                updated = Some(obj.name.clone());
+                            }
+                            if let Some(name) = updated {
+                                self.scene.dirty = true;
+                                self.status_message =
+                                    format!("Assigned Brushed Metal material to {}", name);
+                            }
+                        }
                     });
                 });
         }
@@ -1182,6 +1425,154 @@ impl Forge3dStudioApp {
                         self.show_gpu_dialog = false;
                     }
                 });
+        }
+
+        // 9. Floating Material Inspector Window (Octane / Cinema 4D Studio Style)
+        if self.show_material_editor {
+            let mut open = self.show_material_editor;
+            egui::Window::new("Brushed Metal Material  ‹ › 🔒")
+                .open(&mut open)
+                .resizable(false)
+                .default_size(egui::vec2(360.0, 310.0))
+                .default_pos(egui::pos2(280.0, 140.0))
+                .show(&ctx, |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+                    ui.columns(2, |columns| {
+                        // Left column: preview & basic properties
+                        columns[0].vertical(|ui| {
+                            // Glossy sphere preview
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(64.0, 64.0), egui::Sense::hover());
+                            let center = rect.center();
+                            let radius = 28.0;
+                            // Base gradient
+                            ui.painter().circle_filled(
+                                center,
+                                radius,
+                                egui::Color32::from_rgb(175, 185, 200),
+                            );
+                            // Shaded border
+                            ui.painter().circle_stroke(
+                                center,
+                                radius,
+                                egui::Stroke::new(1.5, egui::Color32::from_rgb(50, 55, 70)),
+                            );
+                            // Specular highlight top-left
+                            let highlight_center = center + egui::vec2(-8.0, -8.0);
+                            ui.painter().circle_filled(
+                                highlight_center,
+                                8.0,
+                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 220),
+                            );
+
+                            ui.add_space(4.0);
+                            let _ = ui.button(
+                                egui::RichText::new("Gold material")
+                                    .size(10.0)
+                                    .color(egui::Color32::from_rgb(255, 215, 80)),
+                            );
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("Type").size(11.0));
+                                egui::ComboBox::from_id_salt("mat_type_combo")
+                                    .selected_text("Glossy ▾")
+                                    .show_ui(ui, |ui| {
+                                        let _ = ui.selectable_label(true, "Glossy");
+                                        let _ = ui.selectable_label(false, "Diffuse");
+                                        let _ = ui.selectable_label(false, "Specular");
+                                        let _ = ui.selectable_label(false, "Metallic");
+                                    });
+                            });
+                            ui.add_space(2.0);
+                            ui.label(
+                                egui::RichText::new("• Diffuse")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(200, 205, 220)),
+                            );
+                            ui.label(
+                                egui::RichText::new("• Specular")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(200, 205, 220)),
+                            );
+                            ui.label(
+                                egui::RichText::new("• Roughness")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(200, 205, 220)),
+                            );
+                            ui.label(
+                                egui::RichText::new("• Bump")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(200, 205, 220)),
+                            );
+                            ui.label(
+                                egui::RichText::new("• Normal")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(200, 205, 220)),
+                            );
+                            ui.label(
+                                egui::RichText::new("• Displacement")
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(200, 205, 220)),
+                            );
+                        });
+
+                        // Right column: sliders and texture settings
+                        columns[1].vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("• Color").size(11.0));
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(80.0, 14.0),
+                                    egui::Sense::hover(),
+                                );
+                                for i in 0..8 {
+                                    let sub_w = rect.width() / 8.0;
+                                    let sub_rect = egui::Rect::from_min_size(
+                                        egui::pos2(rect.left() + i as f32 * sub_w, rect.top()),
+                                        egui::vec2(sub_w, rect.height()),
+                                    );
+                                    let hue = i as f32 / 8.0;
+                                    let c = egui::epaint::Hsva::new(hue, 0.8, 0.9, 1.0);
+                                    ui.painter().rect_filled(sub_rect, 0.0, c);
+                                }
+                            });
+                            let mut dummy_deg = 88.0f32;
+                            ui.add(egui::Slider::new(&mut dummy_deg, 0.0..=360.0).suffix("°"));
+                            let mut dummy_p1 = 34.0f32;
+                            ui.add(egui::Slider::new(&mut dummy_p1, 0.0..=100.0).suffix("%"));
+                            let mut dummy_p2 = 69.0f32;
+                            ui.add(egui::Slider::new(&mut dummy_p2, 0.0..=100.0).suffix("%"));
+
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("• Float").size(11.0));
+                                egui::ComboBox::from_id_salt("mat_texture_combo")
+                                    .selected_text("Texture ▾")
+                                    .show_ui(ui, |ui| {
+                                        let _ = ui.selectable_label(true, "None");
+                                        let _ = ui.selectable_label(false, "Image...");
+                                    });
+                            });
+                            let mut dummy_f = 0.23f32;
+                            ui.add(egui::Slider::new(&mut dummy_f, 0.0..=1.0));
+
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new("• Mix").size(11.0));
+                            let mut dummy_mix = 0.03f32;
+                            ui.add(egui::Slider::new(&mut dummy_mix, 0.0..=1.0));
+                        });
+                    });
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        let _ = ui.button(
+                            egui::RichText::new("Node Editor")
+                                .size(11.0)
+                                .color(egui::Color32::WHITE),
+                        );
+                        let _ = ui.button(egui::RichText::new("Assignment").size(11.0));
+                        let _ = ui.button(egui::RichText::new("Help").size(11.0));
+                    });
+                });
+            self.show_material_editor = open;
         }
     }
 }

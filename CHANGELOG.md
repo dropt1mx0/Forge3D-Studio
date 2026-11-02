@@ -5,6 +5,27 @@ All notable changes to Forge3D Rust Edition will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3-alpha.5] - 2026-11-02
+
+### Added
+- **Studio Visual Redesign (Cinema 4D / Octane Dark Aesthetic)**:
+  - Theme: Custom dark studio palette (`#121316` background, `#14151a` panels, `#22252e` widgets, `#2563eb` electric blue selection highlights, `CornerRadius::same(6)`).
+  - Menu Bar: Top strip with logo `⬡`, standard hierarchy (`File`, `Edit`, `Create`, `Select`, `Tools`, `Mesh`, `Render`, `Plugins`, `Windows`, `Help`), and right-aligned `Layout: Model ▾` selector.
+  - Quick-Tool Shelf: Secondary horizontal icon bar (`⤺`, `⤼`, `↖`, `⬚`, `✥`, `⟲`, `⤡`, primitive additions, `🧲`, `▦`, `⚡ Live Viewer`).
+  - Outliner Tabs & Tree: Category tabs (`File | Edit | View | Objects | Tags | Bookmarks`), tree lines with expand icons (`▾`), leading icons, and rounded blue pill selection highlight (`#2563eb`).
+  - Cinema 4D Coordinate Card: 3-column `Position`, `Size`, `Rotation` block with red (`• X`), green (`• Y`), blue (`• Z`) axis dots, and bottom buttons `[ Object ▾ ]`, `[ Size ▾ ]`, `[ Apply ]`.
+  - Viewport HUD: Top-left overlay bar `⚡ Live Viewer :: View Cameras Display Options`.
+  - Viewport Orientation Tripod: Positioned in bottom-left with colored letters `X`, `Y`, `Z`.
+  - Timeline & Scrubbing: 0..30F ruler with green active frame marker, signature red progress track with draggable playhead, transport controls (`⏮`, `◀`, `▶`, `⏭`, `🔁`), and bottom material shelf (`Create`, `Edit`, `Function`, `Texture`, `🟡 Gold`, `⚪ Diffuse`, `🔘 Metal`).
+  - Floating Material Inspector Window: `Brushed Metal Material  ‹ › 🔒` dialog with glossy sphere preview, glossy type selector, diffuse/specular/roughness channels, rainbow hue spectrum bar, and sliders.
+
+### Fixed
+- **Object Drag Jitter & Oscillation ("дергаются вперед назад")**:
+  - Identified root cause: during active free cursor dragging, as the object's pivot moved under the mouse cursor, gizmo handles intercepted mouse input and took over into `GizmoDragging`, applying 1D axis constraint. Moving away from the handle switched back to 3D free drag, causing rapid jittering and oscillation.
+  - Suppressed gizmo hit-testing and pointer consumption whenever `PointerInteractionState::ObjectDragging` or `ObjectPressed` is active.
+  - Completely bypassed gizmo rendering during free dragging.
+  - Suppressed hover raycasts during active dragging, eliminating CPU frame time spikes and ensuring silky 60 FPS movement.
+
 ## [0.5.2-alpha.4] - 2026-11-02
 
 ### Added

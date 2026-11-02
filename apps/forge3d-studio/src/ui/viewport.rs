@@ -875,9 +875,24 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             .screen_to_ray(sp, Vec2::new(rect.width(), rect.height()))
     };
 
+    let is_object_dragging_active = matches!(
+        app.editor_state.pointer_state,
+        PointerInteractionState::ObjectDragging | PointerInteractionState::ObjectPressed
+    );
+
     let mut gizmo_consumed = false;
 
     if !app.editor_state.fly_nav_active && !app.editor_state.modal_transform.active {
+        let gizmo_mouse = if is_object_dragging_active {
+            None
+        } else {
+            mouse_pos
+        };
+        let gizmo_lmb_pressed =
+            lmb_pressed && !input.modifiers.alt && !is_ui_interacting && !is_object_dragging_active;
+        let gizmo_lmb_down =
+            lmb_down && !input.modifiers.alt && !is_ui_interacting && !is_object_dragging_active;
+
         if app.editor_state.edit_mode == EditMode::Object {
             if !app.selection.is_empty()
                 && app.editor_state.transform_mode != TransformMode::BoxSelect
@@ -927,24 +942,36 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     _ => app.editor_state.active_gizmo_mode,
                 };
 
-                let gizmo_res = render_and_interact_gizmo(
-                    &mut app.gizmo_state,
-                    &painter,
-                    view_proj,
-                    eye,
-                    screen_to_ray,
-                    rect,
-                    pivot_world,
-                    effective_gizmo_mode,
-                    app.editor_state.transform_orientation,
-                    orientation_quat,
-                    mouse_pos,
-                    lmb_pressed && !input.modifiers.alt && !is_ui_interacting,
-                    lmb_down && !input.modifiers.alt && !is_ui_interacting,
-                    lmb_released,
-                    app.editor_state.snap_settings.enabled,
-                    app.editor_state.snap_settings.grid_increment,
-                );
+                let gizmo_res =
+                    if app.editor_state.pointer_state == PointerInteractionState::ObjectDragging {
+                        // Cleanly suppress gizmo during active free cursor drag to prevent jitter/conflict
+                        crate::ui::gizmo::GizmoInteractionResult {
+                            consumed: false,
+                            is_dragging: false,
+                            delta: None,
+                            drag_started: false,
+                            drag_ended: false,
+                        }
+                    } else {
+                        render_and_interact_gizmo(
+                            &mut app.gizmo_state,
+                            &painter,
+                            view_proj,
+                            eye,
+                            screen_to_ray,
+                            rect,
+                            pivot_world,
+                            effective_gizmo_mode,
+                            app.editor_state.transform_orientation,
+                            orientation_quat,
+                            gizmo_mouse,
+                            gizmo_lmb_pressed,
+                            gizmo_lmb_down,
+                            lmb_released,
+                            app.editor_state.snap_settings.enabled,
+                            app.editor_state.snap_settings.grid_increment,
+                        )
+                    };
 
                 if gizmo_res.drag_started {
                     app.gizmo_initial_transforms.clear();
@@ -1027,7 +1054,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.scene.dirty = true;
                 }
 
-                if gizmo_res.consumed {
+                if gizmo_res.consumed && !is_object_dragging_active {
                     gizmo_consumed = true;
                 }
             }
@@ -1086,14 +1113,14 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.active_gizmo_mode,
                     app.editor_state.transform_orientation,
                     Quat::IDENTITY,
-                    mouse_pos,
-                    lmb_pressed && !input.modifiers.alt && !is_ui_interacting,
-                    lmb_down && !input.modifiers.alt && !is_ui_interacting,
+                    gizmo_mouse,
+                    gizmo_lmb_pressed,
+                    gizmo_lmb_down,
                     lmb_released,
                     app.editor_state.snap_settings.enabled,
                     app.editor_state.snap_settings.grid_increment,
                 );
-                gizmo_consumed = gizmo_res.consumed;
+                gizmo_consumed = gizmo_res.consumed && !is_object_dragging_active;
                 if gizmo_consumed {
                     app.editor_state.pointer_state = PointerInteractionState::GizmoDragging;
                 }
@@ -1107,10 +1134,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     }
 
-    // Update hover target under cursor
+    // Update hover target under cursor (suppressed during active dragging)
+    let is_dragging_active = app.editor_state.pointer_state != PointerInteractionState::Idle;
     if !is_ui_interacting
         && is_pointer_in_viewport
         && !lmb_down
+        && !is_dragging_active
         && !app.editor_state.fly_nav_active
         && !app.editor_state.modal_transform.active
         && let Some(pos) = mouse_pos
@@ -1121,7 +1150,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
         let hover_hit = app.scene.raycast(&ray).map(|(id, _)| id);
         app.selection.set_hovered(hover_hit);
-    } else if is_ui_interacting {
+    } else if is_ui_interacting || is_dragging_active {
         app.selection.set_hovered(None);
     }
 
@@ -1381,12 +1410,32 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         String::new()
     };
 
-    painter.text(
+    // Sleek Cinema 4D / Octane Viewport Header Strip
+    let header_rect = Rect::from_min_size(
         rect.min + EguiVec2::new(14.0, 14.0),
+        egui::vec2(520.0, 26.0),
+    );
+    painter.rect_filled(
+        header_rect,
+        egui::CornerRadius::same(5),
+        Color32::from_rgba_unmultiplied(16, 18, 24, 220),
+    );
+    painter.rect_stroke(
+        header_rect,
+        egui::CornerRadius::same(5),
+        Stroke::new(1.0, Color32::from_rgb(38, 42, 54)),
+        egui::StrokeKind::Outside,
+    );
+
+    let hud_text = format!(
+        "⚡ Live Viewer  ::  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}){ptr_state_str}"
+    );
+    painter.text(
+        header_rect.min + EguiVec2::new(12.0, 6.0),
         egui::Align2::LEFT_TOP,
-        format!("{mode_str} | Tool: {tool_str} | {proj_str}{ptr_state_str}"),
-        egui::FontId::proportional(14.0),
-        Color32::from_gray(210),
+        hud_text,
+        egui::FontId::proportional(12.0),
+        Color32::from_rgb(215, 220, 235),
     );
 
     // Active Fly Navigation HUD
@@ -1479,18 +1528,25 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         );
     }
 
-    // Coordinate orientation indicator in top-right
-    let gizmo_center = rect.right_top() + EguiVec2::new(-45.0, 45.0);
+    // Coordinate orientation indicator in bottom-left matching reference screenshot
+    let gizmo_center = rect.left_bottom() + EguiVec2::new(45.0, -45.0);
     let view_mat = app.camera.view_matrix();
-    let draw_axis = |axis: Vec3, color: Color32| {
+    let draw_axis = |axis: Vec3, color: Color32, label: &str| {
         let transformed = view_mat.transform_vector3(axis);
-        let end = gizmo_center + EguiVec2::new(transformed.x * 26.0, -transformed.y * 26.0);
+        let end = gizmo_center + EguiVec2::new(transformed.x * 24.0, -transformed.y * 24.0);
         painter.line_segment([gizmo_center, end], Stroke::new(2.5, color));
+        painter.text(
+            end + EguiVec2::new(transformed.x * 6.0, -transformed.y * 6.0),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(10.0),
+            color,
+        );
     };
 
-    draw_axis(Vec3::X, Color32::from_rgb(235, 65, 65)); // X - Red
-    draw_axis(Vec3::Y, Color32::from_rgb(65, 225, 75)); // Y - Green
-    draw_axis(Vec3::Z, Color32::from_rgb(65, 130, 245)); // Z - Blue
+    draw_axis(Vec3::X, Color32::from_rgb(235, 65, 65), "X"); // X - Red
+    draw_axis(Vec3::Y, Color32::from_rgb(65, 225, 75), "Y"); // Y - Green
+    draw_axis(Vec3::Z, Color32::from_rgb(65, 130, 245), "Z"); // Z - Blue
 
     // Floating Debug Telemetry Panel
     if app.editor_state.show_debug_info {

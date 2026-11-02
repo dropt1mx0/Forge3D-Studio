@@ -7,7 +7,23 @@ use forge_scene::PrimitiveType;
 use crate::app::Forge3dStudioApp;
 
 pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
-    ui.heading("Scene Outliner");
+    // Top Tabs: File | Edit | View | Objects | Tags | Bookmarks
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
+        let tab_col = egui::Color32::from_rgb(160, 168, 185);
+        ui.label(egui::RichText::new("File").size(11.0).color(tab_col));
+        ui.label(egui::RichText::new("Edit").size(11.0).color(tab_col));
+        ui.label(egui::RichText::new("View").size(11.0).color(tab_col));
+        ui.label(
+            egui::RichText::new("Objects")
+                .size(11.0)
+                .strong()
+                .color(egui::Color32::from_rgb(220, 230, 255)),
+        );
+        ui.label(egui::RichText::new("Tags").size(11.0).color(tab_col));
+        ui.label(egui::RichText::new("Bookmarks").size(11.0).color(tab_col));
+    });
+    ui.add_space(2.0);
     ui.separator();
 
     let mut to_delete: Option<ObjectId> = None;
@@ -18,7 +34,11 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
     egui::ScrollArea::vertical().show(ui, |ui| {
         if app.scene.objects.is_empty() {
-            ui.label("Empty scene. Add objects from the toolbar or Add menu.");
+            ui.label(
+                egui::RichText::new("Empty scene. Add objects from Create menu or toolbar.")
+                    .weak()
+                    .italics(),
+            );
             return;
         }
 
@@ -178,7 +198,32 @@ fn render_object_node(
                 label_text.push_str(" ★");
             }
 
-            let row = ui.selectable_label(is_selected, label_text);
+            let has_children = !children.is_empty();
+            let expand_icon = if has_children { "▾ " } else { "  " };
+
+            let text_color = if is_selected {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::from_rgb(205, 212, 228)
+            };
+
+            let row_btn = if is_selected {
+                egui::Button::new(
+                    egui::RichText::new(format!("{expand_icon}{label_text}"))
+                        .color(text_color)
+                        .strong(),
+                )
+                .fill(egui::Color32::from_rgb(37, 99, 235))
+                .corner_radius(egui::CornerRadius::same(5))
+            } else {
+                egui::Button::new(
+                    egui::RichText::new(format!("{expand_icon}{label_text}")).color(text_color),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .corner_radius(egui::CornerRadius::same(5))
+            };
+
+            let row = ui.add(row_btn);
 
             if row.clicked() {
                 if ui.input(|i| i.modifiers.ctrl || i.modifiers.command) {
