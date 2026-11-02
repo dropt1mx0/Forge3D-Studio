@@ -228,3 +228,35 @@
      - Window focus loss and `Escape` key cancellation restoring initial object transforms cleanly.
 - **Consequences:**
   Provides a fluid, responsive DCC-standard direct manipulation experience. Preserves existing Gizmo, modal transform, and camera navigation workflows without regressions. Verified by 12 dedicated automated tests and 92/92 total passing tests across the workspace.
+
+## ADR-0015: Adaptive Exponential Viewport Zoom, Cursor-Anchored Homothety, and Smooth Inertial Easing
+- **Status:** Accepted
+- **Date:** 2026-11-02
+- **Context:**
+  The previous mouse-wheel zoom implementation in Forge3D relied on linear distance multiplication `(1.0 - factor * sensitivity * 5.0).clamp(0.05, 5.0)`. Because egui passes `smooth_scroll_delta.y` with typical values of 20 to 50 per mouse-wheel notch, this linear calculation caused erratic, violent distance leaps (up to 95% jumps in a single notch), frequently sending the camera flying past geometry or away into empty space. Furthermore, zooming was fixed exclusively around the camera's central target point rather than the 3D surface under the cursor, and lacked smooth temporal interpolation.
+- **Decision:**
+  1. **Adaptive Exponential Multiplicative Model:**
+     Adopt the mathematical model `distance_new = distance_old * exp(-scroll_delta * sensitivity)`.
+     - In egui, forward scroll (`scroll_delta > 0`) yields a negative exponent, decreasing camera distance smoothly (Zoom In). Backward scroll (`scroll_delta < 0`) yields a positive exponent, increasing distance (Zoom Out).
+     - Base sensitivity is normalized to `0.0025`, resulting in a gentle ~7.3% distance scale per standard wheel notch at `zoom_sensitivity = 1.0`.
+     - The per-notch exponent is clamped to `[-1.2, 1.2]` to prevent overflow from erratic input spikes, and camera distance is bounded to `[0.05, 5000.0]`.
+     - Multiplicative scaling inherently adapts: when close to an object, the absolute step size automatically shrinks, granting sub-millimeter control; when far away, step sizes scale up proportionally.
+  2. **Cursor-Anchored Homothety (Zoom to Cursor):**
+     When `zoom_to_cursor` is active:
+     - Unproject cursor screen position to a world ray using `camera.screen_to_ray(local_pos, viewport_size)`.
+     - Raycast against scene objects. If geometry is hit at `hit_point` $P$, scale camera eye $E$ and target $T$ about $P$:
+       $E' = P + (E - P) \cdot k$, $T' = P + (T - P) \cdot k$, where $k = \text{new\_distance} / \text{current\_distance}$.
+     - This homothety guarantees that the ray $E' \to P$ remains strictly collinear with $E \to P$; the 3D point under the cursor projects to the identical 2D pixel coordinates before and after zooming, while the camera look direction vector $(E' - T')$ remains parallel to $(E - T)$ without rotational twisting.
+     - **Safe Focus Plane Fallback:** If the ray misses scene objects, intersect it with the camera focus plane passing through $T$ with normal $-camera.forward()$. The focal plane intersection serves as $P$, preserving smooth, predictable zooming even over empty viewport regions.
+     - Orthographic projection scales `ortho_size` proportionally while translating camera eye and target along $(T' - T)$.
+  3. **Smooth Frame-Rate Independent Easing:**
+     When `smooth_zoom` is enabled:
+     - Mouse wheel input updates smooth zoom targets (`zoom_target_eye`, `zoom_target_target`, `zoom_target_ortho_size`) with clamping to `[0.15 * current, 6.0 * current]` to prevent unbounded queueing from free-spinning mouse wheels.
+     - Each frame advances interpolation using exponential decay: $\alpha = 1.0 - \exp(-\lambda \cdot dt)$ with $\lambda = 18.0$.
+     - When the distance to target falls below $0.001$, the camera snaps to the final target and halts repainting, preventing idle CPU/GPU consumption on power-constrained hardware (e.g. Intel HD Graphics 4000).
+  4. **Navigation Compatibility & Zoom Synchronization:**
+     Any manual navigation input (MMB Orbit, Shift+MMB Pan, Ctrl+MMB Dolly, empty-space LMB Orbit, Fly/Walk, View Presets, Reset View, Frame Box) invokes `camera.sync_zoom_targets()`, instantly synchronizing smooth targets with active camera state and eliminating interaction fighting.
+  5. **User Settings & Persistence:**
+     Expose `Zoom Sensitivity` (0.1x to 3.0x), `Zoom to Cursor` (toggle), and `Smooth Zoom` (toggle) in the `View` menu and Right Sidebar properties panel, persisted to `forge3d_settings.json` via `PanelSettings`.
+- **Consequences:**
+  Eliminates abrupt jumps, provides precise CAD-grade zooming towards points of interest under the cursor, ensures smooth 60fps transitions without sluggish lag, and maintains 100% backward compatibility. Verified by 23 dedicated camera and studio tests (109/109 workspace tests passing).

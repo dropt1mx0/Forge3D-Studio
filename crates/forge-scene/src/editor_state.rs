@@ -111,6 +111,18 @@ pub enum ToolbarDisplayMode {
     IconAndLabel,
 }
 
+fn default_zoom_sensitivity() -> f32 {
+    1.0
+}
+
+fn default_zoom_to_cursor() -> bool {
+    true
+}
+
+fn default_smooth_zoom() -> bool {
+    true
+}
+
 /// Persistent workspace panel configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanelSettings {
@@ -122,6 +134,12 @@ pub struct PanelSettings {
     pub outliner_height_ratio: f32,
     pub timeline_height: f32,
     pub timeline_visible: bool,
+    #[serde(default = "default_zoom_sensitivity")]
+    pub zoom_sensitivity: f32,
+    #[serde(default = "default_zoom_to_cursor")]
+    pub zoom_to_cursor: bool,
+    #[serde(default = "default_smooth_zoom")]
+    pub smooth_zoom: bool,
 }
 
 impl Default for PanelSettings {
@@ -135,6 +153,9 @@ impl Default for PanelSettings {
             outliner_height_ratio: 0.45,
             timeline_height: 100.0,
             timeline_visible: false,
+            zoom_sensitivity: 1.0,
+            zoom_to_cursor: true,
+            smooth_zoom: true,
         }
     }
 }
@@ -153,6 +174,13 @@ impl PanelSettings {
             outliner_height_ratio: self.outliner_height_ratio.clamp(0.15, 0.85),
             timeline_height: self.timeline_height.clamp(60.0, 350.0),
             timeline_visible: self.timeline_visible,
+            zoom_sensitivity: if self.zoom_sensitivity.is_finite() {
+                self.zoom_sensitivity.clamp(0.1, 5.0)
+            } else {
+                1.0
+            },
+            zoom_to_cursor: self.zoom_to_cursor,
+            smooth_zoom: self.smooth_zoom,
         }
     }
 

@@ -284,6 +284,9 @@ fn test_panel_settings_persistence_and_clamping() {
         outliner_height_ratio: 0.95, // Above max (0.85)
         timeline_height: 500.0,      // Above max (350.0)
         timeline_visible: false,
+        zoom_sensitivity: 10.0, // Above max (5.0)
+        zoom_to_cursor: true,
+        smooth_zoom: true,
     };
 
     let clamped = unconstrained.clamped();
@@ -291,6 +294,7 @@ fn test_panel_settings_persistence_and_clamping() {
     assert_eq!(clamped.sidebar_width, 600.0);
     assert_eq!(clamped.outliner_height_ratio, 0.85);
     assert_eq!(clamped.timeline_height, 350.0);
+    assert_eq!(clamped.zoom_sensitivity, 5.0);
 
     // Test JSON serialization roundtrip
     let json = serde_json::to_string(&clamped).unwrap();

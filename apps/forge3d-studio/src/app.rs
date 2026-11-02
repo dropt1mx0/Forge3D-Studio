@@ -114,11 +114,16 @@ impl Forge3dStudioApp {
             ..Default::default()
         };
 
+        let mut camera = Camera::default();
+        camera.settings.zoom_sensitivity = editor_state.panel_settings.zoom_sensitivity;
+        camera.settings.zoom_to_cursor = editor_state.panel_settings.zoom_to_cursor;
+        camera.settings.smooth_zoom = editor_state.panel_settings.smooth_zoom;
+
         Self {
             scene: Scene::create_default_scene(),
             selection: SelectionState::new(),
             editor_state,
-            camera: Camera::default(),
+            camera,
             renderer,
             gpu_info,
             status_message: "Ready. Welcome to Forge3D Rust Edition.".to_string(),
@@ -142,11 +147,17 @@ impl Forge3dStudioApp {
 
     /// Creates a headless instance of the app (no GPU/eframe required) for automated integration testing.
     pub fn new_headless() -> Self {
+        let editor_state = EditorState::default();
+        let mut camera = Camera::default();
+        camera.settings.zoom_sensitivity = editor_state.panel_settings.zoom_sensitivity;
+        camera.settings.zoom_to_cursor = editor_state.panel_settings.zoom_to_cursor;
+        camera.settings.smooth_zoom = editor_state.panel_settings.smooth_zoom;
+
         Self {
             scene: Scene::create_default_scene(),
             selection: SelectionState::new(),
-            editor_state: EditorState::default(),
-            camera: Camera::default(),
+            editor_state,
+            camera,
             renderer: None,
             gpu_info: None,
             status_message: "Ready (Headless)".to_string(),

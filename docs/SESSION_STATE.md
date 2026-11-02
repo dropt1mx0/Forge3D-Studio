@@ -1,8 +1,8 @@
 # Forge3D Rust Edition — Session State
 
 **Document Status:** Current  
-**Last Updated:** 2026-11-01  
-**Current Milestone:** Forge3D Alpha 0.2.1 — Free Cursor Object Dragging (Complete, 94/94 tests passing)
+**Last Updated:** 2026-11-02  
+**Current Milestone:** Forge3D Alpha 0.2.2 — Adaptive Smooth Viewport Zoom (Complete, 109/109 tests passing)
 
 ---
 
@@ -65,7 +65,7 @@
 - `GpuBuffer`: Typed wrappers for Vertex, Index, and Uniform GPU buffers.
 
 ### `crates/forge-render`
-- `Camera`: Perspective and Orthographic camera with Orbit (yaw/pitch), Pan (screen right/up), Zoom (distance clamp), `distance()` method, view matrix, projection matrix, view-proj matrix, and `screen_to_ray` screen unprojection.
+- `Camera`: Perspective and Orthographic camera with Orbit (yaw/pitch), Pan (screen right/up), Dolly (look vector translation), Exponential Adaptive Zoom (`zoom_adaptive`), Cursor-Anchored Zoom (`apply_zoom_step`), Smooth Inertial Easing (`update_smooth_zoom`), `sync_zoom_targets` cancellation on all navigation modes, `distance()` method, view matrix, projection matrix, view-proj matrix, and `screen_to_ray` screen unprojection.
 - WGSL Shaders:
   - `MESH_SHADER`: Blinn-Phong directional sun lighting, ambient term, specular highlights, and warm amber selection tinting.
   - `GRID_SHADER`: Line list pipeline for ground grid and RGB coordinate axes.
@@ -76,17 +76,17 @@
 - Native desktop application built on `eframe` (v0.37) and `egui`.
 - Custom Dark Graphite styling (#1a1c21 base).
 - Panels:
-  - Menu Bar: File (New, Open, Save, Exit), Add (Cube, Sphere, Plane), View (Reset Camera, Frame Selected, Toggles, Show Viewport Debug Telemetry), Help (About, GPU Diagnostics).
+  - Menu Bar: File (New, Open, Save, Exit), Add (Cube, Sphere, Plane, Cylinder, Cone, Torus, Circle, Capsule, Monkey), View (Reset Camera, Frame Selected, Viewport Zoom settings, Toggles, Show Viewport Debug Telemetry), Help (About, GPU Diagnostics).
   - Left Toolbar: Modes (Select Q, Box Select B, Move W, Rotate E, Scale R), Quick Add, Delete.
-  - Right Sidebar: Scene Outliner (hierarchical list, visibility toggles, selection) + Properties Inspector (Position X/Y/Z, Rotation X/Y/Z in degrees, Scale X/Y/Z, Color picker, Mesh stats).
+  - Right Sidebar: Scene Outliner (hierarchical list, visibility toggles, selection) + Properties Inspector (Position X/Y/Z, Rotation X/Y/Z in degrees, Scale X/Y/Z, Color picker, Mesh stats, Viewport Zoom settings when idle).
   - Bottom Status Bar: GPU adapter name (`Mesa Intel(R) HD Graphics 4000 (Gl)`), FPS, frame time (ms), triangle and vertex metrics, status messages.
-  - Central Viewport: Offscreen WGPU texture target (`Rgba8UnormSrgb`), Free Cursor Drag on geometry with camera-aligned ray-plane projection and grab-point offset retention, LMB drag over empty space orbit, MMB/Alt-drag orbit, Shift-drag pan, scroll zoom, and left-click raycast selection.
+  - Central Viewport: Offscreen WGPU texture target (`Rgba8UnormSrgb`), Free Cursor Drag on geometry with camera-aligned ray-plane projection and grab-point offset retention, LMB drag over empty space orbit, MMB/Alt-drag orbit, Shift-drag pan, adaptive smooth scroll zoom with cursor anchoring and focal plane fallback, and left-click raycast selection.
   - Floating Telemetry Overlay: Monospace debug card reporting pointer state, pointer position, viewport bounds, camera mode, orbit target, and camera distance.
 
 ---
 
 ## 3. Verification & Test Evidence
-- **All Tests**: 94 passed (55 unit & simulation tests + 8 dedicated LMB orbit interaction tests + 8 render/gpu tests + 7 Alpha 0.2 UX tests + 14 Free Cursor Drag tests + 2 other tests), 0 failed, 0 ignored across workspace.
+- **All Tests**: 109 passed (55 unit & simulation tests + 8 dedicated LMB orbit interaction tests + 14 render/gpu tests + 7 Alpha 0.2 UX tests + 14 Free Cursor Drag tests + 9 Adaptive Smooth Zoom tests + 2 other tests), 0 failed, 0 ignored across workspace.
 - **`cargo fmt --check`**: Clean (exit code 0).
 - **`cargo check --workspace`**: Clean (exit code 0).
 - **`cargo clippy --workspace --all-targets -- -D warnings`**: Clean (exit code 0, zero warnings).

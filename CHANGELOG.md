@@ -5,6 +5,33 @@ All notable changes to Forge3D Rust Edition will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2-alpha.4] - 2026-11-02
+
+### Added
+- **Adaptive Smooth Viewport Zoom**:
+  - Replaced erratic linear zoom with exponential multiplicative model: `distance_new = distance_old * exp(-scroll_delta * sensitivity)`.
+  - Scaled base sensitivity factor (`BASE_ZOOM_SENSITIVITY = 0.0025`), eliminating violent camera jumps and providing ~7.3% distance change per standard wheel notch.
+  - Automatic adaptive step scaling: millimeter-fine sensitivity up close, fast navigation when far away.
+  - Safe distance bounds clamping (`[0.05, 5000.0]`) and per-notch exponent clamping (`[-1.2, 1.2]`), preventing penetration through geometry, camera flipping, or NaN/infinity divergence.
+- **Zoom to Cursor (Cursor-Anchored Homothety)**:
+  - Cursor position in screen space unprojects to a 3D ray (`camera.screen_to_ray`).
+  - Raycasts against scene geometry; if hit at point $P$, camera eye and target scale around $P$: $E' = P + (E - P) \cdot k$, $T' = P + (T - P) \cdot k$.
+  - Collinear ray invariant preserves exact 2D screen coordinates of the point under cursor before and after zoom without camera rolling or yaw shifts.
+  - Safe fallback: if raycast misses scene objects, intersects the camera focus plane passing through target (`plane_normal = -camera.forward()`), ensuring smooth navigation across empty viewport regions.
+  - Full support for both Perspective and Orthographic projection modes.
+- **Smooth Inertial Zoom**:
+  - Time-based exponential interpolation ($\alpha = 1.0 - \exp(-18.0 \cdot dt)$) with frame delta awareness.
+  - Anti-queueing guard clamps target distances to `[0.15 * current, 6.0 * current]`, preventing accumulation from free-spinning mouse wheels.
+  - Snaps to target when delta $< 0.001$, halting repaints and conserving GPU/CPU on power-constrained hardware (Intel HD Graphics 4000).
+- **Navigation Compatibility & Synchronization**:
+  - Manual navigation (MMB Orbit, Shift+MMB Pan, Ctrl+MMB Dolly, empty-space LMB Orbit, Fly/Walk, View Presets, Reset View, Frame Box) instantly invokes `camera.sync_zoom_targets()`, ensuring zero conflict.
+- **User Settings & Persistence**:
+  - Added configurable `Zoom Sensitivity` slider (0.1x to 3.0x), `Zoom to Cursor` checkbox, and `Smooth Zoom` checkbox in the `View` menu and Properties panel.
+  - Settings persist across application launches in `forge3d_settings.json`.
+- **Testing & Verification**:
+  - 15 new unit and integration tests (6 in `forge-render::camera`, 9 in `adaptive_smooth_zoom.rs`).
+  - 109/109 automated tests passing across the workspace.
+
 ## [0.5.1-alpha.3] - 2026-11-01
 
 ### Added

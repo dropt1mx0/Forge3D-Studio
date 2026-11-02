@@ -693,10 +693,44 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         }
 
-        // Mouse Wheel: Zoom
+        // Mouse Wheel: Adaptive Viewport Zoom (with Zoom to Cursor and Smooth Zoom)
         if is_pointer_in_viewport && input.smooth_scroll_delta.y.abs() > 0.0 {
-            let zoom_factor = input.smooth_scroll_delta.y;
-            app.camera.zoom(zoom_factor);
+            let scroll_delta = input.smooth_scroll_delta.y;
+
+            let cursor_world_hit = if app.camera.settings.zoom_to_cursor {
+                mouse_pos.and_then(|pos| {
+                    if rect.contains(pos) && rect.width() > 0.0 && rect.height() > 0.0 {
+                        let local_pos = Vec2::new(pos.x - rect.min.x, pos.y - rect.min.y);
+                        let vp_size = Vec2::new(rect.width(), rect.height());
+                        let ray = app.camera.screen_to_ray(local_pos, vp_size);
+
+                        // 1. Scene object geometry raycast hit
+                        if let Some((_id, dist)) = app.scene.raycast(&ray) {
+                            let hit = ray.point_at(dist);
+                            if hit.is_finite() {
+                                return Some(hit);
+                            }
+                        }
+
+                        // 2. Safe fallback: focus plane through camera target
+                        let plane_point = app.camera.target;
+                        let plane_normal = -app.camera.forward();
+                        crate::app::intersect_ray_plane(&ray, plane_point, plane_normal)
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            };
+
+            app.camera.zoom_adaptive(scroll_delta, cursor_world_hit);
+            ui.ctx().request_repaint();
+        }
+
+        // Smooth Zoom frame interpolation
+        let dt = (app.frame_time_ms * 0.001).clamp(0.0005, 0.1);
+        if app.camera.update_smooth_zoom(dt) {
             ui.ctx().request_repaint();
         }
     }

@@ -665,6 +665,53 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.checkbox(&mut app.editor_state.show_wireframe, "Show Wireframe");
 
             ui.separator();
+            ui.label(egui::RichText::new("Viewport Zoom").weak().size(11.0));
+            if ui
+                .checkbox(
+                    &mut app.editor_state.panel_settings.zoom_to_cursor,
+                    "Zoom to Cursor",
+                )
+                .on_hover_text("Zoom towards the 3D surface or focus plane under the mouse cursor")
+                .changed()
+            {
+                app.camera.settings.zoom_to_cursor = app.editor_state.panel_settings.zoom_to_cursor;
+                let _ = app.editor_state.panel_settings.save();
+            }
+            if ui
+                .checkbox(
+                    &mut app.editor_state.panel_settings.smooth_zoom,
+                    "Smooth Zoom",
+                )
+                .on_hover_text(
+                    "Interpolate camera distance smoothly using frame-rate independent easing",
+                )
+                .changed()
+            {
+                app.camera.settings.smooth_zoom = app.editor_state.panel_settings.smooth_zoom;
+                if !app.camera.settings.smooth_zoom {
+                    app.camera.sync_zoom_targets();
+                }
+                let _ = app.editor_state.panel_settings.save();
+            }
+            ui.horizontal(|ui| {
+                ui.label("Zoom Sensitivity:");
+                let mut sens = app.editor_state.panel_settings.zoom_sensitivity;
+                if ui
+                    .add(
+                        egui::Slider::new(&mut sens, 0.1..=3.0)
+                            .step_by(0.1)
+                            .text("x"),
+                    )
+                    .on_hover_text("Adjust mouse wheel zoom sensitivity multiplier (default 1.0x)")
+                    .changed()
+                {
+                    app.editor_state.panel_settings.zoom_sensitivity = sens;
+                    app.camera.settings.zoom_sensitivity = sens;
+                    let _ = app.editor_state.panel_settings.save();
+                }
+            });
+
+            ui.separator();
             ui.label(egui::RichText::new("Workspace Panels").weak().size(11.0));
             if ui
                 .checkbox(

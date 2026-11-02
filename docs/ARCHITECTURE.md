@@ -155,5 +155,47 @@ To enable direct, unconstrained manipulation of 3D objects across the viewport, 
   - Horizon / divergent rays ($t > 10000.0$ or $|\Delta| > 5000.0$): Clamped to prevent float overflow or NaN corruption.
   - Escape key / Focus loss: Reverts all selected objects to their `initial_transforms` without polluting the undo stack.
 
+### 8. Adaptive Smooth Viewport Zoom & Cursor Anchoring
+To eliminate sensitive camera jumping and allow fluid navigation at any scale, Forge3D implements an exponential multiplicative zoom pipeline with cursor-anchored homothety and frame-rate independent easing:
+
+```text
+[Mouse Wheel Event (smooth_scroll_delta.y)]
+         ↓
+1. Compute Exponential Zoom Multiplier:
+   - sens = 0.0025 * settings.zoom_sensitivity.clamp(0.1, 5.0)
+   - mult = exp(-scroll_delta * sens).clamp(exp(-1.2), exp(1.2))
+         ↓
+2. Determine Anchor Hit Point P:
+   - If zoom_to_cursor:
+       - Raycast from mouse screen pos against Scene geometry
+       - If hit: P = Ray.point_at(dist)
+       - If miss: Fallback intersect Ray with Focus Plane:
+           plane_point = camera.target
+           plane_normal = -camera.forward()
+   - If !zoom_to_cursor or no valid hit:
+       P = camera.target
+         ↓
+3. Scale Camera State via Homothety about P:
+   - k = target_dist / current_dist
+   - eye_new = P + (eye - P) * k
+   - target_new = P + (target - P) * k
+   - Bounds: clamp distance to [0.05, 5000.0]
+   - (In Orthographic: ortho_size_new = ortho_size * k, eye_new += delta_target)
+         ↓
+4. If smooth_zoom enabled:
+   - Queue to (zoom_target_eye, zoom_target_target, zoom_target_ortho_size)
+   - Clamp target ratio to [0.15 * current, 6.0 * current] (anti-queueing guard)
+   - On frame tick:
+       alpha = 1.0 - exp(-18.0 * dt)
+       eye = lerp(eye, zoom_target_eye, alpha)
+       target = lerp(target, zoom_target_target, alpha)
+       converged when |diff| < 0.001 (halts repaints)
+   - Orbit / Pan / Dolly / Fly / Presets instantly call sync_zoom_targets()
+```
+
+- **Collinear View Invariant**: Homothety centered at $P$ guarantees the vector $(P - E_{new}) = (P - E) \cdot k$ is parallel to $(P - E)$. Under perspective projection, $P$ projects to the exact same 2D screen coordinates before and after zoom, eliminating visual disorientation.
+- **Dynamic Step Scaling**: At close range ($d \approx 0.1\text{m}$), $7.3\%$ scaling moves the camera by millimeters; at large range ($d \approx 100\text{m}$), $7.3\%$ moves by meters. Distance is clamped to $[0.05, 5000.0]$ preventing inverted projection or horizon overflow.
+
+
 
 

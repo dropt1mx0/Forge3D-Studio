@@ -14,6 +14,13 @@
 - [x] Fix input pipeline execution order (process inputs before offscreen render to eliminate 1-frame latency)
 - [x] Direct MMB / Alt+LMB drag event tracking with continuous repaint requests
 - [x] Camera controls: Orbit, Pan, Zoom, Dolly
+- [x] Adaptive Smooth Viewport Zoom & Cursor Anchoring:
+  - [x] Exponential multiplicative zoom: `distance_new = distance_old * exp(-scroll_delta * sensitivity)`
+  - [x] Base sensitivity normalization (`0.0025`), adaptive step scaling, safe bounds clamping (`[0.05, 5000.0]`)
+  - [x] Zoom to Cursor with collinear ray invariance and safe focal plane fallback
+  - [x] Smooth frame-rate independent easing ($\lambda = 18.0$) with anti-queueing bounds
+  - [x] User settings (Zoom Sensitivity, Zoom to Cursor, Smooth Zoom) persisted to `forge3d_settings.json`
+  - [x] Zero navigation conflicts (`sync_zoom_targets` on Orbit, Pan, Dolly, Fly, Presets, Free Drag)
 - [x] Perspective and Orthographic projection toggle (Numpad 5)
 - [x] Standard viewpoints: Front (Numpad 1), Back (Ctrl+1), Right (Numpad 3), Left (Ctrl+3), Top (Numpad 7), Bottom (Ctrl+7)
 - [x] Frame Selected (`F` / Numpad `.`) and Frame All (`Home`)
