@@ -376,6 +376,77 @@ impl From<PokeFaceResult> for VertexHandle {
     }
 }
 
+/// The typed result of a successful `extrude_face` topological operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ExtrudeFaceResult {
+    /// The original face handle, preserved as the bottom face.
+    pub original_face: FaceHandle,
+    /// The newly created extruded top face handle.
+    pub top_face: FaceHandle,
+    /// The newly created vertex handles forming the top face (length = N).
+    pub new_vertices: Vec<VertexHandle>,
+    /// The newly created edge handles (top edges + pillar edges, length = 2 * N).
+    pub new_edges: Vec<EdgeHandle>,
+    /// The newly created face handles (top face + side faces, length = 1 + N).
+    pub new_faces: Vec<FaceHandle>,
+    /// The newly created half-edge handles (top half-edges + pillar half-edges, length = 4 * N).
+    pub new_half_edges: Vec<HalfEdgeHandle>,
+}
+
+impl ExtrudeFaceResult {
+    #[inline]
+    pub fn original_face(&self) -> FaceHandle {
+        self.original_face
+    }
+
+    #[inline]
+    pub fn top_face(&self) -> FaceHandle {
+        self.top_face
+    }
+
+    #[inline]
+    pub fn face(&self) -> FaceHandle {
+        self.top_face
+    }
+
+    #[inline]
+    pub fn new_vertices(&self) -> &[VertexHandle] {
+        &self.new_vertices
+    }
+
+    #[inline]
+    pub fn new_edges(&self) -> &[EdgeHandle] {
+        &self.new_edges
+    }
+
+    #[inline]
+    pub fn new_faces(&self) -> &[FaceHandle] {
+        &self.new_faces
+    }
+
+    #[inline]
+    pub fn new_half_edges(&self) -> &[HalfEdgeHandle] {
+        &self.new_half_edges
+    }
+}
+
+impl std::ops::Deref for ExtrudeFaceResult {
+    type Target = FaceHandle;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.top_face
+    }
+}
+
+impl From<ExtrudeFaceResult> for FaceHandle {
+    #[inline]
+    fn from(res: ExtrudeFaceResult) -> Self {
+        res.top_face
+    }
+}
+
 impl HalfEdgeMesh {
     /// Inserts a new vertex along edge `e` at linear interpolation parameter `t` in (0, 1).
     ///
@@ -1405,6 +1476,311 @@ impl HalfEdgeMesh {
             new_faces: faces[1..].to_vec(),
             new_edges: e_rad,
             new_half_edges: all_radial_hes,
+        })
+    }
+
+    /// Extrudes face `face` along its normal by `distance`.
+    ///
+    /// Creates a translated top face and side quad faces connecting each original boundary edge
+    /// to its corresponding translated edge, while preserving `face` as the bottom face.
+    /// Transactionally rolls back if an invariant is violated.
+    pub fn extrude_face(
+        &mut self,
+        face: FaceHandle,
+        distance: f32,
+    ) -> Result<ExtrudeFaceResult, TopologyError> {
+        // 1. Pre-validation
+        if !self.is_valid_face(face) {
+            return Err(TopologyError::InvalidFace(face));
+        }
+
+        if !distance.is_finite() {
+            return Err(TopologyError::InvalidOperation(
+                "Extrusion distance must be finite".into(),
+            ));
+        }
+
+        if distance.abs() < 1e-6 {
+            return Err(TopologyError::InvalidOperation(
+                "Extrusion distance cannot be zero or near-zero".into(),
+            ));
+        }
+
+        let h_cycle = self.face_loop_safe(face)?;
+        let n = h_cycle.len();
+        if n < 3 {
+            return Err(TopologyError::Degenerate(format!(
+                "Face {face} has fewer than 3 vertices ({n})"
+            )));
+        }
+
+        let norm_face = self.face_normal(face);
+        if norm_face.length_squared() < 1e-12 {
+            return Err(TopologyError::Degenerate(
+                "Cannot extrude degenerate face with zero area or undefined normal".into(),
+            ));
+        }
+
+        let area = self.face_area(face);
+        if area <= 1e-8 {
+            return Err(TopologyError::Degenerate(format!(
+                "Cannot extrude degenerate face {face} with near-zero area ({area})"
+            )));
+        }
+
+        // Collect original vertices and check that boundary edges are not shared with adjacent faces
+        let mut orig_v = Vec::with_capacity(n);
+        let mut orig_pos = Vec::with_capacity(n);
+        let mut orig_uvs = Vec::with_capacity(n);
+        let mut orig_norms = Vec::with_capacity(n);
+
+        for &h in &h_cycle {
+            let he = self.half_edge(h).unwrap();
+            let v = he.origin;
+            orig_v.push(v);
+            let v_data = self.vertex(v).unwrap();
+            orig_pos.push(v_data.position);
+            orig_uvs.push(he.uv.or(v_data.uv));
+            orig_norms.push(he.normal.or(v_data.normal).unwrap_or(norm_face));
+
+            let twin_h = he.twin;
+            if self.half_edge(twin_h).unwrap().face.is_some() {
+                return Err(TopologyError::NonManifold(format!(
+                    "Face {face} cannot be extruded while preserving bottom face: edge is shared with an adjacent face"
+                )));
+            }
+        }
+
+        // Compute translated top positions and verify coordinate finiteness
+        let offset = norm_face * distance;
+        let mut top_pos = Vec::with_capacity(n);
+        for &p in &orig_pos {
+            let p_new = p + offset;
+            if !p_new.x.is_finite() || !p_new.y.is_finite() || !p_new.z.is_finite() {
+                return Err(TopologyError::Degenerate(
+                    "Generated vertex positions contain non-finite coordinates".into(),
+                ));
+            }
+            top_pos.push(p_new);
+        }
+
+        // Snapshot state for atomic rollback
+        let backup = self.clone();
+
+        // 2. Allocate new vertices
+        let mut top_v = Vec::with_capacity(n);
+        for i in 0..n {
+            let (uv, color, normal) = {
+                let ov = self.vertex(orig_v[i]).unwrap();
+                (ov.uv, ov.color, ov.normal)
+            };
+            let v_new = self.add_vertex(top_pos[i]);
+            let v_mut = self.vertex_mut(v_new).unwrap();
+            v_mut.uv = uv;
+            v_mut.color = color;
+            v_mut.normal = normal.or(Some(norm_face));
+            top_v.push(v_new);
+        }
+
+        // 3. Allocate new faces: 1 top face + N side faces
+        let dummy_he = HalfEdgeHandle::new(u32::MAX, 0);
+        let orig_mat_id = self.face(face).unwrap().material_id;
+
+        let top_face = self.add_face(dummy_he);
+        self.face_mut(top_face).unwrap().material_id = orig_mat_id;
+
+        let mut side_faces = Vec::with_capacity(n);
+        for _ in 0..n {
+            let sf = self.add_face(dummy_he);
+            self.face_mut(sf).unwrap().material_id = orig_mat_id;
+            side_faces.push(sf);
+        }
+
+        // 4. Allocate new edges: N top edges + N pillar edges
+        let mut top_edges = Vec::with_capacity(n);
+        for _ in 0..n {
+            top_edges.push(self.add_edge(dummy_he));
+        }
+
+        let mut pillar_edges = Vec::with_capacity(n);
+        for _ in 0..n {
+            pillar_edges.push(self.add_edge(dummy_he));
+        }
+
+        // 5. Allocate new half-edges
+        // Top edges: 2*N half-edges (h_top and t_top)
+        let mut h_top = Vec::with_capacity(n);
+        let mut t_top = Vec::with_capacity(n);
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let ht = self.add_half_edge(top_v[i], top_edges[i], Some(top_face));
+            let tt = self.add_half_edge(top_v[next_i], top_edges[i], Some(side_faces[i]));
+            h_top.push(ht);
+            t_top.push(tt);
+        }
+
+        // Pillar edges: 2*N half-edges (p_up and p_down)
+        let mut p_up = Vec::with_capacity(n);
+        let mut p_down = Vec::with_capacity(n);
+        for i in 0..n {
+            let prev_side_i = (i + n - 1) % n;
+            let pu = self.add_half_edge(orig_v[i], pillar_edges[i], Some(side_faces[prev_side_i]));
+            let pd = self.add_half_edge(top_v[i], pillar_edges[i], Some(side_faces[i]));
+            p_up.push(pu);
+            p_down.push(pd);
+        }
+
+        // 6. Connect twins
+        for i in 0..n {
+            // Top edges
+            self.half_edge_mut(h_top[i]).unwrap().twin = t_top[i];
+            self.half_edge_mut(t_top[i]).unwrap().twin = h_top[i];
+            self.edge_mut(top_edges[i]).unwrap().half_edge = h_top[i];
+
+            // Pillar edges
+            self.half_edge_mut(p_up[i]).unwrap().twin = p_down[i];
+            self.half_edge_mut(p_down[i]).unwrap().twin = p_up[i];
+            self.edge_mut(pillar_edges[i]).unwrap().half_edge = p_up[i];
+        }
+
+        // 7. Wire Top Face cycle
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let prev_i = (i + n - 1) % n;
+            let ht = self.half_edge_mut(h_top[i]).unwrap();
+            ht.next = h_top[next_i];
+            ht.prev = h_top[prev_i];
+            ht.uv = orig_uvs[i];
+            ht.normal = Some(orig_norms[i]);
+        }
+        self.face_mut(top_face).unwrap().half_edge = h_top[0];
+
+        // 8. Reconfigure bottom edges:
+        // Existing h_cycle[i] had origin orig_v[i] -> orig_v[(i+1)%n].
+        // Its twin orig_twins[i] had origin orig_v[(i+1)%n] -> orig_v[i].
+        //
+        // Bottom face (face) will use orig_twins[i] so that its cycle is reversed (outward normal -norm_face).
+        // Side face i will use h_cycle[i] (orig_v[i] -> orig_v[(i+1)%n]).
+        let mut orig_twins = Vec::with_capacity(n);
+        for &h in &h_cycle {
+            let tw = self.half_edge(h).unwrap().twin;
+            orig_twins.push(tw);
+        }
+
+        // Wire Bottom Face cycle
+        for i in 0..n {
+            let prev_i = (i + n - 1) % n;
+            let next_i = (i + 1) % n;
+            let tw = self.half_edge_mut(orig_twins[i]).unwrap();
+            tw.face = Some(face);
+            tw.next = orig_twins[prev_i];
+            tw.prev = orig_twins[next_i];
+            // Corner attributes for bottom face at origin of tw (orig_v[(i+1)%n])
+            let corner_v_idx = (i + 1) % n;
+            tw.uv = orig_uvs[corner_v_idx];
+            tw.normal = Some(-orig_norms[corner_v_idx]);
+        }
+        self.face_mut(face).unwrap().half_edge = orig_twins[0];
+
+        // 9. Wire Side Face i cycles:
+        // Cycle: h_cycle[i] -> p_up[(i+1)%n] -> t_top[i] -> p_down[i] -> h_cycle[i]
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let sf = side_faces[i];
+
+            let h_bot = h_cycle[i];
+            let p_right = p_up[next_i];
+            let h_t = t_top[i];
+            let p_left = p_down[i];
+
+            // Set face references
+            self.half_edge_mut(h_bot).unwrap().face = Some(sf);
+            self.half_edge_mut(p_right).unwrap().face = Some(sf);
+            self.half_edge_mut(h_t).unwrap().face = Some(sf);
+            self.half_edge_mut(p_left).unwrap().face = Some(sf);
+
+            // Set cycle links
+            self.half_edge_mut(h_bot).unwrap().next = p_right;
+            self.half_edge_mut(h_bot).unwrap().prev = p_left;
+
+            self.half_edge_mut(p_right).unwrap().next = h_t;
+            self.half_edge_mut(p_right).unwrap().prev = h_bot;
+
+            self.half_edge_mut(h_t).unwrap().next = p_left;
+            self.half_edge_mut(h_t).unwrap().prev = p_right;
+
+            self.half_edge_mut(p_left).unwrap().next = h_bot;
+            self.half_edge_mut(p_left).unwrap().prev = h_t;
+
+            self.face_mut(sf).unwrap().half_edge = h_bot;
+        }
+
+        // Set side face normals and corner attributes
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let sf = side_faces[i];
+            let sn = self.face_normal(sf);
+            self.face_mut(sf).unwrap().normal = Some(sn);
+
+            let h_bot = h_cycle[i];
+            let p_right = p_up[next_i];
+            let h_t = t_top[i];
+            let p_left = p_down[i];
+
+            self.half_edge_mut(h_bot).unwrap().uv = orig_uvs[i];
+            self.half_edge_mut(h_bot).unwrap().normal = Some(sn);
+
+            self.half_edge_mut(p_right).unwrap().uv = orig_uvs[next_i];
+            self.half_edge_mut(p_right).unwrap().normal = Some(sn);
+
+            self.half_edge_mut(h_t).unwrap().uv = orig_uvs[next_i];
+            self.half_edge_mut(h_t).unwrap().normal = Some(sn);
+
+            self.half_edge_mut(p_left).unwrap().uv = orig_uvs[i];
+            self.half_edge_mut(p_left).unwrap().normal = Some(sn);
+        }
+
+        // 10. Update vertex outgoing half-edges
+        for i in 0..n {
+            self.vertex_mut(top_v[i]).unwrap().half_edge = Some(h_top[i]);
+            self.vertex_mut(orig_v[i]).unwrap().half_edge = Some(h_cycle[i]);
+        }
+
+        // 11. Recalculate face normals for top and bottom faces
+        let norm_top = self.face_normal(top_face);
+        self.face_mut(top_face).unwrap().normal = Some(norm_top);
+
+        let norm_bot = self.face_normal(face);
+        self.face_mut(face).unwrap().normal = Some(norm_bot);
+
+        // 12. Verify topological and geometric invariants
+        if let Err(e) = self.check_invariants() {
+            *self = backup;
+            return Err(e);
+        }
+
+        // 13. Construct result
+        let mut new_faces = Vec::with_capacity(1 + n);
+        new_faces.push(top_face);
+        new_faces.extend_from_slice(&side_faces);
+
+        let mut new_edges = Vec::with_capacity(2 * n);
+        new_edges.extend_from_slice(&top_edges);
+        new_edges.extend_from_slice(&pillar_edges);
+
+        let mut new_half_edges = Vec::with_capacity(4 * n);
+        new_half_edges.extend_from_slice(&h_top);
+        new_half_edges.extend_from_slice(&t_top);
+        new_half_edges.extend_from_slice(&p_up);
+        new_half_edges.extend_from_slice(&p_down);
+
+        Ok(ExtrudeFaceResult {
+            original_face: face,
+            top_face,
+            new_vertices: top_v,
+            new_edges,
+            new_faces,
+            new_half_edges,
         })
     }
 
@@ -4175,6 +4551,401 @@ mod tests {
         let report = TopologyValidator::validate(&mesh);
         assert!(report.is_valid, "Report must be valid: {:?}", report.issues);
         assert_eq!(report.error_count(), 0);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // =========================================================================
+    // Phase 6.12: Basic Face Extrusion Unit Tests
+    // =========================================================================
+
+    fn make_single_triangle() -> HalfEdgeMesh {
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+        ];
+        let faces = vec![vec![0, 1, 2]];
+        TopologyBuilder::build(&positions, &faces).unwrap()
+    }
+
+    // Extrude Face Test 1: Extruding a single triangle into a triangular prism
+    #[test]
+    fn test_extrude_1_triangle() {
+        let mut mesh = make_single_triangle();
+        let f = mesh.faces().next().unwrap();
+
+        let res = mesh.extrude_face(f, 1.5).expect("extrude triangle");
+        assert_eq!(res.original_face(), f);
+        assert!(mesh.is_valid_face(res.top_face()));
+        assert_eq!(res.new_vertices().len(), 3);
+        assert_eq!(res.new_edges().len(), 6);
+        assert_eq!(res.new_faces().len(), 4); // 1 top + 3 side
+        assert_eq!(res.new_half_edges().len(), 12);
+
+        assert_eq!(mesh.num_vertices(), 6);
+        assert_eq!(mesh.num_edges(), 9);
+        assert_eq!(mesh.num_faces(), 5);
+        assert_eq!(mesh.num_half_edges(), 18);
+
+        // Triangular prism has Euler characteristic: 6 - 9 + 5 = 2
+        assert_eq!(
+            (mesh.num_vertices() as i32) - (mesh.num_edges() as i32) + (mesh.num_faces() as i32),
+            2
+        );
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Extrude Face Test 2: Extruding a quad into a cube/cuboid
+    #[test]
+    fn test_extrude_2_quad() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+
+        let res = mesh.extrude_face(f, 2.0).expect("extrude quad");
+        assert_eq!(res.original_face(), f);
+        assert!(mesh.is_valid_face(res.top_face()));
+        assert_eq!(res.new_vertices().len(), 4);
+        assert_eq!(res.new_edges().len(), 8);
+        assert_eq!(res.new_faces().len(), 5); // 1 top + 4 side
+        assert_eq!(res.new_half_edges().len(), 16);
+
+        assert_eq!(mesh.num_vertices(), 8);
+        assert_eq!(mesh.num_edges(), 12);
+        assert_eq!(mesh.num_faces(), 6);
+        assert_eq!(mesh.num_half_edges(), 24);
+
+        // Cuboid has Euler characteristic: 8 - 12 + 6 = 2
+        assert_eq!(
+            (mesh.num_vertices() as i32) - (mesh.num_edges() as i32) + (mesh.num_faces() as i32),
+            2
+        );
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Extrude Face Test 3: Correct generated vertex, edge, and face counts for N-gon
+    #[test]
+    fn test_extrude_3_correct_element_counts() {
+        let mut mesh = make_pentagon();
+        let f = mesh.faces().next().unwrap();
+
+        let res = mesh.extrude_face(f, 1.0).expect("extrude pentagon");
+        assert_eq!(res.new_vertices().len(), 5);
+        assert_eq!(res.new_edges().len(), 10);
+        assert_eq!(res.new_faces().len(), 6); // 1 top + 5 sides
+        assert_eq!(res.new_half_edges().len(), 20);
+
+        assert_eq!(mesh.num_vertices(), 10);
+        assert_eq!(mesh.num_edges(), 15);
+        assert_eq!(mesh.num_faces(), 7); // 1 bot + 1 top + 5 sides
+        assert_eq!(mesh.num_half_edges(), 30);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Extrude Face Test 4: Correct translated vertex positions
+    #[test]
+    fn test_extrude_4_translated_vertex_positions() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let orig_pos: Vec<Vec3> = mesh
+            .face_vertices(f)
+            .iter()
+            .map(|&v| mesh.vertex(v).unwrap().position)
+            .collect();
+
+        let dist = 3.5;
+        let res = mesh.extrude_face(f, dist).unwrap();
+        let norm = Vec3::new(0.0, 0.0, 1.0);
+
+        for (i, &top_v) in res.new_vertices().iter().enumerate() {
+            let actual = mesh.vertex(top_v).unwrap().position;
+            let expected = orig_pos[i] + norm * dist;
+            assert!((actual - expected).length() < 1e-5);
+        }
+    }
+
+    // Extrude Face Test 5: Correct top and side face loops
+    #[test]
+    fn test_extrude_5_top_and_side_face_loops() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.extrude_face(f, 1.0).unwrap();
+
+        // Top face loop must have 4 vertices
+        let top_verts = mesh.face_vertices(res.top_face());
+        assert_eq!(top_verts.len(), 4);
+        assert_eq!(top_verts, res.new_vertices());
+
+        // Side faces (indices 1..5 of new_faces) must each have 4 vertices
+        for &sf in &res.new_faces()[1..] {
+            let sf_verts = mesh.face_vertices(sf);
+            assert_eq!(sf_verts.len(), 4);
+        }
+
+        // Bottom face must have 4 vertices
+        let bot_verts = mesh.face_vertices(res.original_face());
+        assert_eq!(bot_verts.len(), 4);
+    }
+
+    // Extrude Face Test 6: Reciprocal twin relationships
+    #[test]
+    fn test_extrude_6_reciprocal_twin_relationships() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        mesh.extrude_face(f, 1.0).unwrap();
+
+        for h in mesh.half_edges() {
+            let he = mesh.half_edge(h).unwrap();
+            let twin = mesh.half_edge(he.twin).unwrap();
+            assert_eq!(twin.twin, h);
+            assert_eq!(he.edge, twin.edge);
+            assert_ne!(he.origin, twin.origin);
+        }
+    }
+
+    // Extrude Face Test 7: Correct next and prev links
+    #[test]
+    fn test_extrude_7_correct_next_prev_links() {
+        let mut mesh = make_single_triangle();
+        let f = mesh.faces().next().unwrap();
+        mesh.extrude_face(f, 1.0).unwrap();
+
+        for h in mesh.half_edges() {
+            let he = mesh.half_edge(h).unwrap();
+            let next = mesh.half_edge(he.next).unwrap();
+            let prev = mesh.half_edge(he.prev).unwrap();
+            assert_eq!(next.prev, h);
+            assert_eq!(prev.next, h);
+            let twin = mesh.half_edge(he.twin).unwrap();
+            assert_eq!(next.origin, twin.origin);
+        }
+    }
+
+    // Extrude Face Test 8: Correct face references
+    #[test]
+    fn test_extrude_8_correct_face_references() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.extrude_face(f, 1.0).unwrap();
+
+        for fh in mesh.faces() {
+            let hes = mesh.face_half_edges(fh);
+            for h in hes {
+                assert_eq!(mesh.half_edge(h).unwrap().face, Some(fh));
+            }
+        }
+
+        // All new faces exist
+        for &fh in res.new_faces() {
+            assert!(mesh.is_valid_face(fh));
+        }
+    }
+
+    // Extrude Face Test 9: Vertex attribute preservation
+    #[test]
+    fn test_extrude_9_vertex_attribute_preservation() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+
+        // Assign vertex attributes
+        let test_uv = Vec2::new(0.5, 0.75);
+        let test_color = [1.0, 0.2, 0.3, 1.0];
+        let test_normal = Vec3::new(0.0, 0.0, 1.0);
+
+        let all_verts: Vec<_> = mesh.vertices().collect();
+        for v in all_verts {
+            let vert = mesh.vertex_mut(v).unwrap();
+            vert.uv = Some(test_uv);
+            vert.color = Some(test_color);
+            vert.normal = Some(test_normal);
+        }
+
+        let res = mesh.extrude_face(f, 2.0).unwrap();
+
+        // Check original vertices
+        for &v in &mesh.face_vertices(res.original_face()) {
+            let vert = mesh.vertex(v).unwrap();
+            assert_eq!(vert.uv, Some(test_uv));
+            assert_eq!(vert.color, Some(test_color));
+            assert_eq!(vert.normal, Some(test_normal));
+        }
+
+        // Check top vertices
+        for &v in res.new_vertices() {
+            let vert = mesh.vertex(v).unwrap();
+            assert_eq!(vert.uv, Some(test_uv));
+            assert_eq!(vert.color, Some(test_color));
+            assert_eq!(vert.normal, Some(test_normal));
+        }
+    }
+
+    // Extrude Face Test 10: UV seam and corner normal preservation
+    #[test]
+    fn test_extrude_10_uv_seams_and_corner_normal_preservation() {
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+        let faces = vec![vec![0, 1, 2, 3]];
+        let corner_uvs = vec![vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ]];
+        let corner_normals = vec![vec![
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ]];
+
+        let mut mesh = TopologyBuilder::build_with_attributes(
+            &positions,
+            &faces,
+            None,
+            None,
+            Some(&corner_uvs),
+            Some(&corner_normals),
+        )
+        .unwrap();
+
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.extrude_face(f, 1.0).unwrap();
+
+        // Check top face corners
+        let top_hes = mesh.face_half_edges(res.top_face());
+        for (i, &h) in top_hes.iter().enumerate() {
+            let he = mesh.half_edge(h).unwrap();
+            assert_eq!(he.uv, Some(corner_uvs[0][i]));
+            assert_eq!(he.normal, Some(corner_normals[0][i]));
+        }
+    }
+
+    // Extrude Face Test 11: Material inheritance
+    #[test]
+    fn test_extrude_11_material_inheritance() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        mesh.face_mut(f).unwrap().material_id = Some(99);
+
+        let res = mesh.extrude_face(f, 1.0).unwrap();
+        assert_eq!(
+            mesh.face(res.original_face()).unwrap().material_id,
+            Some(99)
+        );
+        assert_eq!(mesh.face(res.top_face()).unwrap().material_id, Some(99));
+        for &sf in res.new_faces() {
+            assert_eq!(mesh.face(sf).unwrap().material_id, Some(99));
+        }
+    }
+
+    // Extrude Face Test 12: Rejection of invalid handles
+    #[test]
+    fn test_extrude_12_rejection_of_invalid_handles() {
+        let mut mesh = make_single_quad();
+        let invalid_f = FaceHandle::new(9999, 0);
+        let res = mesh.extrude_face(invalid_f, 1.0);
+        assert!(matches!(res, Err(TopologyError::InvalidFace(_))));
+
+        let null_f = FaceHandle::NULL;
+        let res2 = mesh.extrude_face(null_f, 1.0);
+        assert!(matches!(res2, Err(TopologyError::InvalidFace(_))));
+    }
+
+    // Extrude Face Test 13: Rejection of non-finite and zero distances
+    #[test]
+    fn test_extrude_13_rejection_of_non_finite_and_zero_distances() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+
+        assert!(matches!(
+            mesh.extrude_face(f, f32::NAN),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.extrude_face(f, f32::INFINITY),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.extrude_face(f, 0.0),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.extrude_face(f, 1e-7),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Extrude Face Test 14: Rejection of degenerate geometry
+    #[test]
+    fn test_extrude_14_rejection_of_degenerate_geometry() {
+        // Collinear triangle
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+        ];
+        let faces = vec![vec![0, 1, 2]];
+        let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
+        let f = mesh.faces().next().unwrap();
+
+        let res = mesh.extrude_face(f, 1.0);
+        assert!(matches!(res, Err(TopologyError::Degenerate(_))));
+    }
+
+    // Extrude Face Test 15: Rejection of shared adjacent face
+    #[test]
+    fn test_extrude_15_rejection_of_shared_adjacent_face() {
+        let mut mesh = make_two_quads();
+        let f = mesh.faces().next().unwrap();
+
+        // Extruding Face 0 when it shares an edge with Face 1 must be rejected
+        let res = mesh.extrude_face(f, 1.0);
+        assert!(matches!(res, Err(TopologyError::NonManifold(_))));
+    }
+
+    // Extrude Face Test 16: Atomic rollback on failure
+    #[test]
+    fn test_extrude_16_atomic_rollback_on_failure() {
+        let mut mesh = make_single_quad();
+        let backup = mesh.clone();
+        let f = mesh.faces().next().unwrap();
+
+        // Attempt extrusion with invalid distance
+        assert!(mesh.extrude_face(f, 0.0).is_err());
+        assert_eq!(mesh, backup);
+
+        // Attempt extrusion with invalid face
+        assert!(mesh.extrude_face(FaceHandle::NULL, 1.0).is_err());
+        assert_eq!(mesh, backup);
+
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Extrude Face Test 17: Topology validator and invariants
+    #[test]
+    fn test_extrude_17_topology_validator_and_invariants() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.extrude_face(f, 2.0).unwrap();
+        assert!(mesh.is_valid_face(res.top_face()));
+
+        let val_report = TopologyValidator::validate(&mesh);
+        assert!(
+            val_report.is_valid,
+            "ValidationReport must be valid: {:?}",
+            val_report.issues
+        );
+        assert_eq!(val_report.error_count(), 0);
+
+        let top_report = mesh.validate_topology();
+        assert!(top_report.is_valid);
+        assert!(top_report.is_manifold);
+        assert!(top_report.is_closed);
+        assert_eq!(top_report.boundary_loop_count, 0);
+        assert_eq!(top_report.euler_characteristic, 2);
         assert!(mesh.check_invariants().is_ok());
     }
 }
