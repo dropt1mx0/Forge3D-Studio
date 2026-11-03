@@ -539,11 +539,44 @@ fn test_face_merge() {
     let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
     let shared_edge = mesh.edges().find(|&eh| !mesh.is_edge_boundary(eh)).unwrap();
-    let f_merged = mesh.merge_faces(shared_edge).expect("Merge faces failed");
+    let res = mesh
+        .dissolve_edge(shared_edge)
+        .expect("Dissolve edge failed");
 
-    assert!(mesh.is_valid_face(f_merged));
+    assert!(mesh.is_valid_face(res.surviving_face()));
+    assert!(!mesh.is_valid_face(res.removed_face()));
+    assert!(!mesh.is_valid_edge(res.dissolved_edge()));
+    assert_eq!(res.boundary_vertices().len(), 4);
     assert_eq!(mesh.num_faces(), 1);
-    assert_eq!(mesh.face_vertex_count(f_merged), 4);
+    assert_eq!(mesh.face_vertex_count(res.surviving_face()), 4);
+
+    let report = mesh.validate_topology();
+    assert!(report.is_valid);
+}
+
+#[test]
+fn test_poke_face() {
+    let positions = vec![
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(2.0, 0.0, 0.0),
+        Vec3::new(2.0, 2.0, 0.0),
+        Vec3::new(0.0, 2.0, 0.0),
+    ];
+    let faces = vec![vec![0, 1, 2, 3]];
+    let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
+    let f = mesh.faces().next().unwrap();
+
+    let res = mesh
+        .poke_face(f, Vec3::new(1.0, 1.0, 0.0))
+        .expect("Poke face failed");
+    assert!(mesh.is_valid_face(res.original_face()));
+    assert!(mesh.is_valid_vertex(res.new_vertex()));
+    assert_eq!(res.new_faces().len(), 3);
+    assert_eq!(res.new_edges().len(), 4);
+    assert_eq!(res.new_half_edges().len(), 8);
+    assert_eq!(mesh.num_faces(), 4);
+    assert_eq!(mesh.num_edges(), 8);
+    assert_eq!(mesh.num_vertices(), 5);
 
     let report = mesh.validate_topology();
     assert!(report.is_valid);

@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use forge_math::Vec3;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -245,6 +247,132 @@ impl From<SplitFaceResult> for (FaceHandle, EdgeHandle) {
     #[inline]
     fn from(res: SplitFaceResult) -> Self {
         (res.new_face, res.new_edge)
+    }
+}
+
+/// The typed result of a successful `dissolve_edge` (merge faces) topological operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MergeFacesResult {
+    /// The surviving face handle that now encompasses the merged polygon.
+    pub surviving_face: FaceHandle,
+    /// The face handle that was removed and freed during the merge.
+    pub removed_face: FaceHandle,
+    /// The edge handle that was dissolved and freed.
+    pub dissolved_edge: EdgeHandle,
+    /// The ordered list of vertices along the outer boundary of the merged face.
+    pub boundary_vertices: Vec<VertexHandle>,
+}
+
+impl MergeFacesResult {
+    #[inline]
+    pub fn surviving_face(&self) -> FaceHandle {
+        self.surviving_face
+    }
+
+    #[inline]
+    pub fn removed_face(&self) -> FaceHandle {
+        self.removed_face
+    }
+
+    #[inline]
+    pub fn dissolved_edge(&self) -> EdgeHandle {
+        self.dissolved_edge
+    }
+
+    #[inline]
+    pub fn edge(&self) -> EdgeHandle {
+        self.dissolved_edge
+    }
+
+    #[inline]
+    pub fn boundary_vertices(&self) -> &[VertexHandle] {
+        &self.boundary_vertices
+    }
+
+    #[inline]
+    pub fn vertices(&self) -> &[VertexHandle] {
+        &self.boundary_vertices
+    }
+}
+
+impl std::ops::Deref for MergeFacesResult {
+    type Target = FaceHandle;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.surviving_face
+    }
+}
+
+impl From<MergeFacesResult> for FaceHandle {
+    #[inline]
+    fn from(res: MergeFacesResult) -> Self {
+        res.surviving_face
+    }
+}
+
+/// The typed result of a successful `poke_face` topological operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PokeFaceResult {
+    /// The original face handle, which is retained and transformed into one of the fan triangles.
+    pub original_face: FaceHandle,
+    /// The newly created center vertex handle.
+    pub new_vertex: VertexHandle,
+    /// The additional triangular faces created to form the fan (length = N - 1).
+    pub new_faces: Vec<FaceHandle>,
+    /// The radial edges connecting the center vertex to each boundary vertex (length = N).
+    pub new_edges: Vec<EdgeHandle>,
+    /// The directed radial half-edges created for the fan (length = 2 * N).
+    pub new_half_edges: Vec<HalfEdgeHandle>,
+}
+
+impl PokeFaceResult {
+    #[inline]
+    pub fn original_face(&self) -> FaceHandle {
+        self.original_face
+    }
+
+    #[inline]
+    pub fn new_vertex(&self) -> VertexHandle {
+        self.new_vertex
+    }
+
+    #[inline]
+    pub fn vertex(&self) -> VertexHandle {
+        self.new_vertex
+    }
+
+    #[inline]
+    pub fn new_faces(&self) -> &[FaceHandle] {
+        &self.new_faces
+    }
+
+    #[inline]
+    pub fn new_edges(&self) -> &[EdgeHandle] {
+        &self.new_edges
+    }
+
+    #[inline]
+    pub fn new_half_edges(&self) -> &[HalfEdgeHandle] {
+        &self.new_half_edges
+    }
+}
+
+impl std::ops::Deref for PokeFaceResult {
+    type Target = VertexHandle;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.new_vertex
+    }
+}
+
+impl From<PokeFaceResult> for VertexHandle {
+    #[inline]
+    fn from(res: PokeFaceResult) -> Self {
+        res.new_vertex
     }
 }
 
@@ -836,30 +964,65 @@ impl HalfEdgeMesh {
         })
     }
 
-    /// Removes an internal edge between two faces, merging them into a single polygon face.
+    /// Dissolves an internal edge between two faces, merging them into a single polygon face.
+    ///
+    /// The first incident face `f0` is retained as the surviving face, and its `material_id`
+    /// is kept as the deterministic material policy. The second incident face `f1`, the edge,
+    /// and its two half-edges are deleted and their slots freed.
     ///
     /// Transactionally rolls back if an invariant is violated.
-    pub fn merge_faces(&mut self, edge: EdgeHandle) -> Result<FaceHandle, TopologyError> {
+    pub fn dissolve_edge(&mut self, edge: EdgeHandle) -> Result<MergeFacesResult, TopologyError> {
         if !self.is_valid_edge(edge) {
             return Err(TopologyError::InvalidEdge(edge));
         }
 
-        let backup = self.clone();
+        if self.is_edge_boundary(edge) {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot dissolve boundary edge".into(),
+            ));
+        }
 
         let (h0, h1) = self
             .edge_half_edges(edge)
             .ok_or(TopologyError::InvalidEdge(edge))?;
 
+        if !self.is_valid_half_edge(h0) || !self.is_valid_half_edge(h1) {
+            return Err(TopologyError::InvalidOperation(
+                "Edge references invalid half-edges".into(),
+            ));
+        }
+
         let f0 = self.half_edge(h0).unwrap().face.ok_or_else(|| {
-            TopologyError::InvalidOperation("Cannot merge on boundary edge".into())
+            TopologyError::InvalidOperation("Cannot dissolve boundary edge".into())
         })?;
         let f1 = self.half_edge(h1).unwrap().face.ok_or_else(|| {
-            TopologyError::InvalidOperation("Cannot merge on boundary edge".into())
+            TopologyError::InvalidOperation("Cannot dissolve boundary edge".into())
         })?;
+
+        if !self.is_valid_face(f0) {
+            return Err(TopologyError::InvalidFace(f0));
+        }
+        if !self.is_valid_face(f1) {
+            return Err(TopologyError::InvalidFace(f1));
+        }
 
         if f0 == f1 {
             return Err(TopologyError::InvalidOperation(
                 "Cannot merge edge belonging to the same face on both sides".into(),
+            ));
+        }
+
+        // Validate both face cycles are closed and valid
+        let _f0_hes = self.face_loop_safe(f0)?;
+        let _f1_hes = self.face_loop_safe(f1)?;
+
+        // Check if faces share multiple edges
+        let f0_edges = self.face_edges(f0);
+        let f1_edges = self.face_edges(f1);
+        let shared_edge_count = f0_edges.iter().filter(|e| f1_edges.contains(e)).count();
+        if shared_edge_count > 1 {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot dissolve edge: incident faces share multiple edges".into(),
             ));
         }
 
@@ -871,6 +1034,61 @@ impl HalfEdgeMesh {
         let h1_prev = self.half_edge(h1).unwrap().prev;
         let h1_next = self.half_edge(h1).unwrap().next;
 
+        // Build expected boundary vertices in merged cycle
+        let mut boundary_vertices = Vec::new();
+        let mut curr = h0_next;
+        while curr != h0 {
+            boundary_vertices.push(self.half_edge(curr).unwrap().origin);
+            curr = self.half_edge(curr).unwrap().next;
+        }
+        let mut curr = h1_next;
+        while curr != h1 {
+            boundary_vertices.push(self.half_edge(curr).unwrap().origin);
+            curr = self.half_edge(curr).unwrap().next;
+        }
+
+        // Reject if fewer than 3 vertices
+        if boundary_vertices.len() < 3 {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot dissolve edge: merged face would have fewer than 3 vertices".into(),
+            ));
+        }
+
+        // Check for duplicate consecutive vertices
+        let n = boundary_vertices.len();
+        for i in 0..n {
+            if boundary_vertices[i] == boundary_vertices[(i + 1) % n] {
+                return Err(TopologyError::InvalidOperation(
+                    "Cannot dissolve edge: merged face boundary contains duplicate consecutive vertices".into(),
+                ));
+            }
+        }
+
+        // Check for duplicate vertices in simple polygon cycle
+        let mut seen = HashSet::new();
+        for &v in &boundary_vertices {
+            if !seen.insert(v) {
+                return Err(TopologyError::InvalidOperation(
+                    "Cannot dissolve edge: merged face boundary would contain duplicate vertices"
+                        .into(),
+                ));
+            }
+        }
+
+        // Geometric checks on orientation before merge:
+        let norm0 = self.face_normal(f0);
+        let norm1 = self.face_normal(f1);
+        if norm0.length_squared() >= 1e-12
+            && norm1.length_squared() >= 1e-12
+            && norm0.dot(norm1) <= 0.0
+        {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot dissolve edge: incident faces fold backwards (dot product <= 0)".into(),
+            ));
+        }
+
+        let backup = self.clone();
+
         // Splice cycles together bypassing h0 and h1
         self.half_edge_mut(h0_prev).unwrap().next = h1_next;
         self.half_edge_mut(h1_next).unwrap().prev = h0_prev;
@@ -878,22 +1096,18 @@ impl HalfEdgeMesh {
         self.half_edge_mut(h1_prev).unwrap().next = h0_next;
         self.half_edge_mut(h0_next).unwrap().prev = h1_prev;
 
-        // Retarget all half-edges in f1 to f0
-        let mut curr = h1_next;
-        while curr != h0_prev {
+        // Reassign all half-edges in the merged cycle to f0
+        let mut curr = h0_next;
+        loop {
             self.half_edge_mut(curr).unwrap().face = Some(f0);
             curr = self.half_edge(curr).unwrap().next;
+            if curr == h0_next {
+                break;
+            }
         }
 
+        // Set f0's representative half-edge
         self.face_mut(f0).unwrap().half_edge = h0_next;
-
-        // Fix vertex outgoing pointers if they pointed to h0 or h1
-        if self.vertex(v0).unwrap().half_edge == Some(h0) {
-            self.vertex_mut(v0).unwrap().half_edge = Some(h1_next);
-        }
-        if self.vertex(v1).unwrap().half_edge == Some(h1) {
-            self.vertex_mut(v1).unwrap().half_edge = Some(h0_next);
-        }
 
         // Delete h0, h1, edge, and f1
         self.free_half_edge(h0)?;
@@ -901,8 +1115,33 @@ impl HalfEdgeMesh {
         self.free_edge(edge)?;
         self.free_face(f1)?;
 
+        // Refresh vertex outgoing pointers for v0, v1, and all boundary vertices
+        self.refresh_vertex_outgoing_half_edge(v0);
+        self.refresh_vertex_outgoing_half_edge(v1);
+        for &v in &boundary_vertices {
+            self.refresh_vertex_outgoing_half_edge(v);
+        }
+
+        // Recalculate face normal
         let norm = self.face_normal(f0);
         self.face_mut(f0).unwrap().normal = Some(norm);
+
+        // Geometric validation on merged face
+        let area_merged = self.face_area(f0);
+        if !area_merged.is_finite() || area_merged <= 1e-8 {
+            *self = backup;
+            return Err(TopologyError::InvalidOperation(
+                "Cannot dissolve edge: merged face would be degenerate or have zero area".into(),
+            ));
+        }
+
+        if norm0.length_squared() >= 1e-12 && norm.dot(norm0) <= 0.0 {
+            *self = backup;
+            return Err(TopologyError::InvalidOperation(
+                "Cannot dissolve edge: merged face normal inverted relative to original face"
+                    .into(),
+            ));
+        }
 
         // Invariant verification
         if let Err(e) = self.check_invariants() {
@@ -910,7 +1149,263 @@ impl HalfEdgeMesh {
             return Err(e);
         }
 
-        Ok(f0)
+        Ok(MergeFacesResult {
+            surviving_face: f0,
+            removed_face: f1,
+            dissolved_edge: edge,
+            boundary_vertices,
+        })
+    }
+
+    /// Alias for [`dissolve_edge`](Self::dissolve_edge). Merges the two adjacent faces sharing `edge`.
+    #[inline]
+    pub fn merge_faces(&mut self, edge: EdgeHandle) -> Result<MergeFacesResult, TopologyError> {
+        self.dissolve_edge(edge)
+    }
+
+    /// Inserts a new vertex inside a convex polygonal face and connects it to every boundary
+    /// vertex, producing a triangle fan.
+    ///
+    /// Preserves the original face handle for one of the triangles and creates N - 1 new faces.
+    /// Transactionally rolls back if an invariant is violated.
+    pub fn poke_face(
+        &mut self,
+        face: FaceHandle,
+        position: Vec3,
+    ) -> Result<PokeFaceResult, TopologyError> {
+        if !self.is_valid_face(face) {
+            return Err(TopologyError::InvalidFace(face));
+        }
+
+        if !position.x.is_finite() || !position.y.is_finite() || !position.z.is_finite() {
+            return Err(TopologyError::InvalidOperation(
+                "Poke face position contains non-finite coordinates".into(),
+            ));
+        }
+
+        let f_hes = self.face_loop_safe(face)?;
+        let n = f_hes.len();
+        if n < 3 {
+            return Err(TopologyError::InvalidOperation(
+                "Face must have at least 3 vertices to poke".into(),
+            ));
+        }
+
+        let bnd_vertices: Vec<VertexHandle> = f_hes
+            .iter()
+            .map(|&h| self.half_edge(h).unwrap().origin)
+            .collect();
+
+        let bnd_positions: Vec<Vec3> = bnd_vertices
+            .iter()
+            .map(|&v| self.vertex(v).unwrap().position)
+            .collect();
+
+        let norm_face = self.face_normal(face);
+        if norm_face.length_squared() < 1e-12 {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot poke degenerate face with zero area or undefined normal".into(),
+            ));
+        }
+
+        // Planarity check: boundary vertices must lie close to the face plane
+        let center = self.face_center(face);
+        for (i, &p) in bnd_positions.iter().enumerate() {
+            let dist_to_plane = ((p - center).dot(norm_face)).abs();
+            if dist_to_plane > 1e-3 {
+                return Err(TopologyError::InvalidOperation(format!(
+                    "Cannot poke non-planar face: vertex {i} distance to plane is {dist_to_plane}"
+                )));
+            }
+        }
+
+        // Position must also lie in the face plane
+        let pos_dist_to_plane = ((position - center).dot(norm_face)).abs();
+        if pos_dist_to_plane > 1e-3 {
+            return Err(TopologyError::InvalidOperation(format!(
+                "Cannot poke face: position is not coplanar with face (distance {pos_dist_to_plane})"
+            )));
+        }
+
+        // Convexity check: all corners must turn counter-clockwise
+        for i in 0..n {
+            let p_curr = bnd_positions[i];
+            let p_next = bnd_positions[(i + 1) % n];
+            let p_next2 = bnd_positions[(i + 2) % n];
+            let edge1 = p_next - p_curr;
+            let edge2 = p_next2 - p_next;
+            let turn = edge1.cross(edge2).dot(norm_face);
+            if turn <= 1e-6 {
+                return Err(TopologyError::InvalidOperation(
+                    "Cannot poke face: polygon is not strictly convex".into(),
+                ));
+            }
+        }
+
+        // Inside polygon and non-degenerate triangle check
+        for i in 0..n {
+            let p_curr = bnd_positions[i];
+            let p_next = bnd_positions[(i + 1) % n];
+            let edge = p_next - p_curr;
+            let to_pos = position - p_curr;
+            let cross = edge.cross(to_pos);
+            let signed_area_2x = cross.dot(norm_face);
+            if signed_area_2x <= 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Cannot poke face: position lies outside or on the boundary of the face".into(),
+                ));
+            }
+            let tri_area = 0.5 * cross.length();
+            if tri_area <= 1e-6 {
+                return Err(TopologyError::InvalidOperation(
+                    "Cannot poke face: generated triangle would be degenerate or have zero area"
+                        .into(),
+                ));
+            }
+        }
+
+        let backup = self.clone();
+
+        // 1. Create new center vertex
+        let vc = self.add_vertex(position);
+
+        // Interpolate vertex attributes for vc
+        self.vertex_mut(vc).unwrap().normal = Some(norm_face);
+
+        let mut uv_sum = forge_math::Vec2::ZERO;
+        let mut uv_count = 0;
+        for &v in &bnd_vertices {
+            if let Some(uv) = self.vertex(v).unwrap().uv {
+                uv_sum += uv;
+                uv_count += 1;
+            }
+        }
+        if uv_count == n {
+            self.vertex_mut(vc).unwrap().uv = Some(uv_sum / (n as f32));
+        }
+
+        let mut col_sum = [0.0f32; 4];
+        let mut col_count = 0;
+        for &v in &bnd_vertices {
+            if let Some(col) = self.vertex(v).unwrap().color {
+                for c in 0..4 {
+                    col_sum[c] += col[c];
+                }
+                col_count += 1;
+            }
+        }
+        if col_count == n {
+            for val in &mut col_sum {
+                *val /= n as f32;
+            }
+            self.vertex_mut(vc).unwrap().color = Some(col_sum);
+        }
+
+        // 2. Prepare face handles: face 0 is the original face, faces 1..N-1 are newly added
+        let dummy_he = HalfEdgeHandle::new(u32::MAX, 0);
+        let orig_mat_id = self.face(face).unwrap().material_id;
+
+        let mut faces = Vec::with_capacity(n);
+        faces.push(face);
+        for _ in 1..n {
+            let f_new = self.add_face(dummy_he);
+            self.face_mut(f_new).unwrap().material_id = orig_mat_id;
+            faces.push(f_new);
+        }
+
+        // 3. Create N radial edges
+        let e_rad: Vec<EdgeHandle> = (0..n).map(|_| self.add_edge(dummy_he)).collect();
+
+        // 4. Create radial half-edges:
+        // r_in[i] originates at bnd_vertices[i], directed to vc, belongs to face (i + n - 1) % n
+        // r_out[i] originates at vc, directed to bnd_vertices[i], belongs to face i
+        let r_in: Vec<HalfEdgeHandle> = (0..n)
+            .map(|i| self.add_half_edge(bnd_vertices[i], e_rad[i], Some(faces[(i + n - 1) % n])))
+            .collect();
+
+        let r_out: Vec<HalfEdgeHandle> = (0..n)
+            .map(|i| self.add_half_edge(vc, e_rad[i], Some(faces[i])))
+            .collect();
+
+        // Twin setup and edge half-edge assignment
+        for i in 0..n {
+            self.half_edge_mut(r_in[i]).unwrap().twin = r_out[i];
+            self.half_edge_mut(r_out[i]).unwrap().twin = r_in[i];
+            self.edge_mut(e_rad[i]).unwrap().half_edge = r_out[i];
+        }
+
+        // 5. Transfer corner attributes to new radial half-edges
+        let vc_uv = self.vertex(vc).unwrap().uv;
+        for i in 0..n {
+            // In face i:
+            // h_i originates at bnd_vertices[i] (already has corner attributes)
+            // r_in[(i + 1) % n] originates at bnd_vertices[(i + 1) % n] in face i:
+            let h_next_orig = f_hes[(i + 1) % n];
+            let uv_next = self.half_edge(h_next_orig).unwrap().uv;
+            let norm_next = self.half_edge(h_next_orig).unwrap().normal;
+            self.half_edge_mut(r_in[(i + 1) % n]).unwrap().uv = uv_next;
+            self.half_edge_mut(r_in[(i + 1) % n]).unwrap().normal = norm_next;
+
+            // r_out[i] originates at vc in face i:
+            self.half_edge_mut(r_out[i]).unwrap().uv = vc_uv;
+            self.half_edge_mut(r_out[i]).unwrap().normal = Some(norm_face);
+        }
+
+        // 6. Connect next/prev links for each triangle i:
+        // Triangle i cycle: h_i -> r_in[(i + 1) % n] -> r_out[i] -> h_i
+        for i in 0..n {
+            let h_i = f_hes[i];
+            let r_in_next = r_in[(i + 1) % n];
+            let r_out_curr = r_out[i];
+            let f_curr = faces[i];
+
+            self.half_edge_mut(h_i).unwrap().next = r_in_next;
+            self.half_edge_mut(r_in_next).unwrap().prev = h_i;
+
+            self.half_edge_mut(r_in_next).unwrap().next = r_out_curr;
+            self.half_edge_mut(r_out_curr).unwrap().prev = r_in_next;
+
+            self.half_edge_mut(r_out_curr).unwrap().next = h_i;
+            self.half_edge_mut(h_i).unwrap().prev = r_out_curr;
+
+            self.half_edge_mut(h_i).unwrap().face = Some(f_curr);
+            self.half_edge_mut(r_in_next).unwrap().face = Some(f_curr);
+            self.half_edge_mut(r_out_curr).unwrap().face = Some(f_curr);
+
+            self.face_mut(f_curr).unwrap().half_edge = h_i;
+        }
+
+        // 7. Refresh outgoing half-edges for vc and boundary vertices
+        self.vertex_mut(vc).unwrap().half_edge = Some(r_out[0]);
+        for &v in &bnd_vertices {
+            self.refresh_vertex_outgoing_half_edge(v);
+        }
+
+        // 8. Recalculate face normals for all fan triangles
+        for &f in &faces {
+            let norm = self.face_normal(f);
+            self.face_mut(f).unwrap().normal = Some(norm);
+        }
+
+        // 9. Invariant validation
+        if let Err(e) = self.check_invariants() {
+            *self = backup;
+            return Err(e);
+        }
+
+        let mut all_radial_hes = Vec::with_capacity(2 * n);
+        for i in 0..n {
+            all_radial_hes.push(r_in[i]);
+            all_radial_hes.push(r_out[i]);
+        }
+
+        Ok(PokeFaceResult {
+            original_face: face,
+            new_vertex: vc,
+            new_faces: faces[1..].to_vec(),
+            new_edges: e_rad,
+            new_half_edges: all_radial_hes,
+        })
     }
 
     /// Topologically removes a face from the mesh.
@@ -3079,6 +3574,603 @@ mod tests {
         let v1 = VertexHandle::new(1, 0);
         let res2 = mesh.split_face(res.original_face(), v1, v3);
         assert!(res2.is_ok());
+
+        let report = TopologyValidator::validate(&mesh);
+        assert!(report.is_valid, "Report must be valid: {:?}", report.issues);
+        assert_eq!(report.error_count(), 0);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // =========================================================================
+    // Phase 6.10: Dissolve Edge (Merge Faces) Unit Tests
+    // =========================================================================
+
+    fn make_triangle_and_quad() -> HalfEdgeMesh {
+        let positions = vec![
+            Vec3::new(0.0, 1.0, 0.0), // 0
+            Vec3::new(1.0, 0.0, 0.0), // 1
+            Vec3::new(2.0, 1.0, 0.0), // 2
+            Vec3::new(0.0, 3.0, 0.0), // 3
+            Vec3::new(2.0, 3.0, 0.0), // 4
+        ];
+        let faces = vec![
+            vec![0, 1, 2],    // Triangle 0: 0->1->2
+            vec![0, 2, 4, 3], // Quad 1: 0->2->4->3
+        ];
+        TopologyBuilder::build(&positions, &faces).unwrap()
+    }
+
+    // Dissolve Edge Test 1: Merging two triangles into a quad
+    #[test]
+    fn test_dissolve_1_two_triangles_to_quad() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh.dissolve_edge(e).expect("dissolve edge");
+        assert_eq!(res.boundary_vertices().len(), 4);
+        assert_eq!(mesh.num_faces(), 1);
+        assert_eq!(mesh.num_edges(), 4);
+    }
+
+    // Dissolve Edge Test 2: Merging a triangle and a quad into a pentagon
+    #[test]
+    fn test_dissolve_2_triangle_and_quad_to_pentagon() {
+        let mut mesh = make_triangle_and_quad();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh.dissolve_edge(e).expect("dissolve edge");
+        assert_eq!(res.boundary_vertices().len(), 5);
+        assert_eq!(mesh.num_faces(), 1);
+        assert_eq!(mesh.num_edges(), 5);
+    }
+
+    // Dissolve Edge Test 3: Correct merged face loop
+    #[test]
+    fn test_dissolve_3_correct_merged_face_loop() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh.dissolve_edge(e).unwrap();
+        let loop_hes = mesh.face_loop_safe(res.surviving_face()).unwrap();
+        assert_eq!(loop_hes.len(), 4);
+
+        for (i, &he) in loop_hes.iter().enumerate() {
+            let next_expected = loop_hes[(i + 1) % loop_hes.len()];
+            assert_eq!(mesh.half_edge(he).unwrap().next, next_expected);
+        }
+    }
+
+    // Dissolve Edge Test 4: Correct half-edge next/prev links
+    #[test]
+    fn test_dissolve_4_correct_next_prev_links() {
+        let mut mesh = make_triangle_and_quad();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh.dissolve_edge(e).unwrap();
+
+        for he_h in mesh.face_half_edges(res.surviving_face()) {
+            let he = mesh.half_edge(he_h).unwrap();
+            let next_he = mesh.half_edge(he.next).unwrap();
+            let prev_he = mesh.half_edge(he.prev).unwrap();
+
+            assert_eq!(next_he.prev, he_h);
+            assert_eq!(prev_he.next, he_h);
+        }
+    }
+
+    // Dissolve Edge Test 5: Correct face references
+    #[test]
+    fn test_dissolve_5_correct_face_references() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh.dissolve_edge(e).unwrap();
+
+        for he_h in mesh.face_half_edges(res.surviving_face()) {
+            assert_eq!(
+                mesh.half_edge(he_h).unwrap().face,
+                Some(res.surviving_face())
+            );
+        }
+    }
+
+    // Dissolve Edge Test 6: Deletion of the shared edge and half-edges
+    #[test]
+    fn test_dissolve_6_deletion_of_shared_edge_and_half_edges() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (h0, h1) = mesh.edge_half_edges(e).unwrap();
+
+        let res = mesh.dissolve_edge(e).unwrap();
+
+        assert!(!mesh.is_valid_edge(res.dissolved_edge()));
+        assert!(!mesh.is_valid_edge(e));
+        assert!(!mesh.is_valid_half_edge(h0));
+        assert!(!mesh.is_valid_half_edge(h1));
+    }
+
+    // Dissolve Edge Test 7: Deletion of the removed face
+    #[test]
+    fn test_dissolve_7_deletion_of_removed_face() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh.dissolve_edge(e).unwrap();
+
+        assert!(!mesh.is_valid_face(res.removed_face()));
+        assert!(mesh.is_valid_face(res.surviving_face()));
+    }
+
+    // Dissolve Edge Test 8: Active element counters
+    #[test]
+    fn test_dissolve_8_active_element_counters() {
+        let mut mesh = make_two_triangles();
+        let v0 = mesh.num_vertices();
+        let e0 = mesh.num_edges();
+        let f0 = mesh.num_faces();
+        let he0 = mesh.num_half_edges();
+
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.dissolve_edge(e).unwrap();
+
+        assert_eq!(mesh.num_vertices(), v0);
+        assert_eq!(mesh.num_edges(), e0 - 1);
+        assert_eq!(mesh.num_faces(), f0 - 1);
+        assert_eq!(mesh.num_half_edges(), he0 - 2);
+    }
+
+    // Dissolve Edge Test 9: Preservation of UV seams and corner normals
+    #[test]
+    fn test_dissolve_9_preservation_of_uv_seams_and_corner_normals() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (h0, h1) = mesh.edge_half_edges(e).unwrap();
+
+        // Assign distinct UVs to all half-edges that will survive
+        for he_h in mesh.half_edges().collect::<Vec<_>>() {
+            if he_h != h0 && he_h != h1 {
+                let idx = he_h.index() as f32;
+                mesh.half_edge_mut(he_h).unwrap().uv = Some(Vec2::new(idx, idx * 0.5));
+                mesh.half_edge_mut(he_h).unwrap().normal = Some(Vec3::new(0.0, 0.0, 1.0));
+            }
+        }
+
+        let res = mesh.dissolve_edge(e).unwrap();
+
+        for he_h in mesh.face_half_edges(res.surviving_face()) {
+            let idx = he_h.index() as f32;
+            assert_eq!(
+                mesh.half_edge(he_h).unwrap().uv,
+                Some(Vec2::new(idx, idx * 0.5))
+            );
+            assert_eq!(
+                mesh.half_edge(he_h).unwrap().normal,
+                Some(Vec3::new(0.0, 0.0, 1.0))
+            );
+        }
+    }
+
+    // Dissolve Edge Test 10: Preservation of vertex attributes
+    #[test]
+    fn test_dissolve_10_preservation_of_vertex_attributes() {
+        let mut mesh = make_two_triangles();
+        let positions_before: Vec<Vec3> = mesh
+            .vertices()
+            .map(|v| mesh.vertex(v).unwrap().position)
+            .collect();
+
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.dissolve_edge(e).unwrap();
+
+        let positions_after: Vec<Vec3> = mesh
+            .vertices()
+            .map(|v| mesh.vertex(v).unwrap().position)
+            .collect();
+        assert_eq!(positions_before, positions_after);
+    }
+
+    // Dissolve Edge Test 11: Deterministic material behavior
+    #[test]
+    fn test_dissolve_11_deterministic_material_behavior() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (h0, h1) = mesh.edge_half_edges(e).unwrap();
+        let f0 = mesh.half_edge(h0).unwrap().face.unwrap();
+        let f1 = mesh.half_edge(h1).unwrap().face.unwrap();
+
+        mesh.face_mut(f0).unwrap().material_id = Some(111);
+        mesh.face_mut(f1).unwrap().material_id = Some(222);
+
+        let res = mesh.dissolve_edge(e).unwrap();
+        assert_eq!(res.surviving_face(), f0);
+        assert_eq!(
+            mesh.face(res.surviving_face()).unwrap().material_id,
+            Some(111)
+        );
+    }
+
+    // Dissolve Edge Test 12: Rejection of boundary edges
+    #[test]
+    fn test_dissolve_12_rejection_of_boundary_edges() {
+        let mut mesh = make_two_triangles();
+        let e_bnd = find_edge_between(&mesh, 0, 1);
+        assert!(mesh.is_edge_boundary(e_bnd));
+
+        let res = mesh.dissolve_edge(e_bnd);
+        assert!(matches!(res, Err(TopologyError::InvalidOperation(_))));
+    }
+
+    // Dissolve Edge Test 13: Rejection of invalid handles
+    #[test]
+    fn test_dissolve_13_rejection_of_invalid_handles() {
+        let mut mesh = make_two_triangles();
+        let res = mesh.dissolve_edge(EdgeHandle::NULL);
+        assert!(matches!(res, Err(TopologyError::InvalidEdge(_))));
+    }
+
+    // Dissolve Edge Test 14: Rejection of degenerate / folding results
+    #[test]
+    fn test_dissolve_14_rejection_of_degenerate_results() {
+        // Two triangles folded back-to-back (normal dot product < 0)
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0), // 0
+            Vec3::new(2.0, 0.0, 0.0), // 1
+            Vec3::new(1.0, 1.0, 0.0), // 2
+            Vec3::new(1.0, 0.2, 0.0), // 3 (folds backwards inside triangle 0)
+        ];
+        let faces = vec![
+            vec![0, 1, 2], // normal +Z
+            vec![0, 2, 3], // normal -Z (folded backwards)
+        ];
+        let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh.dissolve_edge(e);
+        assert!(matches!(res, Err(TopologyError::InvalidOperation(_))));
+    }
+
+    // Dissolve Edge Test 15: Atomic rollback on failure
+    #[test]
+    fn test_dissolve_15_atomic_rollback_on_failure() {
+        let mut mesh = make_two_triangles();
+        let backup = mesh.clone();
+
+        // 1. Invalid edge
+        assert!(mesh.dissolve_edge(EdgeHandle::NULL).is_err());
+        assert_eq!(mesh, backup);
+
+        // 2. Boundary edge
+        let e_bnd = find_edge_between(&mesh, 0, 1);
+        assert!(mesh.dissolve_edge(e_bnd).is_err());
+        assert_eq!(mesh, backup);
+
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Dissolve Edge Test 16: Successful validation with TopologyValidator and invariants
+    #[test]
+    fn test_dissolve_16_topology_validator_and_invariants() {
+        let mut mesh = make_triangle_and_quad();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh.dissolve_edge(e).unwrap();
+        assert!(mesh.is_valid_face(res.surviving_face()));
+
+        let report = TopologyValidator::validate(&mesh);
+        assert!(report.is_valid, "Report must be valid: {:?}", report.issues);
+        assert_eq!(report.error_count(), 0);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // =========================================================================
+    // Phase 6.11: Poke Face Unit Tests
+    // =========================================================================
+
+    // Poke Face Test 1: Poking a convex quad into four triangles
+    #[test]
+    fn test_poke_1_convex_quad_to_four_triangles() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh
+            .poke_face(f, Vec3::new(1.0, 1.0, 0.0))
+            .expect("poke quad");
+
+        assert_eq!(mesh.num_faces(), 4);
+        assert_eq!(res.new_faces().len(), 3);
+        assert!(mesh.is_valid_face(res.original_face()));
+        assert_eq!(mesh.face_vertices(res.original_face()).len(), 3);
+        for &nf in res.new_faces() {
+            assert_eq!(mesh.face_vertices(nf).len(), 3);
+        }
+    }
+
+    // Poke Face Test 2: Poking a convex pentagon into five triangles
+    #[test]
+    fn test_poke_2_convex_pentagon_to_five_triangles() {
+        let mut mesh = make_pentagon();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.poke_face(f, Vec3::ZERO).expect("poke pentagon");
+
+        assert_eq!(mesh.num_faces(), 5);
+        assert_eq!(res.new_faces().len(), 4);
+        assert_eq!(mesh.face_vertices(res.original_face()).len(), 3);
+        for &nf in res.new_faces() {
+            assert_eq!(mesh.face_vertices(nf).len(), 3);
+        }
+    }
+
+    // Poke Face Test 3: Correct element counts (V+1, E+N, F+N-1, HE+2N)
+    #[test]
+    fn test_poke_3_element_counts() {
+        let mut mesh = make_single_quad();
+        let v0 = mesh.num_vertices();
+        let e0 = mesh.num_edges();
+        let f0 = mesh.num_faces();
+        let he0 = mesh.num_half_edges();
+
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.poke_face(f, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+
+        assert_eq!(mesh.num_vertices(), v0 + 1);
+        assert_eq!(mesh.num_edges(), e0 + 4);
+        assert_eq!(mesh.num_faces(), f0 + 3);
+        assert_eq!(mesh.num_half_edges(), he0 + 8);
+        assert_eq!(res.new_edges().len(), 4);
+        assert_eq!(res.new_half_edges().len(), 8);
+    }
+
+    // Poke Face Test 4: Correct triangle loops and face references
+    #[test]
+    fn test_poke_4_triangle_loops_and_face_references() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.poke_face(f, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+
+        let mut all_faces = vec![res.original_face()];
+        all_faces.extend_from_slice(res.new_faces());
+
+        for &fh in &all_faces {
+            let loop_hes = mesh.face_loop_safe(fh).unwrap();
+            assert_eq!(loop_hes.len(), 3);
+            for &he_h in &loop_hes {
+                assert_eq!(mesh.half_edge(he_h).unwrap().face, Some(fh));
+            }
+        }
+    }
+
+    // Poke Face Test 5: Reciprocal twin relationships
+    #[test]
+    fn test_poke_5_reciprocal_twin_relationships() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.poke_face(f, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+
+        for &he_h in res.new_half_edges() {
+            let twin_h = mesh.half_edge(he_h).unwrap().twin;
+            assert_eq!(mesh.half_edge(twin_h).unwrap().twin, he_h);
+        }
+    }
+
+    // Poke Face Test 6: Consistent next/prev links
+    #[test]
+    fn test_poke_6_consistent_next_prev_links() {
+        let mut mesh = make_pentagon();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.poke_face(f, Vec3::ZERO).unwrap();
+
+        let mut all_faces = vec![res.original_face()];
+        all_faces.extend_from_slice(res.new_faces());
+
+        for &fh in &all_faces {
+            for he_h in mesh.face_half_edges(fh) {
+                let he = mesh.half_edge(he_h).unwrap();
+                let next_he = mesh.half_edge(he.next).unwrap();
+                let prev_he = mesh.half_edge(he.prev).unwrap();
+
+                assert_eq!(next_he.prev, he_h);
+                assert_eq!(prev_he.next, he_h);
+            }
+        }
+    }
+
+    // Poke Face Test 7: Correct vertex outgoing references
+    #[test]
+    fn test_poke_7_vertex_outgoing_references() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.poke_face(f, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+
+        let vc = res.new_vertex();
+        let out_vc = mesh.vertex(vc).unwrap().half_edge.unwrap();
+        assert_eq!(mesh.half_edge(out_vc).unwrap().origin, vc);
+
+        for vh in mesh.vertices() {
+            if let Some(out_he) = mesh.vertex(vh).unwrap().half_edge {
+                assert_eq!(mesh.half_edge(out_he).unwrap().origin, vh);
+            }
+        }
+    }
+
+    // Poke Face Test 8: Preservation of original boundary vertex attributes
+    #[test]
+    fn test_poke_8_preservation_of_boundary_vertex_attributes() {
+        let mut mesh = make_single_quad();
+        let verts: Vec<_> = mesh.vertices().collect();
+        mesh.vertex_mut(verts[0]).unwrap().uv = Some(Vec2::new(0.0, 0.0));
+        mesh.vertex_mut(verts[1]).unwrap().uv = Some(Vec2::new(1.0, 0.0));
+        mesh.vertex_mut(verts[2]).unwrap().uv = Some(Vec2::new(1.0, 1.0));
+        mesh.vertex_mut(verts[3]).unwrap().uv = Some(Vec2::new(0.0, 1.0));
+
+        let f = mesh.faces().next().unwrap();
+        mesh.poke_face(f, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+
+        assert_eq!(mesh.vertex(verts[0]).unwrap().uv, Some(Vec2::new(0.0, 0.0)));
+        assert_eq!(mesh.vertex(verts[1]).unwrap().uv, Some(Vec2::new(1.0, 0.0)));
+        assert_eq!(mesh.vertex(verts[2]).unwrap().uv, Some(Vec2::new(1.0, 1.0)));
+        assert_eq!(mesh.vertex(verts[3]).unwrap().uv, Some(Vec2::new(0.0, 1.0)));
+    }
+
+    // Poke Face Test 9: New vertex attribute initialization
+    #[test]
+    fn test_poke_9_new_vertex_attribute_initialization() {
+        let mut mesh = make_single_quad();
+        let verts: Vec<_> = mesh.vertices().collect();
+        mesh.vertex_mut(verts[0]).unwrap().uv = Some(Vec2::new(0.0, 0.0));
+        mesh.vertex_mut(verts[1]).unwrap().uv = Some(Vec2::new(2.0, 0.0));
+        mesh.vertex_mut(verts[2]).unwrap().uv = Some(Vec2::new(2.0, 2.0));
+        mesh.vertex_mut(verts[3]).unwrap().uv = Some(Vec2::new(0.0, 2.0));
+
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.poke_face(f, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+
+        let vc = res.new_vertex();
+        assert_eq!(mesh.vertex(vc).unwrap().position, Vec3::new(1.0, 1.0, 0.0));
+        assert_eq!(
+            mesh.vertex(vc).unwrap().normal,
+            Some(Vec3::new(0.0, 0.0, 1.0))
+        );
+        assert_eq!(mesh.vertex(vc).unwrap().uv, Some(Vec2::new(1.0, 1.0)));
+    }
+
+    // Poke Face Test 10: Material inheritance
+    #[test]
+    fn test_poke_10_material_inheritance() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        mesh.face_mut(f).unwrap().material_id = Some(888);
+
+        let res = mesh.poke_face(f, Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        assert_eq!(
+            mesh.face(res.original_face()).unwrap().material_id,
+            Some(888)
+        );
+        for &nf in res.new_faces() {
+            assert_eq!(mesh.face(nf).unwrap().material_id, Some(888));
+        }
+    }
+
+    // Poke Face Test 11: Rejection of invalid handles
+    #[test]
+    fn test_poke_11_rejection_of_invalid_handles() {
+        let mut mesh = make_single_quad();
+        let res = mesh.poke_face(FaceHandle::NULL, Vec3::new(1.0, 1.0, 0.0));
+        assert!(matches!(res, Err(TopologyError::InvalidFace(_))));
+    }
+
+    // Poke Face Test 12: Rejection of non-finite positions
+    #[test]
+    fn test_poke_12_rejection_of_non_finite_positions() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+
+        assert!(matches!(
+            mesh.poke_face(f, Vec3::new(f32::NAN, 1.0, 0.0)),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.poke_face(f, Vec3::new(1.0, f32::INFINITY, 0.0)),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Poke Face Test 13: Rejection of concave and non-planar polygons
+    #[test]
+    fn test_poke_13_rejection_of_concave_and_non_planar_polygons() {
+        // Concave quad (reflex angle at vertex 2)
+        let positions_concave = vec![
+            Vec3::new(0.0, 0.0, 0.0), // 0
+            Vec3::new(2.0, 0.0, 0.0), // 1
+            Vec3::new(1.0, 0.2, 0.0), // 2 (indented)
+            Vec3::new(1.0, 2.0, 0.0), // 3
+        ];
+        let faces_concave = vec![vec![0, 1, 2, 3]];
+        let mut mesh_concave = TopologyBuilder::build(&positions_concave, &faces_concave).unwrap();
+        let f_concave = mesh_concave.faces().next().unwrap();
+
+        let res_concave = mesh_concave.poke_face(f_concave, Vec3::new(1.0, 0.5, 0.0));
+        assert!(matches!(
+            res_concave,
+            Err(TopologyError::InvalidOperation(_))
+        ));
+
+        // Non-coplanar position
+        let mut mesh_quad = make_single_quad();
+        let f_quad = mesh_quad.faces().next().unwrap();
+        let res_nonplanar = mesh_quad.poke_face(f_quad, Vec3::new(1.0, 1.0, 1.0));
+        assert!(matches!(
+            res_nonplanar,
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Poke Face Test 14: Rejection of points outside or on boundary
+    #[test]
+    fn test_poke_14_rejection_of_points_outside_or_on_boundary() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+
+        // Point outside
+        assert!(matches!(
+            mesh.poke_face(f, Vec3::new(5.0, 5.0, 0.0)),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+
+        // Point on boundary edge
+        assert!(matches!(
+            mesh.poke_face(f, Vec3::new(1.0, 0.0, 0.0)),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+
+        // Point on vertex
+        assert!(matches!(
+            mesh.poke_face(f, Vec3::new(0.0, 0.0, 0.0)),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Poke Face Test 15: Rejection of degenerate triangles
+    #[test]
+    fn test_poke_15_rejection_of_degenerate_triangles() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+
+        // Point virtually on boundary edge
+        let res = mesh.poke_face(f, Vec3::new(1.0, 1e-7, 0.0));
+        assert!(matches!(res, Err(TopologyError::InvalidOperation(_))));
+    }
+
+    // Poke Face Test 16: Atomic rollback on failure
+    #[test]
+    fn test_poke_16_atomic_rollback_on_failure() {
+        let mut mesh = make_single_quad();
+        let backup = mesh.clone();
+        let f = mesh.faces().next().unwrap();
+
+        // 1. Invalid face handle
+        assert!(
+            mesh.poke_face(FaceHandle::NULL, Vec3::new(1.0, 1.0, 0.0))
+                .is_err()
+        );
+        assert_eq!(mesh, backup);
+
+        // 2. Point outside
+        assert!(mesh.poke_face(f, Vec3::new(10.0, 10.0, 0.0)).is_err());
+        assert_eq!(mesh, backup);
+
+        // 3. Point on boundary
+        assert!(mesh.poke_face(f, Vec3::new(0.0, 0.0, 0.0)).is_err());
+        assert_eq!(mesh, backup);
+
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Poke Face Test 17: Successful TopologyValidator and invariant checks
+    #[test]
+    fn test_poke_17_topology_validator_and_invariants() {
+        let mut mesh = make_pentagon();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.poke_face(f, Vec3::ZERO).unwrap();
+        assert!(mesh.is_valid_vertex(res.new_vertex()));
 
         let report = TopologyValidator::validate(&mesh);
         assert!(report.is_valid, "Report must be valid: {:?}", report.issues);
