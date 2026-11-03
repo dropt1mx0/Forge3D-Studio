@@ -102,6 +102,83 @@ impl FlipEdgeResult {
     }
 }
 
+/// The typed result of a successful `collapse_edge` topological operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CollapseEdgeResult {
+    /// The surviving vertex that now represents the merged endpoints.
+    pub surviving_vertex: VertexHandle,
+    /// The vertex that was removed/merged into `surviving_vertex`.
+    pub removed_vertex: VertexHandle,
+    /// The edge that was collapsed and removed.
+    pub collapsed_edge: EdgeHandle,
+    /// The faces that became degenerate and were removed (e.g. incident triangles).
+    pub removed_faces: Vec<FaceHandle>,
+    /// The edges that were removed during the collapse (the collapsed edge plus merged triangle edges).
+    pub removed_edges: Vec<EdgeHandle>,
+    /// The half-edges that were removed during the collapse.
+    pub removed_half_edges: Vec<HalfEdgeHandle>,
+    /// The remaining active edges incident to `surviving_vertex` affected by the merge.
+    pub affected_edges: Vec<EdgeHandle>,
+}
+
+impl CollapseEdgeResult {
+    #[inline]
+    pub fn surviving_vertex(&self) -> VertexHandle {
+        self.surviving_vertex
+    }
+
+    #[inline]
+    pub fn vertex(&self) -> VertexHandle {
+        self.surviving_vertex
+    }
+
+    #[inline]
+    pub fn removed_vertex(&self) -> VertexHandle {
+        self.removed_vertex
+    }
+
+    #[inline]
+    pub fn collapsed_edge(&self) -> EdgeHandle {
+        self.collapsed_edge
+    }
+
+    #[inline]
+    pub fn removed_faces(&self) -> &[FaceHandle] {
+        &self.removed_faces
+    }
+
+    #[inline]
+    pub fn removed_edges(&self) -> &[EdgeHandle] {
+        &self.removed_edges
+    }
+
+    #[inline]
+    pub fn removed_half_edges(&self) -> &[HalfEdgeHandle] {
+        &self.removed_half_edges
+    }
+
+    #[inline]
+    pub fn affected_edges(&self) -> &[EdgeHandle] {
+        &self.affected_edges
+    }
+
+    /// Total count of all elements removed by the operation (vertex + edges + half-edges + faces).
+    #[inline]
+    pub fn removed_elements_count(&self) -> usize {
+        1 + self.removed_edges.len() + self.removed_half_edges.len() + self.removed_faces.len()
+    }
+}
+
+impl std::ops::Deref for CollapseEdgeResult {
+    type Target = VertexHandle;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.surviving_vertex
+    }
+}
+
 impl HalfEdgeMesh {
     /// Inserts a new vertex along edge `e` at linear interpolation parameter `t` in (0, 1).
     ///
@@ -806,13 +883,42 @@ impl HalfEdgeMesh {
         self.remove_face(face)
     }
 
-    /// Collapses edge `e` by merging its endpoints into a single vertex.
+    fn refresh_vertex_outgoing_half_edge(&mut self, v: VertexHandle) {
+        if !self.is_valid_vertex(v) {
+            return;
+        }
+        let mut bnd = None;
+        let mut any_out = None;
+        for (idx, he) in self.half_edges.iter().enumerate() {
+            if !he.deleted && he.origin == v {
+                let he_h = HalfEdgeHandle::new(idx as u32, he.generation);
+                if he.is_boundary() {
+                    bnd = Some(he_h);
+                    break;
+                } else if any_out.is_none() {
+                    any_out = Some(he_h);
+                }
+            }
+        }
+        self.vertex_mut(v).unwrap().half_edge = bnd.or(any_out);
+    }
+
+    /// Collapses edge `edge` by merging its endpoints into a single vertex at interpolation parameter `t` in [0, 1].
     ///
     /// Preserves 2-manifold invariants using the topological Link Condition.
     /// Transactionally rolls back if an invariant is violated.
-    pub fn collapse_edge(&mut self, edge: EdgeHandle) -> Result<VertexHandle, TopologyError> {
+    pub fn collapse_edge(
+        &mut self,
+        edge: EdgeHandle,
+        t: f32,
+    ) -> Result<CollapseEdgeResult, TopologyError> {
         if !self.is_valid_edge(edge) {
             return Err(TopologyError::InvalidEdge(edge));
+        }
+        if !t.is_finite() || !(0.0..=1.0).contains(&t) {
+            return Err(TopologyError::InvalidOperation(format!(
+                "Collapse edge parameter t ({t}) must be within [0.0, 1.0]"
+            )));
         }
 
         let backup = self.clone();
@@ -823,6 +929,12 @@ impl HalfEdgeMesh {
 
         let v0 = self.half_edge(h0).unwrap().origin;
         let v1 = self.half_edge(h1).unwrap().origin;
+
+        if v0 == v1 {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot collapse self-loop edge".into(),
+            ));
+        }
 
         // Boundary vertex pinching check:
         // If both vertices are on the mesh boundary, the edge itself must be a boundary edge
@@ -844,101 +956,278 @@ impl HalfEdgeMesh {
             adj_v0.intersection(&adj_v1).copied().collect();
 
         let mut expected_common = HashSet::new();
+        let mut v_opp0_opt = None;
+        let mut v_opp1_opt = None;
+        let mut faces_to_remove_count = 0;
+
         if let Some(f0) = self.half_edge(h0).unwrap().face {
             let f0_hes = self.face_half_edges(f0);
             if f0_hes.len() == 3 {
                 let h0_prev = self.half_edge(h0).unwrap().prev;
-                expected_common.insert(self.half_edge(h0_prev).unwrap().origin);
-            } else {
-                return Err(TopologyError::InvalidOperation(
-                    "Edge collapse currently requires triangular incident faces".into(),
-                ));
+                let vo = self.half_edge(h0_prev).unwrap().origin;
+                expected_common.insert(vo);
+                v_opp0_opt = Some(vo);
+                faces_to_remove_count += 1;
             }
         }
         if let Some(f1) = self.half_edge(h1).unwrap().face {
             let f1_hes = self.face_half_edges(f1);
             if f1_hes.len() == 3 {
                 let h1_prev = self.half_edge(h1).unwrap().prev;
-                expected_common.insert(self.half_edge(h1_prev).unwrap().origin);
-            } else {
-                return Err(TopologyError::InvalidOperation(
-                    "Edge collapse currently requires triangular incident faces".into(),
-                ));
+                let vo = self.half_edge(h1_prev).unwrap().origin;
+                expected_common.insert(vo);
+                v_opp1_opt = Some(vo);
+                faces_to_remove_count += 1;
             }
+        }
+
+        // If both faces are triangles and have the same opposite vertex (e.g. 2 triangles glued back-to-back)
+        if matches!((v_opp0_opt, v_opp1_opt), (Some(vo0), Some(vo1)) if vo0 == vo1) {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot collapse edge: incident triangles share all vertices".into(),
+            ));
         }
 
         if common_neighbors != expected_common {
             return Err(TopologyError::InvalidOperation(
-                "Link condition violated: edge collapse would create non-manifold geometry".into(),
+                "Link condition violated: edge collapse would create non-manifold geometry or duplicate edges".into(),
             ));
         }
 
-        // Prevent collapsing tetrahedral / minimal meshes into degenerate surfaces
-        if self.num_faces() <= 2 {
+        // Prevent collapsing if no faces would remain
+        if self.num_faces() <= faces_to_remove_count {
             return Err(TopologyError::InvalidOperation(
-                "Cannot collapse edge: mesh has too few faces".into(),
+                "Cannot collapse edge: mesh would have no faces remaining".into(),
             ));
         }
 
-        // Midpoint position for merged vertex v0
-        let p0 = self.vertex(v0).unwrap().position;
-        let p1 = self.vertex(v1).unwrap().position;
-        let p_mid = 0.5 * (p0 + p1);
-        self.vertex_mut(v0).unwrap().position = p_mid;
+        // Closed manifold mesh with <= 4 vertices (e.g. tetrahedron) cannot be collapsed
+        if self.boundary_loops().is_empty() && self.num_vertices() <= 4 {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot collapse edge: closed manifold mesh must have at least 4 vertices".into(),
+            ));
+        }
 
-        // Retarget all outgoing half-edges from v1 to originate from v0
-        let v1_out = self.outgoing_half_edges(v1);
-        for out_he in v1_out {
-            if out_he != h1 {
-                self.half_edge_mut(out_he).unwrap().origin = v0;
+        // Check for isolated wire edge / antenna creation:
+        // If an incident triangle has both other edges on the boundary, collapsing base edge creates a 0-face wire edge
+        if let Some(f0) = self.half_edge(h0).unwrap().face {
+            let f0_hes = self.face_half_edges(f0);
+            if f0_hes.len() == 3 {
+                let h0_next = self.half_edge(h0).unwrap().next;
+                let h0_prev = self.half_edge(h0).unwrap().prev;
+                let twin_next = self.half_edge(h0_next).unwrap().twin;
+                let twin_prev = self.half_edge(h0_prev).unwrap().twin;
+                if self.half_edge(twin_next).unwrap().face.is_none()
+                    && self.half_edge(twin_prev).unwrap().face.is_none()
+                {
+                    return Err(TopologyError::InvalidOperation(
+                        "Cannot collapse edge: would create isolated non-manifold wire edge".into(),
+                    ));
+                }
+            }
+        }
+        if let Some(f1) = self.half_edge(h1).unwrap().face {
+            let f1_hes = self.face_half_edges(f1);
+            if f1_hes.len() == 3 {
+                let h1_next = self.half_edge(h1).unwrap().next;
+                let h1_prev = self.half_edge(h1).unwrap().prev;
+                let twin_next = self.half_edge(h1_next).unwrap().twin;
+                let twin_prev = self.half_edge(h1_prev).unwrap().twin;
+                if self.half_edge(twin_next).unwrap().face.is_none()
+                    && self.half_edge(twin_prev).unwrap().face.is_none()
+                {
+                    return Err(TopologyError::InvalidOperation(
+                        "Cannot collapse edge: would create isolated non-manifold wire edge".into(),
+                    ));
+                }
             }
         }
 
-        // For incident triangular faces, collapse the triangle
-        let collapse_triangle =
-            |mesh: &mut Self, he_in_tri: HalfEdgeHandle| -> Result<(), TopologyError> {
-                let Some(f) = mesh.half_edge(he_in_tri).unwrap().face else {
-                    return Ok(());
-                };
-                let f_hes = mesh.face_half_edges(f);
-                if f_hes.len() != 3 {
-                    return Ok(());
+        // Check if edge is boundary and on a degenerate boundary loop of length <= 2
+        if self.half_edge(h0).unwrap().face.is_none()
+            && self.boundary_loop(h0).map(|l| l.len()).unwrap_or(0) <= 2
+        {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot collapse boundary edge on degenerate boundary loop".into(),
+            ));
+        }
+        if self.half_edge(h1).unwrap().face.is_none()
+            && self.boundary_loop(h1).map(|l| l.len()).unwrap_or(0) <= 2
+        {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot collapse boundary edge on degenerate boundary loop".into(),
+            ));
+        }
+
+        // Geometric position interpolation: P = P0 + (P1 - P0) * t
+        let p0 = self.vertex(v0).unwrap().position;
+        let p1 = self.vertex(v1).unwrap().position;
+        let p_merged = p0 + (p1 - p0) * t;
+        self.vertex_mut(v0).unwrap().position = p_merged;
+
+        // Normal interpolation
+        let n0 = self.vertex(v0).unwrap().normal;
+        let n1 = self.vertex(v1).unwrap().normal;
+        let n_merged = match (n0, n1) {
+            (Some(a), Some(b)) => {
+                let blended = (1.0 - t) * a + t * b;
+                if blended.length_squared() > 1e-12 {
+                    Some(blended.normalize())
+                } else {
+                    Some(blended)
+                }
+            }
+            (Some(a), None) if t < 0.5 => Some(a),
+            (None, Some(b)) if t >= 0.5 => Some(b),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+        self.vertex_mut(v0).unwrap().normal = n_merged;
+
+        // UV interpolation
+        let uv0 = self.vertex(v0).unwrap().uv;
+        let uv1 = self.vertex(v1).unwrap().uv;
+        let uv_merged = match (uv0, uv1) {
+            (Some(a), Some(b)) => Some((1.0 - t) * a + t * b),
+            (Some(a), None) if t < 0.5 => Some(a),
+            (None, Some(b)) if t >= 0.5 => Some(b),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+        self.vertex_mut(v0).unwrap().uv = uv_merged;
+
+        // Color RGBA interpolation
+        let c0 = self.vertex(v0).unwrap().color;
+        let c1 = self.vertex(v1).unwrap().color;
+        let c_merged = match (c0, c1) {
+            (Some(a), Some(b)) => Some([
+                (1.0 - t) * a[0] + t * b[0],
+                (1.0 - t) * a[1] + t * b[1],
+                (1.0 - t) * a[2] + t * b[2],
+                (1.0 - t) * a[3] + t * b[3],
+            ]),
+            (Some(a), None) if t < 0.5 => Some(a),
+            (None, Some(b)) if t >= 0.5 => Some(b),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+        self.vertex_mut(v0).unwrap().color = c_merged;
+
+        let mut removed_faces = Vec::new();
+        let mut removed_edges = Vec::new();
+        let mut removed_half_edges = Vec::new();
+
+        // Mutate Side 0 (h0)
+        if let Some(f0) = self.half_edge(h0).unwrap().face {
+            let f0_hes = self.face_half_edges(f0);
+            if f0_hes.len() == 3 {
+                let h0_next = self.half_edge(h0).unwrap().next;
+                let h0_prev = self.half_edge(h0).unwrap().prev;
+
+                let twin_next = self.half_edge(h0_next).unwrap().twin;
+                let twin_prev = self.half_edge(h0_prev).unwrap().twin;
+
+                let edge_to_remove = self.half_edge(h0_next).unwrap().edge;
+                let edge_to_keep = self.half_edge(h0_prev).unwrap().edge;
+
+                let v_opp = self.half_edge(h0_prev).unwrap().origin;
+
+                self.half_edge_mut(twin_next).unwrap().twin = twin_prev;
+                self.half_edge_mut(twin_prev).unwrap().twin = twin_next;
+
+                self.half_edge_mut(twin_next).unwrap().edge = edge_to_keep;
+                self.half_edge_mut(twin_prev).unwrap().edge = edge_to_keep;
+                self.edge_mut(edge_to_keep).unwrap().half_edge = twin_prev;
+
+                if self.vertex(v_opp).unwrap().half_edge == Some(h0_prev) {
+                    self.vertex_mut(v_opp).unwrap().half_edge = Some(twin_next);
                 }
 
-                let h_next = mesh.half_edge(he_in_tri).unwrap().next;
-                let h_prev = mesh.half_edge(he_in_tri).unwrap().prev;
+                self.free_half_edge(h0_next)?;
+                self.free_half_edge(h0_prev)?;
+                self.free_edge(edge_to_remove)?;
+                self.free_face(f0)?;
 
-                let twin_next = mesh.half_edge(h_next).unwrap().twin;
-                let twin_prev = mesh.half_edge(h_prev).unwrap().twin;
+                removed_half_edges.push(h0_next);
+                removed_half_edges.push(h0_prev);
+                removed_edges.push(edge_to_remove);
+                removed_faces.push(f0);
+            } else {
+                let h0_next = self.half_edge(h0).unwrap().next;
+                let h0_prev = self.half_edge(h0).unwrap().prev;
+                self.half_edge_mut(h0_prev).unwrap().next = h0_next;
+                self.half_edge_mut(h0_next).unwrap().prev = h0_prev;
+                if self.face(f0).unwrap().half_edge == h0 {
+                    self.face_mut(f0).unwrap().half_edge = h0_next;
+                }
+            }
+        } else {
+            let h0_next = self.half_edge(h0).unwrap().next;
+            let h0_prev = self.half_edge(h0).unwrap().prev;
+            self.half_edge_mut(h0_prev).unwrap().next = h0_next;
+            self.half_edge_mut(h0_next).unwrap().prev = h0_prev;
+        }
 
-                let edge_to_remove = mesh.half_edge(h_next).unwrap().edge;
-                let edge_to_keep = mesh.half_edge(h_prev).unwrap().edge;
+        // Mutate Side 1 (h1)
+        if let Some(f1) = self.half_edge(h1).unwrap().face {
+            let f1_hes = self.face_half_edges(f1);
+            if f1_hes.len() == 3 {
+                let h1_next = self.half_edge(h1).unwrap().next;
+                let h1_prev = self.half_edge(h1).unwrap().prev;
 
-                let v_opp = mesh.half_edge(h_prev).unwrap().origin;
+                let twin_next = self.half_edge(h1_next).unwrap().twin;
+                let twin_prev = self.half_edge(h1_prev).unwrap().twin;
 
-                // Merge twin_next and twin_prev
-                mesh.half_edge_mut(twin_next).unwrap().twin = twin_prev;
-                mesh.half_edge_mut(twin_prev).unwrap().twin = twin_next;
+                let edge_to_remove = self.half_edge(h1_next).unwrap().edge;
+                let edge_to_keep = self.half_edge(h1_prev).unwrap().edge;
 
-                mesh.half_edge_mut(twin_next).unwrap().edge = edge_to_keep;
-                mesh.half_edge_mut(twin_prev).unwrap().edge = edge_to_keep;
-                mesh.edge_mut(edge_to_keep).unwrap().half_edge = twin_prev;
+                let v_opp = self.half_edge(h1_prev).unwrap().origin;
 
-                // If v_opp pointed to h_prev, repoint it to twin_next
-                if mesh.vertex(v_opp).unwrap().half_edge == Some(h_prev) {
-                    mesh.vertex_mut(v_opp).unwrap().half_edge = Some(twin_next);
+                self.half_edge_mut(twin_next).unwrap().twin = twin_prev;
+                self.half_edge_mut(twin_prev).unwrap().twin = twin_next;
+
+                self.half_edge_mut(twin_next).unwrap().edge = edge_to_keep;
+                self.half_edge_mut(twin_prev).unwrap().edge = edge_to_keep;
+                self.edge_mut(edge_to_keep).unwrap().half_edge = twin_prev;
+
+                if self.vertex(v_opp).unwrap().half_edge == Some(h1_prev) {
+                    self.vertex_mut(v_opp).unwrap().half_edge = Some(twin_next);
                 }
 
-                mesh.free_half_edge(h_next)?;
-                mesh.free_half_edge(h_prev)?;
-                mesh.free_edge(edge_to_remove)?;
-                mesh.free_face(f)?;
+                self.free_half_edge(h1_next)?;
+                self.free_half_edge(h1_prev)?;
+                self.free_edge(edge_to_remove)?;
+                self.free_face(f1)?;
 
-                Ok(())
-            };
+                removed_half_edges.push(h1_next);
+                removed_half_edges.push(h1_prev);
+                removed_edges.push(edge_to_remove);
+                removed_faces.push(f1);
+            } else {
+                let h1_next = self.half_edge(h1).unwrap().next;
+                let h1_prev = self.half_edge(h1).unwrap().prev;
+                self.half_edge_mut(h1_prev).unwrap().next = h1_next;
+                self.half_edge_mut(h1_next).unwrap().prev = h1_prev;
+                if self.face(f1).unwrap().half_edge == h1 {
+                    self.face_mut(f1).unwrap().half_edge = h1_next;
+                }
+            }
+        } else {
+            let h1_next = self.half_edge(h1).unwrap().next;
+            let h1_prev = self.half_edge(h1).unwrap().prev;
+            self.half_edge_mut(h1_prev).unwrap().next = h1_next;
+            self.half_edge_mut(h1_next).unwrap().prev = h1_prev;
+        }
 
-        collapse_triangle(self, h0)?;
-        collapse_triangle(self, h1)?;
+        // Retarget all remaining active half-edges originating from v1 to originate from v0
+        for he in &mut self.half_edges {
+            if !he.deleted && he.origin == v1 {
+                he.origin = v0;
+            }
+        }
 
         // Remove h0, h1, edge, and v1
         self.free_half_edge(h0)?;
@@ -946,22 +1235,20 @@ impl HalfEdgeMesh {
         self.free_edge(edge)?;
         self.free_vertex(v1)?;
 
-        // Update v0 outgoing half-edge
-        let mut new_v0_out = None;
-        for (idx, he) in self.half_edges.iter().enumerate() {
-            if !he.deleted && he.origin == v0 {
-                let he_h = HalfEdgeHandle::new(idx as u32, he.generation);
-                if he.is_boundary() {
-                    new_v0_out = Some(he_h);
-                    break;
-                } else if new_v0_out.is_none() {
-                    new_v0_out = Some(he_h);
-                }
-            }
-        }
-        self.vertex_mut(v0).unwrap().half_edge = new_v0_out;
+        removed_half_edges.push(h0);
+        removed_half_edges.push(h1);
+        removed_edges.push(edge);
 
-        // Recalculate normals of incident faces
+        // Refresh outgoing half-edges for v0 and opposite vertices
+        self.refresh_vertex_outgoing_half_edge(v0);
+        if let Some(vo0) = v_opp0_opt {
+            self.refresh_vertex_outgoing_half_edge(vo0);
+        }
+        if let Some(vo1) = v_opp1_opt {
+            self.refresh_vertex_outgoing_half_edge(vo1);
+        }
+
+        // Recalculate face normals of all adjacent faces to v0
         for f in self.adjacent_faces(v0) {
             let n = self.face_normal(f);
             if let Some(face_ref) = self.face_mut(f) {
@@ -969,13 +1256,22 @@ impl HalfEdgeMesh {
             }
         }
 
-        // Invariant verification
+        // Transactional invariant verification
         if let Err(e) = self.check_invariants() {
             *self = backup;
             return Err(e);
         }
 
-        Ok(v0)
+        let affected_edges = self.incident_edges(v0);
+        Ok(CollapseEdgeResult {
+            surviving_vertex: v0,
+            removed_vertex: v1,
+            collapsed_edge: edge,
+            removed_faces,
+            removed_edges,
+            removed_half_edges,
+            affected_edges,
+        })
     }
 
     /// Removes an isolated vertex that has no incident edges.
@@ -1742,6 +2038,435 @@ mod tests {
         let report = TopologyValidator::validate(&mesh);
         assert!(report.is_valid, "Report must be valid: {:?}", report.issues);
         assert_eq!(report.error_count(), 0);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    fn make_octahedron() -> HalfEdgeMesh {
+        let positions = vec![
+            Vec3::new(1.0, 0.0, 0.0),  // 0
+            Vec3::new(-1.0, 0.0, 0.0), // 1
+            Vec3::new(0.0, 1.0, 0.0),  // 2
+            Vec3::new(0.0, -1.0, 0.0), // 3
+            Vec3::new(0.0, 0.0, 1.0),  // 4
+            Vec3::new(0.0, 0.0, -1.0), // 5
+        ];
+        let faces = vec![
+            vec![0, 2, 4],
+            vec![2, 1, 4],
+            vec![1, 3, 4],
+            vec![3, 0, 4],
+            vec![2, 0, 5],
+            vec![1, 2, 5],
+            vec![3, 1, 5],
+            vec![0, 3, 5],
+        ];
+        TopologyBuilder::build(&positions, &faces).unwrap()
+    }
+
+    // Collapse Edge Test 1: Collapse Edge of an interior edge
+    #[test]
+    fn test_collapse_1_interior_edge() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.collapse_edge(e, 0.5).expect("Collapse interior edge");
+
+        assert!(mesh.is_valid_vertex(res.surviving_vertex()));
+        assert!(!mesh.is_valid_vertex(res.removed_vertex()));
+        assert!(!mesh.is_valid_edge(res.collapsed_edge()));
+        assert_eq!(res.removed_faces().len(), 2);
+    }
+
+    // Collapse Edge Test 2: Collapse Edge of a boundary edge
+    #[test]
+    fn test_collapse_2_boundary_edge() {
+        let mut mesh = make_two_triangles();
+        let e_bnd = find_edge_between(&mesh, 0, 1);
+        assert!(mesh.is_edge_boundary(e_bnd));
+
+        let res = mesh
+            .collapse_edge(e_bnd, 0.5)
+            .expect("Collapse boundary edge");
+        assert!(mesh.is_valid_vertex(res.surviving_vertex()));
+        assert_eq!(mesh.num_faces(), 1);
+        assert_eq!(mesh.boundary_loops().len(), 1);
+        assert_eq!(mesh.boundary_loops()[0].len(), 3);
+    }
+
+    // Collapse Edge Test 3: Collapse Edge with t = 0.0
+    #[test]
+    fn test_collapse_3_t_zero() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (h0, _) = mesh.edge_half_edges(e).unwrap();
+        let v0 = mesh.half_edge(h0).unwrap().origin;
+        let p0 = mesh.vertex(v0).unwrap().position;
+
+        let res = mesh.collapse_edge(e, 0.0).unwrap();
+        let p_res = mesh.vertex(res.surviving_vertex()).unwrap().position;
+        assert!((p_res - p0).length() < 1e-5);
+    }
+
+    // Collapse Edge Test 4: Collapse Edge with t = 0.5
+    #[test]
+    fn test_collapse_4_t_half() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (h0, h1) = mesh.edge_half_edges(e).unwrap();
+        let p0 = mesh
+            .vertex(mesh.half_edge(h0).unwrap().origin)
+            .unwrap()
+            .position;
+        let p1 = mesh
+            .vertex(mesh.half_edge(h1).unwrap().origin)
+            .unwrap()
+            .position;
+
+        let res = mesh.collapse_edge(e, 0.5).unwrap();
+        let p_res = mesh.vertex(res.surviving_vertex()).unwrap().position;
+        assert!((p_res - 0.5 * (p0 + p1)).length() < 1e-5);
+    }
+
+    // Collapse Edge Test 5: Collapse Edge with t = 1.0
+    #[test]
+    fn test_collapse_5_t_one() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (_, h1) = mesh.edge_half_edges(e).unwrap();
+        let v1 = mesh.half_edge(h1).unwrap().origin;
+        let p1 = mesh.vertex(v1).unwrap().position;
+
+        let res = mesh.collapse_edge(e, 1.0).unwrap();
+        let p_res = mesh.vertex(res.surviving_vertex()).unwrap().position;
+        assert!((p_res - p1).length() < 1e-5);
+    }
+
+    // Collapse Edge Test 6: Check position of resulting vertex
+    #[test]
+    fn test_collapse_6_position_check() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (h0, h1) = mesh.edge_half_edges(e).unwrap();
+        let p0 = mesh
+            .vertex(mesh.half_edge(h0).unwrap().origin)
+            .unwrap()
+            .position;
+        let p1 = mesh
+            .vertex(mesh.half_edge(h1).unwrap().origin)
+            .unwrap()
+            .position;
+
+        let t = 0.25;
+        let res = mesh.collapse_edge(e, t).unwrap();
+        let p_res = mesh.vertex(res.surviving_vertex()).unwrap().position;
+        let expected = p0 + (p1 - p0) * t;
+        assert!((p_res - expected).length() < 1e-5);
+    }
+
+    // Collapse Edge Test 7: Interpolation of attributes
+    #[test]
+    fn test_collapse_7_attribute_interpolation() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (h0, h1) = mesh.edge_half_edges(e).unwrap();
+        let v0 = mesh.half_edge(h0).unwrap().origin;
+        let v1 = mesh.half_edge(h1).unwrap().origin;
+
+        mesh.vertex_mut(v0).unwrap().normal = Some(Vec3::new(1.0, 0.0, 0.0));
+        mesh.vertex_mut(v1).unwrap().normal = Some(Vec3::new(0.0, 1.0, 0.0));
+
+        mesh.vertex_mut(v0).unwrap().uv = Some(Vec2::new(0.1, 0.2));
+        mesh.vertex_mut(v1).unwrap().uv = Some(Vec2::new(0.5, 0.8));
+
+        mesh.vertex_mut(v0).unwrap().color = Some([1.0, 0.0, 0.0, 1.0]);
+        mesh.vertex_mut(v1).unwrap().color = Some([0.0, 1.0, 0.0, 1.0]);
+
+        let res = mesh.collapse_edge(e, 0.5).unwrap();
+        let v_res = mesh.vertex(res.surviving_vertex()).unwrap();
+
+        let n_expected = (Vec3::new(1.0, 0.0, 0.0) + Vec3::new(0.0, 1.0, 0.0)).normalize();
+        assert!((v_res.normal.unwrap() - n_expected).length() < 1e-5);
+
+        assert!((v_res.uv.unwrap() - Vec2::new(0.3, 0.5)).length() < 1e-5);
+
+        let c = v_res.color.unwrap();
+        assert!((c[0] - 0.5).abs() < 1e-5);
+        assert!((c[1] - 0.5).abs() < 1e-5);
+        assert!((c[2] - 0.0).abs() < 1e-5);
+        assert!((c[3] - 1.0).abs() < 1e-5);
+    }
+
+    // Collapse Edge Test 8: Preservation of UV seams
+    #[test]
+    fn test_collapse_8_preserve_uv_seams() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+
+        // Find an unaffected face that shares vertex 0, e.g. [0, 3, 4]
+        let f_other = mesh
+            .adjacent_faces(VertexHandle::new(0, 0))
+            .into_iter()
+            .find(|&f| {
+                let verts = mesh.face_vertices(f);
+                !verts.iter().any(|v| v.index() == 2)
+            })
+            .expect("unaffected face exists");
+
+        // Set wedge UV on f_other's corner at vertex 0
+        let he_in_other = mesh
+            .face_half_edges(f_other)
+            .into_iter()
+            .find(|&h| mesh.half_edge(h).unwrap().origin.index() == 0)
+            .unwrap();
+        mesh.half_edge_mut(he_in_other).unwrap().uv = Some(Vec2::new(0.42, 0.84));
+
+        let res = mesh.collapse_edge(e, 0.5).unwrap();
+        assert!(mesh.is_valid_face(f_other));
+
+        let uv_after = mesh.half_edge(he_in_other).unwrap().uv;
+        assert_eq!(uv_after, Some(Vec2::new(0.42, 0.84)));
+        assert_eq!(res.surviving_vertex().index(), 0);
+    }
+
+    // Collapse Edge Test 9: Removal of degenerate faces
+    #[test]
+    fn test_collapse_9_remove_degenerate_faces() {
+        let mut mesh = make_octahedron();
+        assert_eq!(mesh.num_faces(), 8);
+
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.collapse_edge(e, 0.5).unwrap();
+
+        assert_eq!(mesh.num_faces(), 6);
+        assert_eq!(res.removed_faces().len(), 2);
+        for f in res.removed_faces() {
+            assert!(!mesh.is_valid_face(*f));
+        }
+    }
+
+    // Collapse Edge Test 10: Correctness of Twin after operation
+    #[test]
+    fn test_collapse_10_twin_reciprocity() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.collapse_edge(e, 0.5).unwrap();
+
+        for h in mesh.half_edges() {
+            let he = mesh.half_edge(h).unwrap();
+            let twin = mesh.half_edge(he.twin).unwrap();
+            assert_eq!(
+                twin.twin, h,
+                "Twin reciprocity must hold for all active half-edges"
+            );
+        }
+    }
+
+    // Collapse Edge Test 11: Correctness of Next and Prev cycles
+    #[test]
+    fn test_collapse_11_next_prev_cycles() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.collapse_edge(e, 0.5).unwrap();
+
+        for f in mesh.faces() {
+            let hes = mesh.face_half_edges(f);
+            assert_eq!(hes.len(), 3);
+            for i in 0..hes.len() {
+                let curr = hes[i];
+                let next = hes[(i + 1) % hes.len()];
+                let prev = hes[(i + hes.len() - 1) % hes.len()];
+                assert_eq!(mesh.half_edge(curr).unwrap().next, next);
+                assert_eq!(mesh.half_edge(curr).unwrap().prev, prev);
+                assert_eq!(mesh.half_edge(next).unwrap().prev, curr);
+                assert_eq!(mesh.half_edge(prev).unwrap().next, curr);
+            }
+        }
+    }
+
+    // Collapse Edge Test 12: Preservation of Boundary Loops
+    #[test]
+    fn test_collapse_12_boundary_loops_preservation() {
+        let mut mesh = make_two_triangles();
+        assert_eq!(mesh.boundary_loops().len(), 1);
+        let initial_len = mesh.boundary_loops()[0].len();
+
+        let e_bnd = find_edge_between(&mesh, 0, 1);
+        let res = mesh.collapse_edge(e_bnd, 0.5).unwrap();
+
+        let loops = mesh.boundary_loops();
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].len(), initial_len - 1);
+        assert_eq!(res.removed_faces().len(), 1);
+    }
+
+    // Collapse Edge Test 13: Check active counters
+    #[test]
+    fn test_collapse_13_active_counters() {
+        let mut mesh = make_octahedron();
+        let v0 = mesh.num_vertices();
+        let e0 = mesh.num_edges();
+        let f0 = mesh.num_faces();
+        let he0 = mesh.half_edges().count();
+
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.collapse_edge(e, 0.5).unwrap();
+
+        assert_eq!(mesh.num_vertices(), v0 - 1);
+        assert_eq!(mesh.num_edges(), e0 - 3);
+        assert_eq!(mesh.num_faces(), f0 - 2);
+        assert_eq!(mesh.half_edges().count(), he0 - 6);
+        assert_eq!(res.removed_elements_count(), 1 + 3 + 6 + 2);
+    }
+
+    // Collapse Edge Test 14: Check generation and invalidation of removed handles
+    #[test]
+    fn test_collapse_14_generation_handles() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.collapse_edge(e, 0.5).unwrap();
+
+        assert!(mesh.is_valid_vertex(res.surviving_vertex()));
+        assert!(!mesh.is_valid_vertex(res.removed_vertex()));
+        assert!(!mesh.is_valid_edge(res.collapsed_edge()));
+
+        for eh in res.removed_edges() {
+            assert!(!mesh.is_valid_edge(*eh));
+        }
+        for fh in res.removed_faces() {
+            assert!(!mesh.is_valid_face(*fh));
+        }
+        for heh in res.removed_half_edges() {
+            assert!(!mesh.is_valid_half_edge(*heh));
+        }
+    }
+
+    // Collapse Edge Test 15: Check absence of duplicate edges
+    #[test]
+    fn test_collapse_15_no_duplicate_edges() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.collapse_edge(e, 0.5).unwrap();
+
+        let mut seen_pairs = HashSet::new();
+        for eh in mesh.edges() {
+            let (va, vb) = mesh.edge_vertices(eh).unwrap();
+            let pair = if va.index() < vb.index() {
+                (va.index(), vb.index())
+            } else {
+                (vb.index(), va.index())
+            };
+            assert!(
+                seen_pairs.insert(pair),
+                "Duplicate edge detected between vertices {:?}",
+                pair
+            );
+        }
+    }
+
+    // Collapse Edge Test 16: Link Condition and pinching rejection
+    #[test]
+    fn test_collapse_16_link_condition_rejection() {
+        // 1. Single triangle: collapsing any edge rejected
+        let positions_single = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ];
+        let faces_single = vec![vec![0, 1, 2]];
+        let mut mesh_single = TopologyBuilder::build(&positions_single, &faces_single).unwrap();
+        let e_single = mesh_single.edges().next().unwrap();
+        assert!(matches!(
+            mesh_single.collapse_edge(e_single, 0.5),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+
+        // 2. Pinching check: interior edge connecting two boundary vertices
+        let mut mesh_two_tri = make_two_triangles();
+        let e_diag = find_edge_between(&mesh_two_tri, 0, 2);
+        assert!(!mesh_two_tri.is_edge_boundary(e_diag));
+        assert!(matches!(
+            mesh_two_tri.collapse_edge(e_diag, 0.5),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+
+        // 3. Tetrahedron: collapsing edge in closed mesh with <= 4 vertices rejected
+        let mut mesh_tet = make_tetrahedron();
+        let e_tet = mesh_tet.edges().next().unwrap();
+        assert!(matches!(
+            mesh_tet.collapse_edge(e_tet, 0.5),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Collapse Edge Test 17: Handling of invalid EdgeHandle
+    #[test]
+    fn test_collapse_17_invalid_edge_handle() {
+        let mut mesh = make_octahedron();
+
+        let res_null = mesh.collapse_edge(EdgeHandle::NULL, 0.5);
+        assert!(matches!(res_null, Err(TopologyError::InvalidEdge(_))));
+
+        let res_oob = mesh.collapse_edge(EdgeHandle::new(9999, 0), 0.5);
+        assert!(matches!(res_oob, Err(TopologyError::InvalidEdge(_))));
+
+        let valid_e = mesh.edges().next().unwrap();
+        let wrong_gen = EdgeHandle::new(valid_e.raw_index(), valid_e.generation() + 1);
+        let res_gen = mesh.collapse_edge(wrong_gen, 0.5);
+        assert!(matches!(res_gen, Err(TopologyError::InvalidEdge(_))));
+    }
+
+    // Collapse Edge Test 18: Handling of invalid parameter t
+    #[test]
+    fn test_collapse_18_invalid_t_values() {
+        let mut mesh = make_octahedron();
+        let e = mesh.edges().next().unwrap();
+
+        for &bad_t in &[
+            -0.1,
+            1.1,
+            -10.0,
+            2.0,
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ] {
+            let res = mesh.collapse_edge(e, bad_t);
+            assert!(
+                matches!(res, Err(TopologyError::InvalidOperation(_))),
+                "bad t ({bad_t}) must return InvalidOperation"
+            );
+        }
+    }
+
+    // Collapse Edge Test 19: Final mesh validity via TopologyValidator and check_invariants
+    #[test]
+    fn test_collapse_19_final_mesh_validity() {
+        let mut mesh = make_octahedron();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.collapse_edge(e, 0.5);
+        assert!(res.is_ok());
+
+        let report = TopologyValidator::validate(&mesh);
+        assert!(report.is_valid, "Report must be valid: {:?}", report.issues);
+        assert_eq!(report.error_count(), 0);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Collapse Edge Test 20: Atomicity check on error (mesh unchanged if collapse fails)
+    #[test]
+    fn test_collapse_20_atomic_rollback() {
+        let mut mesh = make_octahedron();
+        let mesh_backup = mesh.clone();
+
+        // 1. Error on invalid handle
+        assert!(mesh.collapse_edge(EdgeHandle::NULL, 0.5).is_err());
+        assert_eq!(mesh, mesh_backup);
+
+        // 2. Error on invalid t
+        let e = find_edge_between(&mesh, 0, 2);
+        assert!(mesh.collapse_edge(e, -1.0).is_err());
+        assert_eq!(mesh, mesh_backup);
+
+        // 3. Topology must remain completely intact
         assert!(mesh.check_invariants().is_ok());
     }
 }

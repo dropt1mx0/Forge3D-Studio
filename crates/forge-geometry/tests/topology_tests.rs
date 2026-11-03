@@ -433,7 +433,8 @@ fn test_edge_collapse() {
     let old_v_count = mesh.num_vertices();
     let old_f_count = mesh.num_faces();
 
-    let v_merged = mesh.collapse_edge(e).expect("Collapse edge failed");
+    let res = mesh.collapse_edge(e, 0.5).expect("Collapse edge failed");
+    let v_merged = res.surviving_vertex();
     assert!(mesh.is_valid_vertex(v_merged));
     assert_eq!(mesh.num_vertices(), old_v_count - 1);
     assert_eq!(mesh.num_faces(), old_f_count - 2);
@@ -455,7 +456,7 @@ fn test_edge_collapse_link_condition_rejection() {
 
     let e = mesh.edges().next().unwrap();
     // Collapsing a single triangle's edge would collapse the mesh into too few faces
-    let res = mesh.collapse_edge(e);
+    let res = mesh.collapse_edge(e, 0.5);
     assert!(res.is_err());
 }
 
