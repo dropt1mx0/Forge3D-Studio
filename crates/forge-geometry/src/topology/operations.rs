@@ -1,8 +1,61 @@
 use std::collections::HashSet;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::error::TopologyError;
 use super::handles::{EdgeHandle, FaceHandle, HalfEdgeHandle, VertexHandle};
 use super::mesh::HalfEdgeMesh;
+
+/// The typed result of a successful `split_edge` topological operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SplitEdgeResult {
+    /// The newly created topological vertex along the edge.
+    pub vertex: VertexHandle,
+    /// The original edge handle, which now represents the segment from `v0` to `v_new`.
+    pub original_edge: EdgeHandle,
+    /// The newly created edge handle, which represents the segment from `v_new` to `v1`.
+    pub new_edge: EdgeHandle,
+    /// The two newly created directed half-edges: `(h0b, h1b)`.
+    /// - `h0b` is directed from `v_new` to `v1` in face `f0`.
+    /// - `h1b` is directed from `v_new` to `v0` in face `f1`.
+    pub new_half_edges: (HalfEdgeHandle, HalfEdgeHandle),
+    /// The incident faces affected by the split: `(f0, f1)`.
+    pub affected_faces: (Option<FaceHandle>, Option<FaceHandle>),
+}
+
+impl SplitEdgeResult {
+    #[inline]
+    pub fn vertex(&self) -> VertexHandle {
+        self.vertex
+    }
+
+    #[inline]
+    pub fn original_edge(&self) -> EdgeHandle {
+        self.original_edge
+    }
+
+    #[inline]
+    pub fn new_edge(&self) -> EdgeHandle {
+        self.new_edge
+    }
+
+    #[inline]
+    pub fn edges(&self) -> (EdgeHandle, EdgeHandle) {
+        (self.original_edge, self.new_edge)
+    }
+
+    #[inline]
+    pub fn new_half_edges(&self) -> (HalfEdgeHandle, HalfEdgeHandle) {
+        self.new_half_edges
+    }
+
+    #[inline]
+    pub fn affected_faces(&self) -> (Option<FaceHandle>, Option<FaceHandle>) {
+        self.affected_faces
+    }
+}
 
 impl HalfEdgeMesh {
     /// Inserts a new vertex along edge `e` at linear interpolation parameter `t` in (0, 1).
@@ -13,7 +66,7 @@ impl HalfEdgeMesh {
         &mut self,
         edge: EdgeHandle,
         t: f32,
-    ) -> Result<(VertexHandle, EdgeHandle), TopologyError> {
+    ) -> Result<SplitEdgeResult, TopologyError> {
         if !self.is_valid_edge(edge) {
             return Err(TopologyError::InvalidEdge(edge));
         }
@@ -34,12 +87,12 @@ impl HalfEdgeMesh {
 
         let p0 = self.vertex(v0).unwrap().position;
         let p1 = self.vertex(v1).unwrap().position;
-        let p_new = (1.0 - t) * p0 + t * p1;
+        let p_new = p0 + (p1 - p0) * t;
 
         // Allocate new vertex
         let v_new = self.add_vertex(p_new);
 
-        // Interpolate vertex normal and uv if available
+        // Interpolate vertex normal if available
         if let (Some(n0), Some(n1)) = (
             self.vertex(v0).unwrap().normal,
             self.vertex(v1).unwrap().normal,
@@ -47,9 +100,25 @@ impl HalfEdgeMesh {
             let n_new = ((1.0 - t) * n0 + t * n1).normalize_or_zero();
             self.vertex_mut(v_new).unwrap().normal = Some(n_new);
         }
+
+        // Interpolate vertex UV if available
         if let (Some(uv0), Some(uv1)) = (self.vertex(v0).unwrap().uv, self.vertex(v1).unwrap().uv) {
             let uv_new = (1.0 - t) * uv0 + t * uv1;
             self.vertex_mut(v_new).unwrap().uv = Some(uv_new);
+        }
+
+        // Interpolate vertex RGBA color if available
+        if let (Some(c0), Some(c1)) = (
+            self.vertex(v0).unwrap().color,
+            self.vertex(v1).unwrap().color,
+        ) {
+            let c_new = [
+                (1.0 - t) * c0[0] + t * c1[0],
+                (1.0 - t) * c0[1] + t * c1[1],
+                (1.0 - t) * c0[2] + t * c1[2],
+                (1.0 - t) * c0[3] + t * c1[3],
+            ];
+            self.vertex_mut(v_new).unwrap().color = Some(c_new);
         }
 
         let f0 = self.half_edge(h0).unwrap().face;
@@ -58,19 +127,90 @@ impl HalfEdgeMesh {
         let h0_next = self.half_edge(h0).unwrap().next;
         let h1_next = self.half_edge(h1).unwrap().next;
 
+        // Interpolate corner UV and normal on Side 0 (face f0)
+        // h0 is v0 -> v1; h0_next starts at v1
+        let uv0_f0 = self
+            .half_edge(h0)
+            .unwrap()
+            .uv
+            .or(self.vertex(v0).unwrap().uv);
+        let uv1_f0 = self
+            .half_edge(h0_next)
+            .unwrap()
+            .uv
+            .or(self.vertex(v1).unwrap().uv);
+        let uv_corner_f0 = match (uv0_f0, uv1_f0) {
+            (Some(u0), Some(u1)) => Some((1.0 - t) * u0 + t * u1),
+            _ => None,
+        };
+
+        let norm0_f0 = self
+            .half_edge(h0)
+            .unwrap()
+            .normal
+            .or(self.vertex(v0).unwrap().normal);
+        let norm1_f0 = self
+            .half_edge(h0_next)
+            .unwrap()
+            .normal
+            .or(self.vertex(v1).unwrap().normal);
+        let norm_corner_f0 = match (norm0_f0, norm1_f0) {
+            (Some(n0), Some(n1)) => Some(((1.0 - t) * n0 + t * n1).normalize_or_zero()),
+            _ => None,
+        };
+
+        // Interpolate corner UV and normal on Side 1 (face f1)
+        // h1 is v1 -> v0; h1_next starts at v0
+        // parameter t is from v0 to v1: at v0, UV is uv_at_v0; at v1, UV is uv_at_v1
+        let uv0_f1 = self
+            .half_edge(h1_next)
+            .unwrap()
+            .uv
+            .or(self.vertex(v0).unwrap().uv);
+        let uv1_f1 = self
+            .half_edge(h1)
+            .unwrap()
+            .uv
+            .or(self.vertex(v1).unwrap().uv);
+        let uv_corner_f1 = match (uv0_f1, uv1_f1) {
+            (Some(u0), Some(u1)) => Some((1.0 - t) * u0 + t * u1),
+            _ => None,
+        };
+
+        let norm0_f1 = self
+            .half_edge(h1_next)
+            .unwrap()
+            .normal
+            .or(self.vertex(v0).unwrap().normal);
+        let norm1_f1 = self
+            .half_edge(h1)
+            .unwrap()
+            .normal
+            .or(self.vertex(v1).unwrap().normal);
+        let norm_corner_f1 = match (norm0_f1, norm1_f1) {
+            (Some(n0), Some(n1)) => Some(((1.0 - t) * n0 + t * n1).normalize_or_zero()),
+            _ => None,
+        };
+
         // Create new edge connecting v_new and v1
         let dummy_he = HalfEdgeHandle::new(u32::MAX, 0);
         let e_new = self.add_edge(dummy_he);
 
         // Create new half-edge h0b (v_new -> v1)
         let h0b = self.add_half_edge(v_new, e_new, f0);
+        self.half_edge_mut(h0b).unwrap().uv = uv_corner_f0;
+        self.half_edge_mut(h0b).unwrap().normal = norm_corner_f0;
+
         // Create new half-edge h1b (v_new -> v0)
         let h1b = self.add_half_edge(v_new, edge, f1);
+        self.half_edge_mut(h1b).unwrap().uv = uv_corner_f1;
+        self.half_edge_mut(h1b).unwrap().normal = norm_corner_f1;
 
+        self.edge_mut(edge).unwrap().half_edge = h0;
         self.edge_mut(e_new).unwrap().half_edge = h0b;
 
         // Link twins
-        // edge connects h0 (v0 -> v_new) and h1b (v_new -> v0)
+        // original edge connects h0 (v0 -> v_new) and h1b (v_new -> v0)
         self.half_edge_mut(h0).unwrap().twin = h1b;
         self.half_edge_mut(h1b).unwrap().twin = h0;
 
@@ -91,8 +231,14 @@ impl HalfEdgeMesh {
         self.half_edge_mut(h1b).unwrap().next = h1_next;
         self.half_edge_mut(h1_next).unwrap().prev = h1b;
 
-        // Outgoing half-edges for vertices
-        let v_new_out = if f1.is_none() { h1b } else { h0b };
+        // Outgoing half-edges for vertices: prefer boundary half-edge if on boundary
+        let v_new_out = if f0.is_none() {
+            h0b
+        } else if f1.is_none() {
+            h1b
+        } else {
+            h0b
+        };
         self.vertex_mut(v_new).unwrap().half_edge = Some(v_new_out);
 
         // Transactional invariant verification
@@ -101,7 +247,13 @@ impl HalfEdgeMesh {
             return Err(e);
         }
 
-        Ok((v_new, e_new))
+        Ok(SplitEdgeResult {
+            vertex: v_new,
+            original_edge: edge,
+            new_edge: e_new,
+            new_half_edges: (h0b, h1b),
+            affected_faces: (f0, f1),
+        })
     }
 
     /// Flips an internal edge between two adjacent triangles.
@@ -740,5 +892,409 @@ impl HalfEdgeMesh {
         }
 
         self.free_vertex(vertex)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::topology::TopologyValidator;
+    use crate::topology::builder::TopologyBuilder;
+    use forge_math::{Vec2, Vec3};
+
+    fn make_two_quads() -> HalfEdgeMesh {
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0), // 0
+            Vec3::new(1.0, 0.0, 0.0), // 1
+            Vec3::new(2.0, 0.0, 0.0), // 2
+            Vec3::new(0.0, 1.0, 0.0), // 3
+            Vec3::new(1.0, 1.0, 0.0), // 4
+            Vec3::new(2.0, 1.0, 0.0), // 5
+        ];
+        let faces = vec![
+            vec![0, 1, 4, 3], // Face 0
+            vec![1, 2, 5, 4], // Face 1
+        ];
+        TopologyBuilder::build(&positions, &faces).unwrap()
+    }
+
+    // Helper: finds the edge connecting two vertices by their original index
+    fn find_edge_between(mesh: &HalfEdgeMesh, v0_idx: usize, v1_idx: usize) -> EdgeHandle {
+        mesh.edges()
+            .find(|&eh| {
+                let (v0, v1) = mesh.edge_vertices(eh).unwrap();
+                (v0.index() == v0_idx && v1.index() == v1_idx)
+                    || (v0.index() == v1_idx && v1.index() == v0_idx)
+            })
+            .expect("edge connecting specified vertices")
+    }
+
+    // Test 1: Split Edge in the middle of an interior edge
+    #[test]
+    fn test_1_split_edge_interior_midpoint() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let res = mesh.split_edge(e_mid, 0.5).expect("split edge");
+        assert!(mesh.is_valid_vertex(res.vertex));
+        assert!(mesh.is_valid_edge(res.original_edge));
+        assert!(mesh.is_valid_edge(res.new_edge));
+
+        let pos = mesh.vertex(res.vertex).unwrap().position;
+        assert!((pos - Vec3::new(1.0, 0.5, 0.0)).length() < 1e-5);
+
+        assert!(res.affected_faces.0.is_some());
+        assert!(res.affected_faces.1.is_some());
+
+        assert_eq!(mesh.num_vertices(), 7);
+        assert_eq!(mesh.num_edges(), 8);
+    }
+
+    // Test 2: Split Edge with t = 0.25
+    #[test]
+    fn test_2_split_edge_t_0_25() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let (h0, _) = mesh.edge_half_edges(e_mid).unwrap();
+        let v0 = mesh.half_edge(h0).unwrap().origin;
+        let v1 = mesh
+            .half_edge(mesh.half_edge(h0).unwrap().twin)
+            .unwrap()
+            .origin;
+        let p0 = mesh.vertex(v0).unwrap().position;
+        let p1 = mesh.vertex(v1).unwrap().position;
+
+        let res = mesh.split_edge(e_mid, 0.25).unwrap();
+        let pos = mesh.vertex(res.vertex).unwrap().position;
+        let expected = p0 + (p1 - p0) * 0.25;
+        assert!((pos - expected).length() < 1e-5);
+    }
+
+    // Test 3: Split Edge with t = 0.75
+    #[test]
+    fn test_3_split_edge_t_0_75() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let (h0, _) = mesh.edge_half_edges(e_mid).unwrap();
+        let v0 = mesh.half_edge(h0).unwrap().origin;
+        let v1 = mesh
+            .half_edge(mesh.half_edge(h0).unwrap().twin)
+            .unwrap()
+            .origin;
+        let p0 = mesh.vertex(v0).unwrap().position;
+        let p1 = mesh.vertex(v1).unwrap().position;
+
+        let res = mesh.split_edge(e_mid, 0.75).unwrap();
+        let pos = mesh.vertex(res.vertex).unwrap().position;
+        let expected = p0 + (p1 - p0) * 0.75;
+        assert!((pos - expected).length() < 1e-5);
+    }
+
+    // Test 4: Split Edge of a boundary edge
+    #[test]
+    fn test_4_split_edge_boundary_edge() {
+        let mut mesh = make_two_quads();
+        let e_bnd = find_edge_between(&mesh, 0, 3);
+        assert!(mesh.is_edge_boundary(e_bnd));
+
+        let res = mesh.split_edge(e_bnd, 0.5).unwrap();
+        assert!(mesh.is_edge_boundary(res.original_edge));
+        assert!(mesh.is_edge_boundary(res.new_edge));
+        assert!(mesh.is_vertex_boundary(res.vertex));
+
+        // One face is Some, the other is None (virtual boundary)
+        assert!(
+            (res.affected_faces.0.is_some() && res.affected_faces.1.is_none())
+                || (res.affected_faces.0.is_none() && res.affected_faces.1.is_some())
+        );
+
+        let bnd_loops = mesh.boundary_loops();
+        assert_eq!(bnd_loops.len(), 1);
+        assert_eq!(bnd_loops[0].len(), 7); // 6 + 1 boundary half-edges
+    }
+
+    // Test 5: Split Edge of an edge belonging to a triangle
+    #[test]
+    fn test_5_split_edge_triangle_edge() {
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+        ];
+        let faces = vec![vec![0, 1, 2]];
+        let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
+
+        let e = mesh.edges().next().unwrap();
+        let res = mesh.split_edge(e, 0.5).unwrap();
+
+        let f = mesh.faces().next().unwrap();
+        assert_eq!(mesh.face_vertex_count(f), 4);
+        assert!(mesh.face_vertices(f).contains(&res.vertex));
+    }
+
+    // Test 6: Split Edge shared between two faces
+    #[test]
+    fn test_6_split_edge_shared_two_faces() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let res = mesh.split_edge(e_mid, 0.5).unwrap();
+        let f0 = res.affected_faces.0.unwrap();
+        let f1 = res.affected_faces.1.unwrap();
+
+        assert_ne!(f0, f1);
+        assert_eq!(mesh.face_vertex_count(f0), 5);
+        assert_eq!(mesh.face_vertex_count(f1), 5);
+
+        assert!(mesh.face_vertices(f0).contains(&res.vertex));
+        assert!(mesh.face_vertices(f1).contains(&res.vertex));
+    }
+
+    // Test 7: Verification of position interpolation
+    #[test]
+    fn test_7_check_position_interpolation() {
+        let positions = vec![
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec3::new(5.0, 6.0, 7.0),
+            Vec3::new(3.0, 8.0, 5.0),
+        ];
+        let faces = vec![vec![0, 1, 2]];
+        let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
+
+        let e = find_edge_between(&mesh, 0, 1);
+        let t = 0.4;
+        let res = mesh.split_edge(e, t).unwrap();
+
+        let pos = mesh.vertex(res.vertex).unwrap().position;
+        let p0 = Vec3::new(1.0, 2.0, 3.0);
+        let p1 = Vec3::new(5.0, 6.0, 7.0);
+        let expected = p0 + (p1 - p0) * t;
+        assert!((pos - expected).length() < 1e-5);
+    }
+
+    // Test 8: Verification of attribute interpolation (normal, UV, color)
+    #[test]
+    fn test_8_check_attribute_interpolation() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let (h0, _) = mesh.edge_half_edges(e_mid).unwrap();
+        let v0 = mesh.half_edge(h0).unwrap().origin;
+        let v1 = mesh
+            .half_edge(mesh.half_edge(h0).unwrap().twin)
+            .unwrap()
+            .origin;
+
+        // Assign attributes to v0 and v1
+        mesh.vertex_mut(v0).unwrap().normal = Some(Vec3::new(0.0, 1.0, 0.0));
+        mesh.vertex_mut(v1).unwrap().normal = Some(Vec3::new(0.0, 0.0, 1.0));
+
+        mesh.vertex_mut(v0).unwrap().uv = Some(Vec2::new(0.2, 0.4));
+        mesh.vertex_mut(v1).unwrap().uv = Some(Vec2::new(0.6, 0.8));
+
+        mesh.vertex_mut(v0).unwrap().color = Some([1.0, 0.0, 0.0, 1.0]);
+        mesh.vertex_mut(v1).unwrap().color = Some([0.0, 1.0, 0.0, 1.0]);
+
+        let t = 0.5;
+        let res = mesh.split_edge(e_mid, t).unwrap();
+        let v_new = mesh.vertex(res.vertex).unwrap();
+
+        // Normal must be normalized
+        let n_expected = (Vec3::new(0.0, 1.0, 0.0) + Vec3::new(0.0, 0.0, 1.0)).normalize();
+        assert!((v_new.normal.unwrap() - n_expected).length() < 1e-5);
+
+        // UV interpolation
+        assert!((v_new.uv.unwrap() - Vec2::new(0.4, 0.6)).length() < 1e-5);
+
+        // Color interpolation
+        let c = v_new.color.unwrap();
+        assert!((c[0] - 0.5).abs() < 1e-5);
+        assert!((c[1] - 0.5).abs() < 1e-5);
+        assert!((c[2] - 0.0).abs() < 1e-5);
+        assert!((c[3] - 1.0).abs() < 1e-5);
+    }
+
+    // Test 9: Preservation of UV seams
+    #[test]
+    fn test_9_preserve_uv_seams() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let (h0, h1) = mesh.edge_half_edges(e_mid).unwrap();
+        let h0_next = mesh.half_edge(h0).unwrap().next;
+        let h1_next = mesh.half_edge(h1).unwrap().next;
+
+        // Assign different wedge UVs on both sides (a UV seam along e_mid)
+        mesh.half_edge_mut(h0).unwrap().uv = Some(Vec2::new(0.0, 0.0));
+        mesh.half_edge_mut(h0_next).unwrap().uv = Some(Vec2::new(1.0, 0.0));
+
+        mesh.half_edge_mut(h1).unwrap().uv = Some(Vec2::new(0.0, 1.0));
+        mesh.half_edge_mut(h1_next).unwrap().uv = Some(Vec2::new(0.0, 0.5));
+
+        let res = mesh.split_edge(e_mid, 0.5).unwrap();
+        let (h0b, h1b) = res.new_half_edges;
+
+        let uv_side0 = mesh.half_edge(h0b).unwrap().uv.unwrap();
+        let uv_side1 = mesh.half_edge(h1b).unwrap().uv.unwrap();
+
+        assert!((uv_side0 - Vec2::new(0.5, 0.0)).length() < 1e-5);
+        assert!((uv_side1 - Vec2::new(0.0, 0.75)).length() < 1e-5);
+
+        // The UV seam is preserved: the two corners on opposite sides have different coordinates
+        assert_ne!(uv_side0, uv_side1);
+    }
+
+    // Test 10: Verification of Twin reciprocity after split
+    #[test]
+    fn test_10_verify_twins_after_split() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let res = mesh.split_edge(e_mid, 0.5).unwrap();
+        let (h0b, h1b) = res.new_half_edges;
+
+        // Check mutual twin property for all half-edges in the mesh
+        for h in mesh.half_edges() {
+            let he = mesh.half_edge(h).unwrap();
+            let twin = mesh.half_edge(he.twin).unwrap();
+            assert_eq!(
+                twin.twin, h,
+                "twin reciprocity must hold for all half-edges"
+            );
+        }
+
+        let (h0, h1) = (
+            mesh.half_edge(h1b).unwrap().twin,
+            mesh.half_edge(h0b).unwrap().twin,
+        );
+        assert_eq!(mesh.half_edge(h0).unwrap().twin, h1b);
+        assert_eq!(mesh.half_edge(h1).unwrap().twin, h0b);
+    }
+
+    // Test 11: Verification of Next and Prev cycles after split
+    #[test]
+    fn test_11_verify_next_and_prev() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let res = mesh.split_edge(e_mid, 0.5).unwrap();
+        let (h0b, h1b) = res.new_half_edges;
+
+        let h0 = mesh.half_edge(h0b).unwrap().prev;
+        let h1 = mesh.half_edge(h1b).unwrap().prev;
+
+        assert_eq!(mesh.half_edge(h0).unwrap().next, h0b);
+        assert_eq!(mesh.half_edge(h1).unwrap().next, h1b);
+
+        // Verify full cycle closure and prev/next consistency around affected faces
+        for f in [res.affected_faces.0, res.affected_faces.1]
+            .into_iter()
+            .flatten()
+        {
+            let hes = mesh.face_half_edges(f);
+            assert_eq!(hes.len(), 5);
+            for i in 0..hes.len() {
+                let curr = hes[i];
+                let next = hes[(i + 1) % hes.len()];
+                assert_eq!(mesh.half_edge(curr).unwrap().next, next);
+                assert_eq!(mesh.half_edge(next).unwrap().prev, curr);
+            }
+        }
+    }
+
+    // Test 12: Verification of Boundary Loop integrity
+    #[test]
+    fn test_12_boundary_loop_preservation() {
+        let mut mesh = make_two_quads();
+        let initial_loops = mesh.boundary_loops();
+        assert_eq!(initial_loops.len(), 1);
+        let initial_len = initial_loops[0].len();
+
+        let e_bnd = find_edge_between(&mesh, 2, 5);
+        assert!(mesh.is_edge_boundary(e_bnd));
+
+        let _res = mesh.split_edge(e_bnd, 0.3).unwrap();
+
+        let after_loops = mesh.boundary_loops();
+        assert_eq!(after_loops.len(), 1);
+        assert_eq!(after_loops[0].len(), initial_len + 1);
+    }
+
+    // Test 13: Verification of mesh validity via TopologyValidator
+    #[test]
+    fn test_13_topology_validator_pass() {
+        let mut mesh = make_two_quads();
+        let e_int = find_edge_between(&mesh, 1, 4);
+        mesh.split_edge(e_int, 0.5).unwrap();
+
+        let e_bnd = find_edge_between(&mesh, 0, 1);
+        mesh.split_edge(e_bnd, 0.3).unwrap();
+
+        let report = TopologyValidator::validate(&mesh);
+        assert!(report.is_valid, "Report must be valid: {:?}", report.issues);
+        assert_eq!(report.error_count(), 0);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Test 14: Handling of invalid EdgeHandle
+    #[test]
+    fn test_14_invalid_edge_handle() {
+        let mut mesh = make_two_quads();
+
+        let res_null = mesh.split_edge(EdgeHandle::NULL, 0.5);
+        assert!(matches!(res_null, Err(TopologyError::InvalidEdge(_))));
+
+        let res_oob = mesh.split_edge(EdgeHandle::new(9999, 0), 0.5);
+        assert!(matches!(res_oob, Err(TopologyError::InvalidEdge(_))));
+
+        let valid_e = mesh.edges().next().unwrap();
+        let wrong_gen = EdgeHandle::new(valid_e.raw_index(), valid_e.generation() + 1);
+        let res_gen = mesh.split_edge(wrong_gen, 0.5);
+        assert!(matches!(res_gen, Err(TopologyError::InvalidEdge(_))));
+    }
+
+    // Test 15: Handling of invalid parameter t
+    #[test]
+    fn test_15_invalid_t_values() {
+        let mut mesh = make_two_quads();
+        let e = mesh.edges().next().unwrap();
+
+        for &bad_t in &[
+            0.0,
+            1.0,
+            -0.5,
+            1.5,
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ] {
+            let res = mesh.split_edge(e, bad_t);
+            assert!(
+                matches!(res, Err(TopologyError::InvalidOperation(_))),
+                "bad t ({bad_t}) must return InvalidOperation"
+            );
+        }
+    }
+
+    // Test 16: Verification of atomicity on error
+    #[test]
+    fn test_16_atomic_rollback_on_error() {
+        let mut mesh = make_two_quads();
+        let mesh_backup = mesh.clone();
+
+        let e = mesh.edges().next().unwrap();
+
+        // 1. Error on invalid t
+        assert!(mesh.split_edge(e, -0.1).is_err());
+        assert_eq!(mesh, mesh_backup);
+
+        // 2. Error on invalid handle
+        assert!(mesh.split_edge(EdgeHandle::NULL, 0.5).is_err());
+        assert_eq!(mesh, mesh_backup);
+
+        // 3. Topology must remain completely intact
+        assert!(mesh.check_invariants().is_ok());
     }
 }

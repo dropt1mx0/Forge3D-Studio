@@ -393,7 +393,9 @@ fn test_edge_split() {
     let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
     let e = mesh.edges().next().unwrap();
-    let (v_new, e_new) = mesh.split_edge(e, 0.5).expect("Split edge failed");
+    let res = mesh.split_edge(e, 0.5).expect("Split edge failed");
+    let v_new = res.vertex;
+    let e_new = res.new_edge;
 
     assert!(mesh.is_valid_vertex(v_new));
     assert!(mesh.is_valid_edge(e_new));
