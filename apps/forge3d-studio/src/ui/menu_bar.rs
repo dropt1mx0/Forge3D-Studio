@@ -12,14 +12,15 @@ use crate::app::Forge3dStudioApp;
 pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     egui::MenuBar::new().ui(ui, |ui| {
         ui.label(
-            egui::RichText::new("⬡")
+            egui::RichText::new("Forge3D")
                 .strong()
-                .size(15.0)
+                .size(13.0)
                 .color(egui::Color32::from_rgb(59, 130, 246)),
         );
+        ui.add_space(2.0);
         // ---------------- File Menu ----------------
         ui.menu_button("File", |ui| {
-            if ui.button("📄 New Scene").clicked() {
+            if ui.button("New Scene").clicked() {
                 app.scene = Scene::create_default_scene();
                 app.selection.deselect();
                 app.history.clear();
@@ -29,7 +30,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             ui.separator();
 
-            if ui.button("📂 Open (.forge)...").clicked() {
+            if ui.button("Open (.forge)...").clicked() {
                 let default_path = "scene.forge";
                 match std::fs::read_to_string(default_path) {
                     Ok(json) => match ForgeProject::from_json(&json) {
@@ -53,7 +54,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.close();
             }
 
-            if ui.button("💾 Save Project (.forge)").clicked() {
+            if ui.button("Save Project (.forge)").clicked() {
                 let default_path = "scene.forge";
                 let project = ForgeProject::new(&app.scene.name, app.scene.clone());
                 match project.to_json() {
@@ -74,7 +75,50 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             ui.separator();
 
-            if ui.button("❌ Exit").clicked() {
+            ui.menu_button("Import", |ui| {
+                if ui.button("Wavefront (.obj)...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Wavefront OBJ", &["obj"])
+                        .set_title("Import Wavefront OBJ")
+                        .pick_file()
+                        && let Err(e) = app.import_obj_from_path(&path)
+                    {
+                        app.status_message = format!("Import error: {e}");
+                    }
+                }
+            });
+
+            ui.menu_button("Export", |ui| {
+                if ui.button("Wavefront (.obj)...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Wavefront OBJ", &["obj"])
+                        .set_file_name("scene.obj")
+                        .set_title("Export Wavefront OBJ")
+                        .save_file()
+                        && let Err(e) = app.export_obj_to_path(&path, false)
+                    {
+                        app.status_message = format!("Export error: {e}");
+                    }
+                }
+                if ui.button("Wavefront (.obj) [Selected]...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Wavefront OBJ", &["obj"])
+                        .set_file_name("selected.obj")
+                        .set_title("Export Selected to Wavefront OBJ")
+                        .save_file()
+                        && let Err(e) = app.export_obj_to_path(&path, true)
+                    {
+                        app.status_message = format!("Export error: {e}");
+                    }
+                }
+            });
+
+            ui.separator();
+
+            if ui.button("Exit").clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -82,9 +126,9 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // ---------------- Edit Menu ----------------
         ui.menu_button("Edit", |ui| {
             let undo_label = if let Some(desc) = app.history.last_undo_description() {
-                format!("↩ Undo: {desc} (Ctrl+Z)")
+                format!("Undo: {desc} (Ctrl+Z)")
             } else {
-                "↩ Undo (Ctrl+Z)".to_string()
+                "Undo (Ctrl+Z)".to_string()
             };
             if ui
                 .add_enabled(app.history.can_undo(), egui::Button::new(undo_label))
@@ -95,9 +139,9 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
 
             let redo_label = if let Some(desc) = app.history.last_redo_description() {
-                format!("↪ Redo: {desc} (Ctrl+Shift+Z)")
+                format!("Redo: {desc} (Ctrl+Shift+Z)")
             } else {
-                "↪ Redo (Ctrl+Shift+Z)".to_string()
+                "Redo (Ctrl+Shift+Z)".to_string()
             };
             if ui
                 .add_enabled(app.history.can_redo(), egui::Button::new(redo_label))
@@ -111,7 +155,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             let has_sel = !app.selection.is_empty();
             if ui
-                .add_enabled(has_sel, egui::Button::new("📑 Duplicate (Shift+D)"))
+                .add_enabled(has_sel, egui::Button::new("Duplicate (Shift+D)"))
                 .clicked()
             {
                 app.duplicate_selected();
@@ -119,7 +163,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
 
             if ui
-                .add_enabled(has_sel, egui::Button::new("🗑 Delete (Del)"))
+                .add_enabled(has_sel, egui::Button::new("Delete (Del)"))
                 .clicked()
             {
                 app.delete_selected();
@@ -148,13 +192,13 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.data_mut(|d| d.get_temp_mut_or_default::<String>(search_id).clone());
 
             ui.horizontal(|ui| {
-                ui.label("🔍");
+                ui.label(egui::RichText::new("Search:").size(11.0).weak());
                 ui.add(
                     egui::TextEdit::singleline(&mut search_buf)
                         .hint_text("Search primitives...")
                         .desired_width(140.0),
                 );
-                if !search_buf.is_empty() && ui.small_button("×").clicked() {
+                if !search_buf.is_empty() && ui.small_button("Clear").clicked() {
                     search_buf.clear();
                 }
             });
@@ -184,7 +228,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             if show_mesh_header {
                 ui.label(egui::RichText::new("Mesh Primitives").weak().size(11.0));
 
-                if matches("Cube") && ui.button("📦 Cube").clicked() {
+                if matches("Cube") && ui.button("Cube").clicked() {
                     let mesh = generate_cube(1.0);
                     let id = app.scene.add_object(
                         SceneObject::new("Cube", PrimitiveType::Cube, mesh)
@@ -203,7 +247,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.close();
                 }
 
-                if matches("UV Sphere") && ui.button("🌐 UV Sphere").clicked() {
+                if matches("UV Sphere") && ui.button("UV Sphere").clicked() {
                     let mesh = generate_uv_sphere(0.75, 32, 16);
                     let id = app.scene.add_object(
                         SceneObject::new("UV Sphere", PrimitiveType::Sphere, mesh)
@@ -222,7 +266,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.close();
                 }
 
-                if matches("Icosphere") && ui.button("🌐 Icosphere").clicked() {
+                if matches("Icosphere") && ui.button("Icosphere").clicked() {
                     let mesh = generate_icosphere(0.75, 2);
                     let id = app.scene.add_object(
                         SceneObject::new("Icosphere", PrimitiveType::Icosphere, mesh)
@@ -241,7 +285,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.close();
                 }
 
-                if matches("Cylinder") && ui.button("🛢 Cylinder").clicked() {
+                if matches("Cylinder") && ui.button("Cylinder").clicked() {
                     let mesh = generate_cylinder(0.6, 1.5, 24);
                     let id = app.scene.add_object(
                         SceneObject::new("Cylinder", PrimitiveType::Cylinder, mesh)
@@ -260,7 +304,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.close();
                 }
 
-                if matches("Cone") && ui.button("▲ Cone").clicked() {
+                if matches("Cone") && ui.button("Cone").clicked() {
                     let mesh = generate_cone(0.8, 1.5, 24);
                     let id = app.scene.add_object(
                         SceneObject::new("Cone", PrimitiveType::Cone, mesh)
@@ -279,7 +323,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.close();
                 }
 
-                if matches("Torus") && ui.button("🍩 Torus").clicked() {
+                if matches("Torus") && ui.button("Torus").clicked() {
                     let mesh = generate_torus(1.0, 0.3, 24, 16);
                     let id = app.scene.add_object(
                         SceneObject::new("Torus", PrimitiveType::Torus, mesh)
@@ -298,7 +342,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.close();
                 }
 
-                if matches("Capsule") && ui.button("💊 Capsule").clicked() {
+                if matches("Capsule") && ui.button("Capsule").clicked() {
                     let mesh = generate_capsule(0.5, 1.0, 24, 8);
                     let id = app.scene.add_object(
                         SceneObject::new("Capsule", PrimitiveType::Capsule, mesh)
@@ -317,8 +361,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.close();
                 }
 
-                if (matches("Plane") || matches("Grid")) && ui.button("⬛ Plane / Grid").clicked()
-                {
+                if (matches("Plane") || matches("Grid")) && ui.button("Plane / Grid").clicked() {
                     let mesh = generate_plane(8.0, 8);
                     let id = app.scene.add_object(
                         SceneObject::new("Plane", PrimitiveType::Plane, mesh)
@@ -335,7 +378,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.close();
                 }
 
-                if matches("Circle") && ui.button("⭕ Circle").clicked() {
+                if matches("Circle") && ui.button("Circle").clicked() {
                     let mesh = generate_circle(1.0, 32);
                     let id = app.scene.add_object(
                         SceneObject::new("Circle", PrimitiveType::Circle, mesh)
@@ -353,7 +396,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 }
 
                 if (matches("Suzanne") || matches("Monkey"))
-                    && ui.button("🐵 Suzanne (Monkey)").clicked()
+                    && ui.button("Suzanne (Monkey)").clicked()
                 {
                     let mesh = generate_monkey(1.0);
                     let id = app.scene.add_object(
@@ -377,7 +420,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             if matches("Camera") {
                 ui.separator();
                 ui.label(egui::RichText::new("Scene Objects").weak().size(11.0));
-                if ui.button("📷 Camera").clicked() {
+                if ui.button("Camera").clicked() {
                     let mut camera_obj = SceneObject::new_camera("Camera");
                     camera_obj.local_transform.translation = cursor + Vec3::new(0.0, 1.5, 3.0);
                     let id = app.scene.add_object(camera_obj);
@@ -398,7 +441,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             let has_sel = !app.selection.is_empty();
 
             if ui
-                .add_enabled(has_sel, egui::Button::new("✔ Apply Transform"))
+                .add_enabled(has_sel, egui::Button::new("Apply Transform"))
                 .clicked()
             {
                 app.apply_transform_selected();
@@ -427,7 +470,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             if ui
                 .add_enabled(
                     app.selection.selected_ids.len() > 1,
-                    egui::Button::new("🔗 Join Objects (Ctrl+J)"),
+                    egui::Button::new("Join Objects (Ctrl+J)"),
                 )
                 .clicked()
             {
@@ -527,7 +570,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         // ---------------- Mesh Menu ----------------
         ui.menu_button("Mesh", |ui| {
-            if ui.button("⏏ Extrude (E)").clicked() {
+            if ui.button("Extrude (E)").clicked() {
                 if app.editor_state.edit_mode != EditMode::Edit {
                     app.toggle_edit_mode();
                 }
@@ -535,7 +578,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.close();
             }
 
-            if ui.button("⇲ Inset (I)").clicked() {
+            if ui.button("Inset (I)").clicked() {
                 if app.editor_state.edit_mode != EditMode::Edit {
                     app.toggle_edit_mode();
                 }
@@ -543,7 +586,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.close();
             }
 
-            if ui.button("⊞ Subdivide").clicked() {
+            if ui.button("Subdivide").clicked() {
                 if app.editor_state.edit_mode != EditMode::Edit {
                     app.toggle_edit_mode();
                 }
@@ -551,7 +594,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.close();
             }
 
-            if ui.button("⨁ Merge at Center (M)").clicked() {
+            if ui.button("Merge at Center (M)").clicked() {
                 if app.editor_state.edit_mode != EditMode::Edit {
                     app.toggle_edit_mode();
                 }
@@ -559,7 +602,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.close();
             }
 
-            if ui.button("▱ Fill Face/Edge (F)").clicked() {
+            if ui.button("Fill Face/Edge (F)").clicked() {
                 if app.editor_state.edit_mode != EditMode::Edit {
                     app.toggle_edit_mode();
                 }
@@ -569,7 +612,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             ui.separator();
 
-            if ui.button("🗑 Delete Selected").clicked() {
+            if ui.button("Delete Selected").clicked() {
                 app.delete_selected();
                 ui.close();
             }
@@ -577,17 +620,17 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         // ---------------- Render Menu ----------------
         ui.menu_button("Render", |ui| {
-            if ui.button("⚡ Live Viewer (WGPU Viewport)").clicked() {
+            if ui.button("Live Viewer (WGPU Viewport)").clicked() {
                 app.status_message = "Live Viewer Active".to_string();
                 ui.close();
             }
-            if ui.button("🖼 Render Image (F12)").clicked() {
+            if ui.button("Render Image (F12)").clicked() {
                 app.status_message = "Render Frame Complete".to_string();
                 ui.close();
             }
             ui.separator();
             ui.label(egui::RichText::new("Octane / PBR Engine").weak().size(11.0));
-            if ui.button("⚙ Viewport Shading: Lit PBR").clicked() {
+            if ui.button("Viewport Shading: Lit PBR").clicked() {
                 app.status_message = "PBR Forward Shading Active".to_string();
                 ui.close();
             }
@@ -595,11 +638,11 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         // ---------------- Plugins Menu ----------------
         ui.menu_button("Plugins", |ui| {
-            if ui.button("🔌 Plugin Manager...").clicked() {
+            if ui.button("Plugin Manager...").clicked() {
                 app.status_message = "Plugins: 0 loaded".to_string();
                 ui.close();
             }
-            if ui.button("🔗 Cinema 4D / Octane Bridge").clicked() {
+            if ui.button("Cinema 4D / Octane Bridge").clicked() {
                 app.status_message = "Bridge Ready".to_string();
                 ui.close();
             }
@@ -608,9 +651,9 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // ---------------- Windows Menu ----------------
         ui.menu_button("Windows", |ui| {
             let cam_view_text = if app.editor_state.is_camera_view {
-                "📷 Exit Camera View (Numpad 0)"
+                "Exit Camera View (Numpad 0)"
             } else {
-                "📷 Camera View (Numpad 0)"
+                "Camera View (Numpad 0)"
             };
             if ui.button(cam_view_text).clicked() {
                 app.toggle_camera_view();
@@ -628,9 +671,9 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.separator();
 
             let fly_text = if app.editor_state.fly_nav_active {
-                "🚀 Exit Fly Navigation (Esc)"
+                "Exit Fly Navigation (Esc)"
             } else {
-                "🚀 Fly Navigation (Shift+~ / Shift+F)"
+                "Fly Navigation (Shift+~ / Shift+F)"
             };
             if ui.button(fly_text).clicked() {
                 app.toggle_fly_navigation();
@@ -681,17 +724,17 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             ui.separator();
 
-            if ui.button("🎯 Frame Selected (F / Numpad .)").clicked() {
+            if ui.button("Frame Selected (F / Numpad .)").clicked() {
                 app.frame_selected();
                 ui.close();
             }
 
-            if ui.button("🌐 Frame All (Home)").clicked() {
+            if ui.button("Frame All (Home)").clicked() {
                 app.frame_all();
                 ui.close();
             }
 
-            if ui.button("🔄 Reset View").clicked() {
+            if ui.button("Reset View").clicked() {
                 app.camera.reset_view();
                 app.editor_state.is_camera_view = false;
                 ui.close();
@@ -793,7 +836,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 &mut app.show_material_editor,
                 "Show Material Inspector (Octane Style)",
             );
-            if ui.button("↺ Reset Workspace Layout").clicked() {
+            if ui.button("Reset Workspace Layout").clicked() {
                 app.editor_state.panel_settings = forge_scene::PanelSettings::default();
                 let _ = app.editor_state.panel_settings.save();
                 app.status_message = "Reset workspace layout to defaults".to_string();
@@ -803,19 +846,75 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         // ---------------- Help Menu ----------------
         ui.menu_button("Help", |ui| {
-            if ui.button("ℹ About Forge3D").clicked() {
+            if ui.button("About Forge3D").clicked() {
                 app.show_about_dialog = true;
                 ui.close();
             }
 
-            if ui.button("🖥 GPU Diagnostics").clicked() {
+            if ui.button("GPU Diagnostics").clicked() {
                 app.show_gpu_dialog = true;
                 ui.close();
             }
         });
 
-        // ---------------- Right-aligned Layout Mode Dropdown ----------------
+        // ---------------- Right-aligned Window Controls & Layout Selector ----------------
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+
+            // Close button with hover highlight
+            let close_resp = ui.add(
+                egui::Button::new(
+                    egui::RichText::new("✕")
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(180, 190, 210)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .corner_radius(egui::CornerRadius::same(3))
+                .min_size(egui::vec2(24.0, 20.0)),
+            );
+            if close_resp.clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+
+            // Maximize / Restore button
+            let is_maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+            let max_symbol = if is_maximized { "⧉" } else { "▢" };
+            let max_resp = ui.add(
+                egui::Button::new(
+                    egui::RichText::new(max_symbol)
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(180, 190, 210)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .corner_radius(egui::CornerRadius::same(3))
+                .min_size(egui::vec2(24.0, 20.0)),
+            );
+            if max_resp.clicked() {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
+            }
+
+            // Minimize button
+            let min_resp = ui.add(
+                egui::Button::new(
+                    egui::RichText::new("—")
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(180, 190, 210)),
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .corner_radius(egui::CornerRadius::same(3))
+                .min_size(egui::vec2(24.0, 20.0)),
+            );
+            if min_resp.clicked() {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            // Layout Mode Selector
             egui::ComboBox::from_id_salt("layout_mode_selector")
                 .selected_text("Layout: Model ▾")
                 .show_ui(ui, |ui| {
@@ -824,6 +923,29 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     let _ = ui.selectable_label(false, "Sculpt");
                     let _ = ui.selectable_label(false, "Render / UV");
                 });
+
+            // Draggable window title space in the center
+            let remaining_w = ui.available_width();
+            if remaining_w > 10.0 {
+                let (drag_rect, drag_resp) = ui.allocate_exact_size(
+                    egui::vec2(remaining_w, 20.0),
+                    egui::Sense::click_and_drag(),
+                );
+                if drag_resp.drag_started_by(egui::PointerButton::Primary) {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+                if drag_resp.double_clicked() {
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
+                }
+                ui.painter().text(
+                    drag_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "Forge3D Studio",
+                    egui::FontId::proportional(11.0),
+                    egui::Color32::from_rgb(110, 118, 135),
+                );
+            }
         });
     });
 
@@ -834,14 +956,14 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         // Undo / Redo
         if ui
-            .add_enabled(app.history.can_undo(), egui::Button::new("⤺"))
+            .add_enabled(app.history.can_undo(), egui::Button::new("Undo"))
             .on_hover_text("Undo (Ctrl+Z)")
             .clicked()
         {
             app.undo();
         }
         if ui
-            .add_enabled(app.history.can_redo(), egui::Button::new("⤼"))
+            .add_enabled(app.history.can_redo(), egui::Button::new("Redo"))
             .on_hover_text("Redo (Ctrl+Shift+Z)")
             .clicked()
         {
@@ -852,7 +974,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // Selection modes
         let is_pointer = app.editor_state.transform_mode != forge_scene::TransformMode::BoxSelect;
         if ui
-            .selectable_label(is_pointer, "↖")
+            .selectable_label(is_pointer, "Select")
             .on_hover_text("Pointer Selection (LMB Click/Drag)")
             .clicked()
         {
@@ -860,7 +982,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
         let is_box = app.editor_state.transform_mode == forge_scene::TransformMode::BoxSelect;
         if ui
-            .selectable_label(is_box, "⬚")
+            .selectable_label(is_box, "Box")
             .on_hover_text("Box Selection (B)")
             .clicked()
         {
@@ -871,7 +993,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // Transform Gizmo modes
         let is_trans = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Translate;
         if ui
-            .selectable_label(is_trans, "✥ Move")
+            .selectable_label(is_trans, "Move")
             .on_hover_text("Translate Tool (G / Move Gizmo)")
             .clicked()
         {
@@ -880,7 +1002,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
         let is_rot = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Rotate;
         if ui
-            .selectable_label(is_rot, "⟲ Rotate")
+            .selectable_label(is_rot, "Rotate")
             .on_hover_text("Rotate Tool (R / Rotate Gizmo)")
             .clicked()
         {
@@ -889,7 +1011,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
         let is_scale = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Scale;
         if ui
-            .selectable_label(is_scale, "⤡ Scale")
+            .selectable_label(is_scale, "Scale")
             .on_hover_text("Scale Tool (S / Scale Gizmo)")
             .clicked()
         {
@@ -901,7 +1023,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // Primitives Quick Add
         let cursor = app.editor_state.cursor_3d;
         if ui
-            .button("⬡ Cube")
+            .button("Cube")
             .on_hover_text("Add Cube at 3D Cursor")
             .clicked()
         {
@@ -922,7 +1044,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             app.status_message = "Added Cube".to_string();
         }
         if ui
-            .button("◯ Sphere")
+            .button("Sphere")
             .on_hover_text("Add UV Sphere at 3D Cursor")
             .clicked()
         {
@@ -943,7 +1065,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             app.status_message = "Added UV Sphere".to_string();
         }
         if ui
-            .button("💡 Light")
+            .button("Light")
             .on_hover_text("Add Light Object")
             .clicked()
         {
@@ -964,7 +1086,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             app.status_message = "Added Light".to_string();
         }
         if ui
-            .button("📷 Camera")
+            .button("Camera")
             .on_hover_text("Add Camera Object")
             .clicked()
         {
@@ -989,7 +1111,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // Snapping & Grid Toggles
         let snap_on = app.editor_state.snap_settings.enabled;
         if ui
-            .selectable_label(snap_on, "🧲 Snap")
+            .selectable_label(snap_on, "Snap")
             .on_hover_text("Toggle Snapping to Grid")
             .clicked()
         {
@@ -997,7 +1119,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
         let grid_on = app.editor_state.show_grid;
         if ui
-            .selectable_label(grid_on, "▦ Grid")
+            .selectable_label(grid_on, "Grid")
             .on_hover_text("Toggle Viewport Ground Grid")
             .clicked()
         {
@@ -1010,7 +1132,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             if ui
                 .add(
                     egui::Button::new(
-                        egui::RichText::new("⚡ Live Viewer")
+                        egui::RichText::new("Live Viewer")
                             .color(egui::Color32::from_rgb(180, 220, 255)),
                     )
                     .fill(egui::Color32::from_rgb(28, 38, 56)),

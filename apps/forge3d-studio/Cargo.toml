@@ -20,6 +20,8 @@ forge-scene = { workspace = true }
 forge-gpu = { workspace = true }
 forge-render = { workspace = true }
 forge-modifiers = { workspace = true }
+forge-io = { workspace = true }
+rfd = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }

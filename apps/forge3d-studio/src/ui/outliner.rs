@@ -8,20 +8,22 @@ use crate::app::Forge3dStudioApp;
 
 pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     // Top Tabs: File | Edit | View | Objects | Tags | Bookmarks
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
-        let tab_col = egui::Color32::from_rgb(160, 168, 185);
-        ui.label(egui::RichText::new("File").size(11.0).color(tab_col));
-        ui.label(egui::RichText::new("Edit").size(11.0).color(tab_col));
-        ui.label(egui::RichText::new("View").size(11.0).color(tab_col));
-        ui.label(
-            egui::RichText::new("Objects")
-                .size(11.0)
-                .strong()
-                .color(egui::Color32::from_rgb(220, 230, 255)),
-        );
-        ui.label(egui::RichText::new("Tags").size(11.0).color(tab_col));
-        ui.label(egui::RichText::new("Bookmarks").size(11.0).color(tab_col));
+    egui::ScrollArea::horizontal().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
+            let tab_col = egui::Color32::from_rgb(160, 168, 185);
+            ui.label(egui::RichText::new("File").size(11.0).color(tab_col));
+            ui.label(egui::RichText::new("Edit").size(11.0).color(tab_col));
+            ui.label(egui::RichText::new("View").size(11.0).color(tab_col));
+            ui.label(
+                egui::RichText::new("Objects")
+                    .size(11.0)
+                    .strong()
+                    .color(egui::Color32::from_rgb(220, 230, 255)),
+            );
+            ui.label(egui::RichText::new("Tags").size(11.0).color(tab_col));
+            ui.label(egui::RichText::new("Bookmarks").size(11.0).color(tab_col));
+        });
     });
     ui.add_space(2.0);
     ui.separator();
@@ -159,7 +161,7 @@ fn render_object_node(
             }
 
             // Visibility toggle icon
-            let eye_icon = if obj.visible { "👁" } else { "🚫" };
+            let eye_icon = if obj.visible { "●" } else { "○" };
             if ui
                 .small_button(eye_icon)
                 .on_hover_text("Toggle Visibility (H)")
@@ -169,7 +171,7 @@ fn render_object_node(
             }
 
             // Lock toggle icon
-            let lock_icon = if obj.locked { "🔒" } else { "🔓" };
+            let lock_icon = if obj.locked { "[L]" } else { "[-]" };
             if ui
                 .small_button(lock_icon)
                 .on_hover_text("Toggle Transform Lock")
@@ -178,24 +180,24 @@ fn render_object_node(
                 obj.locked = !obj.locked;
             }
 
-            // Primitive icon
-            let icon = match obj.primitive_type {
-                PrimitiveType::Cube => "📦",
-                PrimitiveType::Sphere | PrimitiveType::Icosphere => "🌐",
-                PrimitiveType::Plane | PrimitiveType::Grid => "⬛",
-                PrimitiveType::Circle => "⭕",
-                PrimitiveType::Cylinder => "🛢",
-                PrimitiveType::Cone => "▲",
-                PrimitiveType::Torus => "🍩",
-                PrimitiveType::Capsule => "💊",
-                PrimitiveType::Monkey => "🐵",
-                PrimitiveType::Camera => "📷",
-                PrimitiveType::Custom => "📐",
+            // Primitive type badge
+            let tag = match obj.primitive_type {
+                PrimitiveType::Cube => "[Cube]",
+                PrimitiveType::Sphere | PrimitiveType::Icosphere => "[Sphere]",
+                PrimitiveType::Plane | PrimitiveType::Grid => "[Plane]",
+                PrimitiveType::Circle => "[Circle]",
+                PrimitiveType::Cylinder => "[Cyl]",
+                PrimitiveType::Cone => "[Cone]",
+                PrimitiveType::Torus => "[Torus]",
+                PrimitiveType::Capsule => "[Capsule]",
+                PrimitiveType::Monkey => "[Suzanne]",
+                PrimitiveType::Camera => "[Cam]",
+                PrimitiveType::Custom => "[Mesh]",
             };
 
-            let mut label_text = format!("{icon} {}", obj.name);
+            let mut label_text = format!("{tag} {}", obj.name);
             if obj.primitive_type == PrimitiveType::Camera && is_active_cam {
-                label_text.push_str(" ★");
+                label_text.push_str(" [Active]");
             }
 
             let has_children = !children.is_empty();

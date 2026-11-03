@@ -72,8 +72,8 @@ This roadmap establishes the phased engineering progression of **Forge3D Rust Ed
 ### Phase 4 — Materials, Lighting & Asset Interchange (Status: PLANNED — NEXT CYCLE)
 - **Primary Goals**: Transition from basic shading to full PBR materials, dynamic multi-light scenes, shadow mapping, and standard 3D asset interchange (`crates/forge-io`).
 - **Target Tasks**:
-  - [ ] **Asset I/O Crate (`crates/forge-io`)**:
-    - [ ] Wavefront OBJ import and export (`.obj` / `.mtl`) with fast parsing.
+  - [x] **Asset I/O Crate (`crates/forge-io`)**:
+    - [x] Wavefront OBJ import and export (`.obj`) with clean-room parser, 3D Ear Clipping triangulation, and unified history undo/redo.
     - [ ] glTF 2.0 / GLB import and export (`.gltf` / `.glb`) with PBR material and node hierarchy support.
     - [ ] STL import and export (ASCII & binary) for 3D printing workflows.
   - [ ] **PBR Material Data Model**:

@@ -123,6 +123,10 @@ fn default_smooth_zoom() -> bool {
     true
 }
 
+fn default_menu_bar_right_width() -> f32 {
+    200.0
+}
+
 /// Persistent workspace panel configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanelSettings {
@@ -140,15 +144,17 @@ pub struct PanelSettings {
     pub zoom_to_cursor: bool,
     #[serde(default = "default_smooth_zoom")]
     pub smooth_zoom: bool,
+    #[serde(default = "default_menu_bar_right_width")]
+    pub menu_bar_right_width: f32,
 }
 
 impl Default for PanelSettings {
     fn default() -> Self {
         Self {
-            toolbar_width: 52.0,
+            toolbar_width: 58.0,
             toolbar_visible: true,
             toolbar_mode: ToolbarDisplayMode::IconOnly,
-            sidebar_width: 300.0,
+            sidebar_width: 350.0,
             sidebar_visible: true,
             outliner_height_ratio: 0.45,
             timeline_height: 100.0,
@@ -156,6 +162,7 @@ impl Default for PanelSettings {
             zoom_sensitivity: 1.0,
             zoom_to_cursor: true,
             smooth_zoom: true,
+            menu_bar_right_width: 200.0,
         }
     }
 }
@@ -166,7 +173,7 @@ impl PanelSettings {
     /// Returns clamped panel settings within safe minimum and maximum bounds.
     pub fn clamped(&self) -> Self {
         Self {
-            toolbar_width: self.toolbar_width.clamp(48.0, 240.0),
+            toolbar_width: self.toolbar_width.clamp(48.0, 280.0),
             toolbar_visible: self.toolbar_visible,
             toolbar_mode: self.toolbar_mode,
             sidebar_width: self.sidebar_width.clamp(220.0, 600.0),
@@ -181,6 +188,7 @@ impl PanelSettings {
             },
             zoom_to_cursor: self.zoom_to_cursor,
             smooth_zoom: self.smooth_zoom,
+            menu_bar_right_width: self.menu_bar_right_width.clamp(80.0, 500.0),
         }
     }
 

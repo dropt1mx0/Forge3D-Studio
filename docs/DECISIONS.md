@@ -288,3 +288,63 @@
      - Floating `Brushed Metal Material  ‹ › 🔒` inspector window with glossy sphere preview, glossy type selector, diffuse/specular/roughness channels, color spectrum bar, and sliders.
 - **Consequences:**
   Object dragging is completely smooth with zero jitter, oscillation, or frame drops. The studio interface achieves a modern, cohesive, dark DCC studio aesthetic strictly matching the reference screenshot. All 109 automated tests pass cleanly with zero warnings under clippy and fmt.
+
+---
+
+## ADR-0017: Viewport/Sidebar Separation, Dynamic Border Resizing, Unified Dark Title/Menu Bar, and Comprehensive UI Emoji Purge
+- **Status:** Accepted
+- **Date:** 2026-11-02
+- **Context:**
+  The user requested three critical interface refinements:
+  1. Fix the workspace (3D viewport) and separate it from the right menu bar (Outliner / Properties), because previously the workspace was overlapping the right panel and cutting off its functions.
+  2. Add the ability to resize using the cursor on the border: hovering over the boundary between the workspace and the right sidebar must change the cursor and dynamically scale both the workspace and sidebar.
+  3. Eliminate the jarring white bar on top that took up vertical space and clashed with the dark theme; recolor it to match the `#131419` dark studio theme and move the menu functions (`File`, `Edit`, `Create`, etc.) one row up into this unified top bar.
+  4. Completely remove all emojis across the interface (menus, toolbars, properties, outliner, status bar, timeline, material pills, viewport HUD) as emojis look cheap and diminish the application's professional standard.
+- **Decision:**
+  1. **Border-Resizing & Viewport Separation via Native egui Panel:**
+     - Replaced the inner manual 6px splitter in `app.rs` with native `.resizable(true)` on `egui::Panel::right("outliner_properties_panel")`.
+     - Placed the resize handle directly on the outer border between the central 3D viewport panel and the right sidebar. Hovering over the edge switches the cursor to `CursorIcon::ResizeHorizontal` and allows smooth drag-scaling (`240.0..=600.0` range).
+     - Persist resized width back to `PanelSettings::sidebar_width` and `forge3d_settings.json`.
+     - Increased default `sidebar_width` to 350.0 px.
+     - Added `egui::ScrollArea::horizontal()` to Outliner tabs (`File | Edit | View | Objects | Tags | Bookmarks`) preventing horizontal truncation.
+     - Clamped Viewport HUD overlay strip width to `(rect.width() - 28.0).clamp(100.0, 520.0)` to eliminate any potential viewport overlay bleed.
+  2. **Unified Borderless Dark Studio Bar:**
+     - Enabled `.with_decorations(false)` on `egui::ViewportBuilder`, eliminating OS/Wayland `libdecor` white titlebars.
+     - Merged window branding (`Forge3D`), standard menu hierarchy (`File`, `Edit`, `Create`, `Select`, `Tools`, `Mesh`, `Render`, `Plugins`, `Windows`, `Help`), window draggable area (`StartDrag` on drag, double-click for maximize/restore), layout selector, and window controls (`—`, `▢`/`⧉`, `✕`) onto the single top row with matching studio dark frame (`#131419`).
+  3. **Zero-Emoji Policy:**
+     - Completely eliminated all emojis from the application. Replaced them with clean text badges (`[Cube]`, `[Sphere]`, `[Cam]`, `[Mesh]`, `[Active]`, `[Locked]`, `Show`/`Hide`, `X`/`Y`/`Z`, `Copy`, `Paste`, `Apply`, `|<`, `◀`, `▶`, `>|`, `Loop`, `Gold`, `Diffuse`, `Metal`).
+- **Consequences:**
+  Eliminates visual clashes and clipped content, restores complete visibility to the Outliner and Properties cards, provides intuitive border dragging, and gives Forge3D a sleek, professional, modern desktop appearance conforming to Blender, Cinema 4D, and VS Code standards. All automated tests pass with 100% compliance.
+
+---
+
+## ADR-0018: Wavefront OBJ Asset Pipeline MVP (`crates/forge-io`)
+- **Status:** Accepted
+- **Date:** 2026-11-03
+- **Context:**
+  The master specification (Phase 5) requires an independent, robust Wavefront OBJ import and export pipeline allowing artists to load external 3D models into Forge3D, view and manipulate them in the Viewport and Outliner, undo imports via a single `Ctrl+Z`, and export meshes and scenes back to standard-compliant `.obj` files.
+- **Decision:**
+  1. **New Crate `crates/forge-io`**:
+     - Dedicated, pure-CPU crate with zero dependencies on `wgpu` or `egui`.
+     - Independent clean-room parser supporting `v`, `vt`, `vn`, `f`, `o`, `g`, `s`, `mtllib`, and `usemtl`.
+     - Relative and negative index resolution (e.g. `-1`, `-2`) evaluated at line parse time against accumulated buffer length.
+     - Strict 1-based indexing validation rejecting 0-indices as `ForgeIoError::ZeroIndex`.
+  2. **3D Polygon Ear Clipping Triangulation (`obj/triangulation.rs`)**:
+     - Arbitrary $N$-gon triangulation without external dependencies.
+     - Newell's method for normal estimation on non-planar polygons.
+     - Dynamic 2D projection on dominant plane ($XY$, $XZ$, or $YZ$).
+     - Ear clipping with interior-point edge-function tests, correctly handling convex and concave polygons with safe fallback against degenerate/self-intersecting loops.
+  3. **Vertex Welding & Seam Preservation (`obj/importer.rs`)**:
+     - Multi-index hash map keyed by `(v_idx, vt_idx, vn_idx)` guarantees vertex deduplication while strictly preserving UV seams and hard normal edges.
+     - Area-weighted smooth normal calculation if normals are missing in the OBJ file.
+  4. **Scene Export (`obj/exporter.rs`)**:
+     - Supports exporting single `Mesh` or full `Scene`.
+     - World-transform application (`world_space: true`) bakes object translation, rotation, and scale into exported vertex positions and normal vectors.
+  5. **Unified History Undo/Redo (`Action::ImportObjects`)**:
+     - Added `Action::ImportObjects { objects: Vec<SceneObject> }` to `crates/forge-scene/src/history.rs`.
+     - Single `Ctrl+Z` atomic undo removes all objects imported in a multi-object asset.
+  6. **Studio UI Integration**:
+     - File menu entries: `File -> Import -> Wavefront (.obj)...` and `File -> Export -> Wavefront (.obj)...` (full scene and selected-only) via `rfd` native file dialogs.
+- **Consequences:**
+  Forge3D can now import and export standard 3D assets with full roundtrip fidelity, multi-object hierarchy preservation, zero panic on malformed inputs, and complete undo/redo integration. All 149 automated workspace tests pass cleanly with zero warnings under clippy and fmt.
+

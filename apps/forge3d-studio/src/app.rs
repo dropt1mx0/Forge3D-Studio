@@ -343,6 +343,126 @@ impl Forge3dStudioApp {
         Ok(())
     }
 
+    pub fn import_obj_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(), String> {
+        let path_ref = path.as_ref();
+        let options = forge_io::ImportOptions::default();
+        let asset = match forge_io::import_obj(path_ref, &options) {
+            Ok(a) => a,
+            Err(e) => {
+                let msg = format!("Import failed: {e}");
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+        };
+
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("model.obj");
+
+        let total_objs = asset.objects.len();
+        let total_tris = asset.total_triangles();
+
+        let scene_objects = asset.into_scene_objects();
+        if scene_objects.is_empty() {
+            let msg = "Import failed: No objects imported".to_string();
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        let mut imported_ids = std::collections::HashSet::new();
+        let mut first_id = None;
+
+        for obj in &scene_objects {
+            imported_ids.insert(obj.id);
+            if first_id.is_none() {
+                first_id = Some(obj.id);
+            }
+        }
+
+        let history_objects = scene_objects.clone();
+        for obj in scene_objects {
+            self.scene.add_object(obj);
+        }
+
+        self.history.push(Action::ImportObjects {
+            objects: history_objects,
+        });
+
+        self.selection.selected_ids = imported_ids;
+        self.selection.active_id = first_id;
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_all_meshes();
+        }
+
+        self.status_message = format!(
+            "Imported {} ({} object{}, {} tris)",
+            file_name,
+            total_objs,
+            if total_objs == 1 { "" } else { "s" },
+            total_tris
+        );
+
+        Ok(())
+    }
+
+    pub fn export_obj_to_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        selected_only: bool,
+    ) -> Result<(), String> {
+        let path_ref = path.as_ref();
+
+        let export_scene = if selected_only {
+            if self.selection.selected_ids.is_empty() {
+                let msg = "Export error: No objects selected to export".to_string();
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+            let mut sub_scene = Scene::new("SelectedExport");
+            for &id in &self.selection.selected_ids {
+                if let Some(obj) = self.scene.get_object(id) {
+                    sub_scene.add_object(obj.clone());
+                }
+            }
+            sub_scene
+        } else {
+            self.scene.clone()
+        };
+
+        let options = forge_io::ExportOptions {
+            world_space: true,
+            ..Default::default()
+        };
+
+        let mut file = match std::fs::File::create(path_ref) {
+            Ok(f) => f,
+            Err(e) => {
+                let msg = format!("Export error: Failed to create file: {e}");
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+        };
+
+        if let Err(e) = forge_io::export_scene_obj(&export_scene, &options, &mut file) {
+            let msg = format!("Export error: {e}");
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("export.obj");
+
+        self.status_message = format!("Exported Wavefront OBJ to {file_name}");
+        Ok(())
+    }
+
     pub fn duplicate_selected(&mut self) {
         if let Some(active_id) = self.selection.active_id
             && let Some(new_id) = self.scene.duplicate_object(active_id)
@@ -857,65 +977,52 @@ impl Forge3dStudioApp {
         }
 
         // 2. Top Menu Bar
-        egui::Panel::top("menu_bar").show(ui, |ui| {
-            render_menu_bar(self, ui);
-        });
+        egui::Panel::top("menu_bar")
+            .frame(
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(19, 20, 25))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 35, 42)))
+                    .inner_margin(4.0),
+            )
+            .show(ui, |ui| {
+                render_menu_bar(self, ui);
+            });
 
         // 3. Bottom Status Bar
         egui::Panel::bottom("status_bar").show(ui, |ui| {
             render_status_bar(self, ui);
         });
 
-        // 4. Left Toolbar (Resizable with drag handle and auto mode switch)
+        // 4. Left Toolbar (Natively resizable with clean border separator and auto mode switch)
         if self.editor_state.panel_settings.toolbar_visible {
             let toolbar_w = self.editor_state.panel_settings.toolbar_width;
-            egui::Panel::left("tools_panel")
-                .resizable(false)
-                .exact_size(toolbar_w)
+            let panel_resp = egui::Panel::left("tools_panel")
+                .resizable(true)
+                .default_size(toolbar_w.clamp(48.0, 260.0))
+                .size_range(48.0..=280.0)
+                .show_separator_line(true)
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_rgb(19, 20, 25))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 42, 54)))
+                        .inner_margin(4.0),
+                )
                 .show(ui, |ui| {
-                    let total_h = ui.available_height();
-                    let content_w = (toolbar_w - 6.0).max(10.0);
-                    ui.horizontal(|ui| {
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(content_w, total_h),
-                            egui::Layout::top_down(egui::Align::Center),
-                            |ui| {
-                                render_toolbar(self, ui);
-                            },
-                        );
-
-                        // Vertical drag splitter on right edge
-                        let (splitter_rect, response) = ui.allocate_exact_size(
-                            egui::vec2(6.0, total_h),
-                            egui::Sense::click_and_drag(),
-                        );
-                        if response.hovered() || response.dragged() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                        }
-                        if response.dragged() {
-                            let delta_x = response.drag_delta().x;
-                            let new_w = (self.editor_state.panel_settings.toolbar_width + delta_x)
-                                .clamp(48.0, 240.0);
-                            self.editor_state.panel_settings.toolbar_width = new_w;
-                            if new_w >= 90.0 {
-                                self.editor_state.panel_settings.toolbar_mode =
-                                    forge_scene::ToolbarDisplayMode::IconAndLabel;
-                            } else {
-                                self.editor_state.panel_settings.toolbar_mode =
-                                    forge_scene::ToolbarDisplayMode::IconOnly;
-                            }
-                            let _ = self.editor_state.panel_settings.save();
-                        }
-                        let col = if response.dragged() {
-                            egui::Color32::from_rgb(240, 144, 32) // #f09020 accent
-                        } else if response.hovered() {
-                            egui::Color32::from_rgb(255, 175, 50)
-                        } else {
-                            egui::Color32::from_rgb(38, 42, 50)
-                        };
-                        ui.painter().rect_filled(splitter_rect, 1.0, col);
-                    });
+                    render_toolbar(self, ui);
                 });
+
+            let new_w = panel_resp.response.rect.width();
+            if (new_w - self.editor_state.panel_settings.toolbar_width).abs() > 0.5 {
+                self.editor_state.panel_settings.toolbar_width = new_w;
+                if new_w >= 90.0 {
+                    self.editor_state.panel_settings.toolbar_mode =
+                        forge_scene::ToolbarDisplayMode::IconAndLabel;
+                } else {
+                    self.editor_state.panel_settings.toolbar_mode =
+                        forge_scene::ToolbarDisplayMode::IconOnly;
+                }
+                let _ = self.editor_state.panel_settings.save();
+            }
         }
 
         // 5. Bottom Timeline Panel (Optional / Resizable)
@@ -965,7 +1072,7 @@ impl Forge3dStudioApp {
                             if f == current_frame {
                                 let _ = ui.add(
                                     egui::Button::new(
-                                        egui::RichText::new(format!("■ {f}"))
+                                        egui::RichText::new(format!("[{f}]"))
                                             .strong()
                                             .size(10.5)
                                             .color(egui::Color32::from_rgb(34, 197, 94)),
@@ -1061,7 +1168,7 @@ impl Forge3dStudioApp {
 
                         // Transport playback buttons
                         if ui
-                            .button("⏮")
+                            .button("|<")
                             .on_hover_text("Jump to First Frame (Shift+Left)")
                             .clicked()
                         {
@@ -1069,21 +1176,21 @@ impl Forge3dStudioApp {
                             self.status_message = "Timeline: Jump to Frame 0".to_string();
                         }
                         if ui
-                            .button("◀")
+                            .button("<")
                             .on_hover_text("Step Back 1 Frame (Left)")
                             .clicked()
                         {
                             current_frame = (current_frame - 1).max(0);
                         }
                         if ui
-                            .button("▶")
+                            .button("Play")
                             .on_hover_text("Play / Pause (Space)")
                             .clicked()
                         {
                             self.status_message = "Timeline: Play / Pause".to_string();
                         }
                         if ui
-                            .button("▶|")
+                            .button(">|")
                             .on_hover_text("Jump to End Frame (Shift+Right)")
                             .clicked()
                         {
@@ -1091,7 +1198,7 @@ impl Forge3dStudioApp {
                             self.status_message = "Timeline: Jump to End".to_string();
                         }
                         if ui
-                            .button("🔁")
+                            .button("Loop")
                             .on_hover_text("Toggle Loop Playback")
                             .clicked()
                         {
@@ -1137,7 +1244,7 @@ impl Forge3dStudioApp {
                         // Material spheres preview pills
                         if ui
                             .button(
-                                egui::RichText::new("🟡 Gold")
+                                egui::RichText::new("Gold")
                                     .size(11.0)
                                     .color(egui::Color32::from_rgb(255, 215, 80)),
                             )
@@ -1158,7 +1265,7 @@ impl Forge3dStudioApp {
 
                         if ui
                             .button(
-                                egui::RichText::new("⚪ Diffuse")
+                                egui::RichText::new("Diffuse")
                                     .size(11.0)
                                     .color(egui::Color32::from_rgb(230, 235, 245)),
                             )
@@ -1180,7 +1287,7 @@ impl Forge3dStudioApp {
 
                         if ui
                             .button(
-                                egui::RichText::new("🔘 Metal")
+                                egui::RichText::new("Metal")
                                     .size(11.0)
                                     .color(egui::Color32::from_rgb(190, 205, 225)),
                             )
@@ -1206,84 +1313,64 @@ impl Forge3dStudioApp {
         // 6. Right Sidebar: Outliner (Top) and Properties (Bottom)
         if self.editor_state.panel_settings.sidebar_visible {
             let sidebar_w = self.editor_state.panel_settings.sidebar_width;
-            egui::Panel::right("outliner_properties_panel")
-                .resizable(false)
-                .exact_size(sidebar_w)
+            let panel_resp = egui::Panel::right("outliner_properties_panel")
+                .resizable(true)
+                .default_size(sidebar_w.clamp(240.0, 600.0))
+                .size_range(240.0..=600.0)
+                .show_separator_line(true)
+                .frame(
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_rgb(19, 20, 25))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 42, 54)))
+                        .inner_margin(4.0),
+                )
                 .show(ui, |ui| {
                     let total_h = ui.available_height();
-                    let content_w = (sidebar_w - 6.0).max(10.0);
-                    ui.horizontal(|ui| {
-                        // Vertical drag splitter on left edge of right panel
-                        let (splitter_rect, response) = ui.allocate_exact_size(
-                            egui::vec2(6.0, total_h),
-                            egui::Sense::click_and_drag(),
-                        );
-                        if response.hovered() || response.dragged() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                        }
-                        if response.dragged() {
-                            let delta_x = response.drag_delta().x;
-                            // Dragging left (negative delta) increases sidebar width
-                            self.editor_state.panel_settings.sidebar_width =
-                                (self.editor_state.panel_settings.sidebar_width - delta_x)
-                                    .clamp(220.0, 600.0);
-                            let _ = self.editor_state.panel_settings.save();
-                        }
-                        let col = if response.dragged() {
-                            egui::Color32::from_rgb(240, 144, 32)
-                        } else if response.hovered() {
-                            egui::Color32::from_rgb(255, 175, 50)
-                        } else {
-                            egui::Color32::from_rgb(38, 42, 50)
-                        };
-                        ui.painter().rect_filled(splitter_rect, 1.0, col);
+                    let outliner_h = (total_h
+                        * self.editor_state.panel_settings.outliner_height_ratio)
+                        .clamp(60.0, (total_h - 80.0).max(60.0));
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), outliner_h),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            render_outliner(self, ui);
+                        },
+                    );
 
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(content_w, total_h),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                let outliner_h = (total_h
-                                    * self.editor_state.panel_settings.outliner_height_ratio)
-                                    .clamp(60.0, (total_h - 80.0).max(60.0));
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(ui.available_width(), outliner_h),
-                                    egui::Layout::top_down(egui::Align::Min),
-                                    |ui| {
-                                        render_outliner(self, ui);
-                                    },
-                                );
+                    // Horizontal drag splitter between Outliner and Properties
+                    let (h_rect, h_resp) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 6.0),
+                        egui::Sense::click_and_drag(),
+                    );
+                    if h_resp.hovered() || h_resp.dragged() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    }
+                    if h_resp.dragged() {
+                        let delta_y = h_resp.drag_delta().y;
+                        let new_ratio = (outliner_h + delta_y) / total_h.max(1.0);
+                        self.editor_state.panel_settings.outliner_height_ratio =
+                            new_ratio.clamp(0.15, 0.85);
+                        let _ = self.editor_state.panel_settings.save();
+                    }
+                    let h_col = if h_resp.dragged() {
+                        egui::Color32::from_rgb(240, 144, 32)
+                    } else if h_resp.hovered() {
+                        egui::Color32::from_rgb(255, 175, 50)
+                    } else {
+                        egui::Color32::from_rgb(45, 48, 55)
+                    };
+                    ui.painter().rect_filled(h_rect, 1.0, h_col);
 
-                                // Horizontal drag splitter between Outliner and Properties
-                                let (h_rect, h_resp) = ui.allocate_exact_size(
-                                    egui::vec2(ui.available_width(), 6.0),
-                                    egui::Sense::click_and_drag(),
-                                );
-                                if h_resp.hovered() || h_resp.dragged() {
-                                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-                                }
-                                if h_resp.dragged() {
-                                    let delta_y = h_resp.drag_delta().y;
-                                    let new_ratio = (outliner_h + delta_y) / total_h.max(1.0);
-                                    self.editor_state.panel_settings.outliner_height_ratio =
-                                        new_ratio.clamp(0.15, 0.85);
-                                    let _ = self.editor_state.panel_settings.save();
-                                }
-                                let h_col = if h_resp.dragged() {
-                                    egui::Color32::from_rgb(240, 144, 32)
-                                } else if h_resp.hovered() {
-                                    egui::Color32::from_rgb(255, 175, 50)
-                                } else {
-                                    egui::Color32::from_rgb(45, 48, 55)
-                                };
-                                ui.painter().rect_filled(h_rect, 1.0, h_col);
-
-                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                    render_properties(self, ui);
-                                });
-                            },
-                        );
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        render_properties(self, ui);
                     });
                 });
+
+            let new_width = panel_resp.response.rect.width();
+            if (new_width - self.editor_state.panel_settings.sidebar_width).abs() > 0.5 {
+                self.editor_state.panel_settings.sidebar_width = new_width;
+                let _ = self.editor_state.panel_settings.save();
+            }
         }
 
         // 6. Central 3D Viewport Panel
@@ -1430,7 +1517,7 @@ impl Forge3dStudioApp {
         // 9. Floating Material Inspector Window (Octane / Cinema 4D Studio Style)
         if self.show_material_editor {
             let mut open = self.show_material_editor;
-            egui::Window::new("Brushed Metal Material  ‹ › 🔒")
+            egui::Window::new("Brushed Metal Material Inspector")
                 .open(&mut open)
                 .resizable(false)
                 .default_size(egui::vec2(360.0, 310.0))

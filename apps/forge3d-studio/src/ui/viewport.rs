@@ -15,8 +15,6 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
     // Allocate exact viewport area for pointer and keyboard interaction
     let (rect, response) = ui.allocate_exact_size(available_size, Sense::click_and_drag());
-
-    // Update camera aspect ratio
     app.camera.set_aspect_ratio(rect.width(), rect.height());
 
     let input = ui.input(|i| i.clone());
@@ -858,7 +856,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         ui.ctx().request_repaint();
     }
 
-    // UI Interaction tracking: if pointer was pressed outside viewport (or obscured by higher UI window)
+    // UI Interaction tracking: if pointer was pressed outside viewport (or obscured by higher UI window / popup menu)
     if input.pointer.button_pressed(PointerButton::Primary)
         && (!is_pointer_in_viewport || !response.hovered())
     {
@@ -1134,7 +1132,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     }
 
-    // Update hover target under cursor (suppressed during active dragging)
+    // Update hover target under cursor (suppressed during active dragging or when pointer is over UI / popups)
     let is_dragging_active = app.editor_state.pointer_state != PointerInteractionState::Idle;
     if !is_ui_interacting
         && is_pointer_in_viewport
@@ -1411,9 +1409,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     };
 
     // Sleek Cinema 4D / Octane Viewport Header Strip
+    let header_w = (rect.width() - 28.0).clamp(100.0, 520.0);
     let header_rect = Rect::from_min_size(
         rect.min + EguiVec2::new(14.0, 14.0),
-        egui::vec2(520.0, 26.0),
+        egui::vec2(header_w, 26.0),
     );
     painter.rect_filled(
         header_rect,
@@ -1428,7 +1427,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     );
 
     let hud_text = format!(
-        "⚡ Live Viewer  ::  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}){ptr_state_str}"
+        "Live Viewer  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}){ptr_state_str}"
     );
     painter.text(
         header_rect.min + EguiVec2::new(12.0, 6.0),
@@ -1445,10 +1444,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         } else {
             "Fly"
         };
+        let fly_w = (rect.width() - 28.0).clamp(100.0, 520.0);
         painter.rect_filled(
             Rect::from_min_size(
-                rect.min + EguiVec2::new(14.0, 36.0),
-                egui::vec2(520.0, 26.0),
+                rect.min + EguiVec2::new(14.0, 44.0),
+                egui::vec2(fly_w, 26.0),
             ),
             4.0,
             Color32::from_rgba_unmultiplied(200, 60, 40, 220),

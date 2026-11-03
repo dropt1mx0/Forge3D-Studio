@@ -5,6 +5,64 @@ All notable changes to Forge3D Rust Edition will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5-alpha.7] - 2026-11-03
+
+### Added
+- **Phase 5 — Asset Pipeline MVP: Wavefront OBJ Import / Export**:
+  - **New Crate `crates/forge-io`**: Dedicated, renderer-agnostic I/O crate for 3D asset import and export without `wgpu` or `egui` dependencies.
+  - **Clean-Room Wavefront OBJ Parser**:
+    - Directives supported: `v` (with $w$ perspective division), `vt` ($u, v$ texture coordinates), `vn` (unit normal vectors), `f` (arbitrary polygon faces), `o` (object names), `g` (groups), `s` (smoothing groups), `mtllib`, and `usemtl`.
+    - Flexible face syntax: `v`, `v/vt`, `v//vn`, `v/vt/vn`.
+    - Full support for relative negative indices (`-1`, `-2`, etc.) resolved against accumulated elements at line parse time.
+    - Robust float validation rejecting NaN, Infinity, and zero indices.
+  - **3D Polygon Ear Clipping Triangulation**:
+    - Independent Ear Clipping algorithm triangulating arbitrary convex and concave $N$-gons ($N \ge 3$).
+    - Newell's method for normal estimation on non-planar 3D polygons.
+    - Projection onto dominant 2D coordinate plane with orientation-aware convexity testing and edge-function point containment.
+    - Safe fallback preventing infinite loops on non-simple or self-intersecting loops.
+  - **Vertex Welding & Seam Preservation**:
+    - Multi-index hash map keyed by `(v_idx, vt_idx, vn_idx)` guarantees vertex deduplication while preserving UV seams and hard normal edges.
+    - Automatic area-weighted normal calculation if normals are absent in the source file.
+  - **Wavefront OBJ Exporter**:
+    - Functions `export_mesh_obj` and `export_scene_obj` with continuous 1-based indexing.
+    - Optional world-space transform baking applying translation, rotation, and scale to vertices and normals.
+    - Full scene export and selected-only export modes.
+  - **Unified History Undo/Redo (`Action::ImportObjects`)**:
+    - Multi-object imports are registered in `HistoryStack` as a single atomic command.
+    - Single `Ctrl+Z` reverses the complete import of all objects at once.
+  - **Forge3D Studio Desktop Integration**:
+    - File menu entries: `File -> Import -> Wavefront (.obj)...` and `File -> Export -> Wavefront (.obj)...` using native `rfd` file dialogs.
+    - Real-time status bar telemetry reporting imported object count, triangle count, and filename.
+  - **Automated Test Suite**:
+    - 24 tests in `crates/forge-io/tests/` (parser, import, export, roundtrip).
+    - 1 test in `crates/forge-scene/src/history.rs` (`test_history_import_objects_undo_redo`).
+    - 5 integration tests in `apps/forge3d-studio/tests/obj_studio_integration.rs`.
+    - Total workspace test suite expanded from 119 to **149 passed tests** (100% clean).
+
+## [0.5.4-alpha.6] - 2026-11-02
+
+### Added
+- **Unified Dark Studio Title/Menu Bar & Elimination of White Bar**:
+  - Removed jarring OS/Wayland `libdecor` white window title bar by configuring `.with_decorations(false)` on `egui::ViewportBuilder`.
+  - Merged application title `Forge3D`, standard menu hierarchy (`File`, `Edit`, `Create`, `Select`, `Tools`, `Mesh`, `Render`, `Plugins`, `Windows`, `Help`), window draggable area, layout selector, and sleek window control buttons (`—`, `▢`/`⧉`, `✕`) onto the single top row with matching studio dark frame (`#131419`), saving vertical space.
+- **Viewport & Right Sidebar Separation with Dynamic Cursor Resizing**:
+  - Replaced the inner manual splitter with egui's native `.resizable(true)` on `egui::Panel::right("outliner_properties_panel")`.
+  - The boundary between the 3D viewport working zone and the right sidebar is directly interactive: hovering over the edge switches the cursor to `ResizeHorizontal` and dragging scales both the workspace and sidebar smoothly (`240.0..=600.0` range).
+  - Increased default sidebar width to 350px in `PanelSettings` and persisted configuration to ensure coordinate card columns and Outliner items have ample room.
+  - Wrapped Outliner category tabs in `egui::ScrollArea::horizontal()` to prevent clipping at narrow sidebar widths.
+  - Clamped Viewport HUD overlay strip width to viewport dimensions, guaranteeing zero overlap.
+
+### Changed
+- **Complete UI Emoji Purge**:
+  - Completely purged all emojis across the entire user interface:
+    - Menu bar & quick shelf: removed all dropdown and shelf emojis.
+    - Left toolbar: replaced emojis with clean text badges (`Edit`, `Obj`, `Snap`, `Cube`, `Sphere`, `Cyl`, `Capsule`, `Monkey`, etc.).
+    - Right sidebar Outliner: replaced object emojis with professional type badges (`[Cube]`, `[Sphere]`, `[Cam]`, `[Mesh]`, `[Active]`) and status indicators (`●`/`○` for visibility, `[L]`/`[-]` for locks).
+    - Right sidebar Properties: replaced lock/eye emojis with `[Locked]`/`[Unlocked]` and `Show`/`Hide`; replaced `• X`, `• Y`, `• Z` with clean colored `X`, `Y`, `Z` badges; removed emojis from clipboard actions (`Copy`, `Paste`, `Apply`) and camera settings (`[Active Scene Camera]`, `View Camera`).
+    - Timeline: replaced transport emojis with standard glyphs (`|<`, `◀`, `▶`, `>|`, `Loop`).
+    - Material pills: replaced `"🟡 Gold"`, `"⚪ Diffuse"`, `"🔘 Metal"` with clean text `"Gold"`, `"Diffuse"`, `"Metal"`.
+    - Viewport HUD: removed `"⚡"` indicator from Live Viewer.
+
 ## [0.5.3-alpha.5] - 2026-11-02
 
 ### Added

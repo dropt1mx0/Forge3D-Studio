@@ -1,8 +1,8 @@
 # Forge3D Rust Edition — Session State
 
 **Document Status:** Current  
-**Last Updated:** 2026-11-02  
-**Current Milestone:** Forge3D Alpha 0.2.3 — Cinema 4D / Octane Studio Redesign & Drag Optimization (Complete, 109/109 tests passing)
+**Last Updated:** 2026-11-03  
+**Current Milestone:** Forge3D Phase 5 — Asset Pipeline MVP: Wavefront OBJ Import / Export (Complete, 149/149 tests passing)
 
 ---
 
@@ -72,11 +72,21 @@
 - `RenderPipelines`: WGPU render pipelines with depth testing (`Depth32Float`, LessEqual).
 - `ViewportRenderer`: Viewport renderer with depth texture management, dynamic GPU mesh cache, uniform uploads, and command encoding.
 
+### `crates/forge-io`
+- Zero-GPU / zero-UI decoupled asset pipeline crate.
+- Line-by-line streaming Wavefront OBJ parser (`v`, `vt`, `vn`, `f`, `o`, `g`, `s`, `mtllib`, `usemtl`).
+- 1-based, relative, and negative indexing support evaluated at parse time.
+- Robust 3D polygon Ear Clipping triangulation for convex/concave $N$-gons ($N \ge 3$) using Newell plane normal projection.
+- Deduplication vertex cache with vertex welding preserving distinct UV seams and sharp normal edges.
+- Unwinding and area-weighted normal calculation fallback for models lacking normals.
+- OBJ Exporter supporting single `Mesh` and full `Scene` with world-space transform baking and customizable options.
+- Atomic Undo/Redo integration via `Action::ImportObjects` in `forge-scene`.
+
 ### `apps/forge3d-studio`
 - Native desktop application built on `eframe` (v0.37) and `egui`.
 - Cinema 4D / Octane dark studio aesthetic (`#121316` base, `#14151a` panels, `#2563eb` electric blue selection highlights, `CornerRadius::same(6)`).
 - Panels & Overlays:
-  - Top Menu Bar: Logo `⬡`, standard hierarchy (`File`, `Edit`, `Create`, `Select`, `Tools`, `Mesh`, `Render`, `Plugins`, `Windows`, `Help`), and right-aligned `Layout: Model ▾` selector.
+  - Top Menu Bar: Logo `⬡`, standard hierarchy (`File`, `Edit`, `Create`, `Select`, `Tools`, `Mesh`, `Render`, `Plugins`, `Windows`, `Help`), and right-aligned `Layout: Model ▾` selector. Includes `File -> Import -> Wavefront (.obj)...` and `File -> Export -> Wavefront (.obj)...` via `rfd` native dialogs.
   - Quick-Tool Shelf: Secondary horizontal icon strip (`⤺`, `⤼`, `↖`, `⬚`, `✥`, `⟲`, `⤡`, primitive additions, `🧲`, `▦`, `⚡ Live Viewer`).
   - Left Toolbar: Modes (Select Q, Box Select B, Move W, Rotate E, Scale R), Quick Add, Delete.
   - Right Sidebar: Scene Outliner with header tabs (`File | Edit | View | Objects | Tags | Bookmarks`), tree lines with expand icons (`▾`), leading icons, and rounded blue pill selection highlight + Properties Inspector with 3-column Cinema 4D coordinate card (`Position`, `Size`, `Rotation`) with red (`• X`), green (`• Y`), blue (`• Z`) axis dots, and bottom buttons `[ Object ▾ ]`, `[ Size ▾ ]`, `[ Apply ]`.
@@ -89,7 +99,7 @@
 ---
 
 ## 3. Verification & Test Evidence
-- **All Tests**: 109 passed (55 unit & simulation tests + 8 dedicated LMB orbit interaction tests + 14 render/gpu tests + 7 Alpha 0.2 UX tests + 14 Free Cursor Drag tests + 9 Adaptive Smooth Zoom tests + 2 other tests), 0 failed, 0 ignored across workspace.
+- **All Tests**: 149 passed (119 existing + 24 `forge-io` parser/triangulation/import/export/roundtrip + 5 `forge3d-studio` OBJ integration + 1 `forge-scene` import undo/redo), 0 failed, 0 ignored across workspace.
 - **`cargo fmt --check`**: Clean (exit code 0).
 - **`cargo check --workspace`**: Clean (exit code 0).
 - **`cargo clippy --workspace --all-targets -- -D warnings`**: Clean (exit code 0, zero warnings).
@@ -196,7 +206,14 @@ cargo run --release -p forge3d-studio
   - `docs/ROADMAP.md` updated with strategic P0–P4 priority tiers, 10-phase master progression, and rigorous exit criteria.
   - `docs/BENCHMARKS.md` updated with real measured hardware performance baseline on Intel Core i5 Ivy Bridge + Mesa OpenGL.
   - `docs/DECISIONS.md` expanded with ADR-0012 recording the audit and roadmap decisions.
+- **Phase 5 Milestone Completed**:
+  - Implemented `crates/forge-io` Wavefront OBJ Parser, Importer, and Exporter.
+  - Ear Clipping triangulation for convex/concave $N$-gons ($N \ge 3$).
+  - Negative and relative index resolution at parse time.
+  - Native file dialogs integrated in `forge3d-studio` (`File -> Import/Export`).
+  - Atomic Undo/Redo (`Action::ImportObjects`) and full world-transform baking during export.
+  - All workspace tests passing: **149/149**.
 - **Immediate Next Tasks**:
-  1. Complete Phase 2 core modeling operations in `crates/forge-geometry`: Loop Cut & Slide (`Ctrl+R`), Bevel Tool (`Ctrl+B`), and Dissolve.
-  2. Implement `crates/forge-io` for clean-room Wavefront OBJ and glTF 2.0 / GLB import/export.
-  3. Wire asset loading into the studio application and verify on live hardware.
+  1. Phase 4: PBR materials & direct/environment lighting pipeline in `crates/forge-render`.
+  2. Implement glTF 2.0 / GLB import and export in `crates/forge-io`.
+  3. Expand `crates/forge-geometry` with B-Rep modeling operations (Loop Cut, Bevel, Dissolve).

@@ -16,7 +16,7 @@ pub fn render_status_bar(app: &Forge3dStudioApp, ui: &mut Ui) {
         if app.editor_state.snap_settings.enabled {
             ui.separator();
             ui.label(format!(
-                "🧲 Snap: {:.2}m",
+                "Snap: {:.2}m",
                 app.editor_state.snap_settings.grid_increment
             ));
         }

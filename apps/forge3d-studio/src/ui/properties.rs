@@ -36,7 +36,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.label("Name:");
                 ui.text_edit_singleline(&mut obj.name);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let lock_icon = if obj.locked { "🔒" } else { "🔓" };
+                    let lock_icon = if obj.locked { "[Locked]" } else { "[Unlocked]" };
                     if ui
                         .selectable_label(obj.locked, lock_icon)
                         .on_hover_text("Lock Object Transform")
@@ -45,7 +45,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         obj.locked = !obj.locked;
                     }
 
-                    let eye_icon = if obj.visible { "👁" } else { "🚫" };
+                    let eye_icon = if obj.visible { "Show" } else { "Hide" };
                     if ui
                         .selectable_label(obj.visible, eye_icon)
                         .on_hover_text("Toggle Visibility (H)")
@@ -99,6 +99,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.columns(3, |cols| {
                         // Column 0: Position
                         cols[0].vertical(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                             ui.label(
                                 egui::RichText::new("Position")
                                     .strong()
@@ -110,7 +111,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row X
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• X")
+                                    egui::RichText::new("X")
                                         .color(egui::Color32::from_rgb(239, 68, 68))
                                         .strong(),
                                 );
@@ -124,7 +125,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row Y
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• Y")
+                                    egui::RichText::new("Y")
                                         .color(egui::Color32::from_rgb(34, 197, 94))
                                         .strong(),
                                 );
@@ -138,7 +139,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row Z
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• Z")
+                                    egui::RichText::new("Z")
                                         .color(egui::Color32::from_rgb(59, 130, 246))
                                         .strong(),
                                 );
@@ -152,6 +153,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                         // Column 1: Size
                         cols[1].vertical(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                             ui.label(
                                 egui::RichText::new("Size")
                                     .strong()
@@ -163,7 +165,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row X
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• X")
+                                    egui::RichText::new("X")
                                         .color(egui::Color32::from_rgb(239, 68, 68))
                                         .strong(),
                                 );
@@ -183,7 +185,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row Y
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• Y")
+                                    egui::RichText::new("Y")
                                         .color(egui::Color32::from_rgb(34, 197, 94))
                                         .strong(),
                                 );
@@ -203,7 +205,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row Z
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• Z")
+                                    egui::RichText::new("Z")
                                         .color(egui::Color32::from_rgb(59, 130, 246))
                                         .strong(),
                                 );
@@ -223,6 +225,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                         // Column 2: Rotation
                         cols[2].vertical(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
                             ui.label(
                                 egui::RichText::new("Rotation")
                                     .strong()
@@ -234,7 +237,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row X
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• X")
+                                    egui::RichText::new("X")
                                         .color(egui::Color32::from_rgb(239, 68, 68))
                                         .strong(),
                                 );
@@ -249,7 +252,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row Y
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• Y")
+                                    egui::RichText::new("Y")
                                         .color(egui::Color32::from_rgb(34, 197, 94))
                                         .strong(),
                                 );
@@ -264,7 +267,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             // Row Z
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new("• Z")
+                                    egui::RichText::new("Z")
                                         .color(egui::Color32::from_rgb(59, 130, 246))
                                         .strong(),
                                 );
@@ -361,7 +364,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             // Transform Actions (Copy, Paste, Apply, Reset)
             ui.horizontal(|ui| {
                 if ui
-                    .button("📋 Copy")
+                    .button("Copy")
                     .on_hover_text("Copy Transform to clipboard")
                     .clicked()
                 {
@@ -369,14 +372,14 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 }
                 let has_clip = app.editor_state.transform_clipboard.is_some();
                 if ui
-                    .add_enabled(has_clip, egui::Button::new("📄 Paste"))
+                    .add_enabled(has_clip, egui::Button::new("Paste"))
                     .on_hover_text("Paste Transform from clipboard")
                     .clicked()
                 {
                     paste_tf = true;
                 }
                 if ui
-                    .button("✔ Apply")
+                    .button("Apply")
                     .on_hover_text("Apply Transform to Geometry (Ctrl+A)")
                     .clicked()
                 {
@@ -397,20 +400,20 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                 ui.add_space(8.0);
                 ui.separator();
-                ui.label(egui::RichText::new("📷 Camera Optics & Sensor").strong());
+                ui.label(egui::RichText::new("Camera Optics & Sensor").strong());
 
                 ui.horizontal(|ui| {
                     if is_active_cam {
                         ui.label(
-                            egui::RichText::new("★ Active Scene Camera")
+                            egui::RichText::new("[Active Scene Camera]")
                                 .color(egui::Color32::from_rgb(255, 200, 50)),
                         );
-                    } else if ui.button("★ Set as Active Camera").clicked() {
+                    } else if ui.button("Set as Active Camera").clicked() {
                         set_active_camera = Some(selected_id);
                     }
 
                     if ui
-                        .button("📷 View Camera")
+                        .button("View Camera")
                         .on_hover_text("View through this camera (Numpad 0)")
                         .clicked()
                     {
@@ -615,16 +618,16 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         ui.checkbox(&mut entry.enabled, "");
                         ui.label(egui::RichText::new(&entry.name).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("❌").on_hover_text("Delete Modifier").clicked() {
+                            if ui.button("✕").on_hover_text("Delete Modifier").clicked() {
                                 remove_mod_idx = Some(i);
                             }
-                            if ui.button("✔").on_hover_text("Apply to Mesh").clicked() {
+                            if ui.button("Apply").on_hover_text("Apply to Mesh").clicked() {
                                 apply_mod_idx = Some(i);
                             }
-                            if i > 0 && ui.button("▲").clicked() {
+                            if i > 0 && ui.button("Up").clicked() {
                                 move_up_idx = Some(i);
                             }
-                            if i + 1 < num_mods && ui.button("▼").clicked() {
+                            if i + 1 < num_mods && ui.button("Down").clicked() {
                                 move_down_idx = Some(i);
                             }
                         });

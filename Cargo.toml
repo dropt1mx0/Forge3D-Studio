@@ -8,6 +8,7 @@ members = [
     "crates/forge-gpu",
     "crates/forge-render",
     "crates/forge-modifiers",
+    "crates/forge-io",
     "apps/forge3d-studio",
 ]
 
@@ -27,8 +28,10 @@ forge-scene = { path = "crates/forge-scene" }
 forge-gpu = { path = "crates/forge-gpu" }
 forge-render = { path = "crates/forge-render" }
 forge-modifiers = { path = "crates/forge-modifiers" }
+forge-io = { path = "crates/forge-io" }
 
 # Third-party dependencies
+rfd = "0.15"
 wgpu = { version = "30.0.1", default-features = true }
 glam = { version = "0.30", features = ["bytemuck"] }
 bytemuck = { version = "1.25", features = ["derive"] }

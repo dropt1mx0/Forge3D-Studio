@@ -4,25 +4,25 @@
 
 ```text
                apps/forge3d-studio
-             /          |          \
-            v           v           v
-      forge-render  forge-scene  forge-gpu
-           |      \   /     \       /
-           |       v v       v     v
-           |   forge-modifiers  (wgpu)
-           |         |
-           |         v
-           |   forge-geometry
-           |       /     \
-           v      v       v
-         forge-math   forge-core
+             /    |     |     \     \
+            v     v     v      v     v
+      forge-render forge-scene forge-gpu forge-io (rfd)
+           |      \   /     \       /       /     \
+           |       v v       v     v       v       v
+           |   forge-modifiers  (wgpu) forge-geometry
+           |         |                     /     \
+           |         v                    v       v
+           |   forge-geometry         forge-math forge-core
+           |       /     \                 \     /
+           v      v       v                 v   v
+         forge-math   forge-core          (glam, etc.)
               \           /
                v         v
                  (glam, etc.)
 ```
 
 ## Core Invariants
-1. **Renderer-agnostic domain crates**: `forge-core`, `forge-math`, `forge-geometry`, `forge-modifiers`, and `forge-scene` must NEVER import `wgpu`, `egui`, or any graphics/UI handle.
+1. **Renderer-agnostic domain crates**: `forge-core`, `forge-math`, `forge-geometry`, `forge-modifiers`, `forge-scene`, and `forge-io` must NEVER import `wgpu`, `egui`, or any graphics/UI handle.
 2. **Explicit Data Flow**:
    ```text
    User Input / UI Interaction / 3D Gizmo
@@ -195,6 +195,32 @@ To eliminate sensitive camera jumping and allow fluid navigation at any scale, F
 
 - **Collinear View Invariant**: Homothety centered at $P$ guarantees the vector $(P - E_{new}) = (P - E) \cdot k$ is parallel to $(P - E)$. Under perspective projection, $P$ projects to the exact same 2D screen coordinates before and after zoom, eliminating visual disorientation.
 - **Dynamic Step Scaling**: At close range ($d \approx 0.1\text{m}$), $7.3\%$ scaling moves the camera by millimeters; at large range ($d \approx 100\text{m}$), $7.3\%$ moves by meters. Distance is clamped to $[0.05, 5000.0]$ preventing inverted projection or horizon overflow.
+
+---
+
+## 8. Asset Pipeline & Interchange Architecture (`crates/forge-io`)
+
+### 1. Separation of Parsing, Geometry Synthesis, and Scene Binding
+- **`forge-io` Pure-CPU Domain**: Parsing and serialization operate entirely without GPU handles, display servers, or UI toolkits.
+- **Wavefront OBJ Parser (`obj/parser.rs`)**:
+  - Directives: `v` (with $w$ perspective division), `vt` ($u, v$ texture coordinates), `vn` (unit normal vectors), `f` (arbitrary polygon faces), `o` (object boundaries), `g` (groups), `s` (smoothing groups), `mtllib`, `usemtl`.
+  - Relative & Negative Index Resolution: In OBJ, negative indices $-k$ index relative to the count of elements defined up to that line. The parser resolves both 1-based and negative indices at parse time into 0-based absolute indices.
+  - Zero-Index Rejection: OBJ uses 1-based indexing; 0-indices are rejected as structured `ForgeIoError::ZeroIndex`.
+- **3D Polygon Ear Clipping Triangulation (`obj/triangulation.rs`)**:
+  - Arbitrary $N$-gon triangulation ($N \ge 3$) without external libraries.
+  - Newell's method computes the exact average normal of non-planar polygons.
+  - Projection to dominant 2D coordinate plane ($XY$, $XZ$, or $YZ$) based on maximum normal component.
+  - Convexity and reflex vertex detection via 2D cross-product area.
+  - Point-in-triangle edge-function containment tests avoiding self-intersections.
+  - Robust non-simple polygon fallback preventing infinite loops.
+- **Vertex Welding & Seam Preservation (`obj/importer.rs`)**:
+  - Hash map keyed by `(pos_idx, uv_idx, norm_idx)` welds identical vertex references.
+  - Preserves UV seams and sharp normal creases as distinct vertices in the resulting `Mesh`.
+  - Computes area-weighted smooth surface normals if OBJ normals are absent.
+- **Unified Import History (`Action::ImportObjects`)**:
+  - Multi-object imports are pushed to `HistoryStack` as a single atomic `Action::ImportObjects { objects }`.
+  - Single `Ctrl+Z` undo cleanly removes all imported objects and restores scene state atomically.
+
 
 
 

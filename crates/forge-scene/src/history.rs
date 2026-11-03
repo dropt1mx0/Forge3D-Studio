@@ -36,6 +36,9 @@ pub enum Action {
     MultiDelete {
         objects: Vec<SceneObject>,
     },
+    ImportObjects {
+        objects: Vec<SceneObject>,
+    },
     Join {
         active_id: ObjectId,
         old_mesh: Mesh,
@@ -65,6 +68,7 @@ impl Action {
             Self::AddObject { .. } => "Add Object",
             Self::DeleteObject { .. } => "Delete Object",
             Self::MultiDelete { .. } => "Delete Multiple Objects",
+            Self::ImportObjects { .. } => "Import Wavefront OBJ",
             Self::ModifyMesh { name, .. } => name.as_str(),
             Self::ApplyTransform { .. } => "Apply Transform",
             Self::Join { .. } => "Join Objects",
@@ -154,6 +158,12 @@ impl HistoryStack {
                 for obj in objects {
                     scene.add_object(obj.clone());
                 }
+            }
+            Action::ImportObjects { objects } => {
+                for obj in objects {
+                    scene.remove_object(obj.id);
+                }
+                scene.dirty = true;
             }
             Action::ModifyMesh { id, old_mesh, .. } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
@@ -247,6 +257,12 @@ impl HistoryStack {
                 for obj in objects {
                     scene.remove_object(obj.id);
                 }
+            }
+            Action::ImportObjects { objects } => {
+                for obj in objects {
+                    scene.add_object(obj.clone());
+                }
+                scene.dirty = true;
             }
             Action::ModifyMesh { id, new_mesh, .. } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
@@ -345,5 +361,37 @@ mod tests {
             scene.get_object(id).unwrap().local_transform.translation.x,
             5.0
         );
+    }
+
+    #[test]
+    fn test_history_import_objects_undo_redo() {
+        let mut scene = Scene::new("Test");
+        let obj1 = SceneObject::new("Imported1", PrimitiveType::Custom, generate_cube(1.0));
+        let obj2 = SceneObject::new("Imported2", PrimitiveType::Custom, generate_cube(1.0));
+        let id1 = obj1.id;
+        let id2 = obj2.id;
+        let imported_list = vec![obj1.clone(), obj2.clone()];
+
+        scene.add_object(obj1);
+        scene.add_object(obj2);
+
+        let mut history = HistoryStack::new();
+        history.push(Action::ImportObjects {
+            objects: imported_list,
+        });
+
+        assert_eq!(scene.objects.len(), 2);
+
+        // Single Undo removes both imported objects
+        history.undo(&mut scene);
+        assert_eq!(scene.objects.len(), 0);
+        assert!(scene.get_object(id1).is_none());
+        assert!(scene.get_object(id2).is_none());
+
+        // Single Redo restores both objects
+        history.redo(&mut scene);
+        assert_eq!(scene.objects.len(), 2);
+        assert!(scene.get_object(id1).is_some());
+        assert!(scene.get_object(id2).is_some());
     }
 }

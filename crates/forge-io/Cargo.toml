@@ -1,0 +1,19 @@
+[package]
+name = "forge-io"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Asset import and export pipeline for Forge3D Rust Edition"
+
+[dependencies]
+forge-core = { workspace = true }
+forge-math = { workspace = true }
+forge-geometry = { workspace = true }
+forge-scene = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+glam = { workspace = true }

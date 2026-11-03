@@ -367,4 +367,57 @@
 - [x] `cargo clippy --workspace --all-targets -- -D warnings` clean (zero warnings)
 - [x] Full application live input verified: `test_full_app_ui_live_drag_and_ui_isolation` and `test_egui_render_viewport_live_drag` pass with real pointer movement, drag deltas, release commit, and undo
 
+---
+
+## Forge3D — Viewport Separation, Dynamic Resizing & Emoji Purge (Alpha 0.2.4)
+- [x] Client-Side Borderless Decorations: eliminated OS/libdecor white titlebar via `.with_decorations(false)`.
+- [x] Unified Dark Studio Menu/Title Bar: unified branding, menu hierarchy (`File`..`Help`), draggable window area, layout selector, and window controls (`—`, `▢`/`⧉`, `✕`) on single top row in `#131419`.
+- [x] Viewport & Right Sidebar Separation: replaced inner manual splitter with egui native `.resizable(true)` on `egui::Panel::right`.
+- [x] Dynamic Border Resizing: interactive edge boundary with `ResizeHorizontal` cursor scaling workspace and sidebar (`240.0..=600.0`).
+- [x] Expanded Sidebar Default Width: increased default to 350px in `PanelSettings` preventing coordinate card column clipping.
+- [x] Outliner Horizontal Tab Scroll: wrapped category tabs in `ScrollArea::horizontal()`.
+- [x] Viewport HUD Clamping: bounded Live Viewer header width to viewport bounds.
+- [x] Comprehensive Emoji Purge: 100% removed emojis from menu bar, toolbar, properties, outliner, status bar, timeline, materials, and HUD.
+- [x] Automated Testing: all unit and integration tests passing across the workspace.
+
+---
+
+## Forge3D Phase 5 — Asset Pipeline MVP: Wavefront OBJ Import / Export
+- [x] Dedicated I/O Crate: created `crates/forge-io` registered in workspace `Cargo.toml`.
+- [x] Clean-Room Wavefront OBJ Parser (`crates/forge-io/src/obj/parser.rs`):
+  - [x] Geometry directives: `v`, `vt`, `vn`, `f`, `o`, `g`, `s`, `mtllib`, `usemtl`.
+  - [x] Flexible face indexing: `v`, `v/vt`, `v//vn`, `v/vt/vn`.
+  - [x] Negative relative indexing support (`-1`, `-2`, etc.) resolved against accumulated elements at line parse time.
+  - [x] Strict 1-based indexing validation rejecting 0-indices as `ForgeIoError::ZeroIndex`.
+  - [x] Robust float parsing rejecting NaN and Infinity.
+- [x] 3D Polygon Ear Clipping Triangulation (`crates/forge-io/src/obj/triangulation.rs`):
+  - [x] Newell's method for normal calculation on 3D non-planar polygons.
+  - [x] Dynamic 2D projection onto dominant coordinate plane.
+  - [x] Winding detection and Ear Clipping with edge-function containment test.
+  - [x] Robust fallback for non-simple and degenerate polygons.
+- [x] OBJ Importer (`crates/forge-io/src/obj/importer.rs`):
+  - [x] Multi-object support preserving names and structure.
+  - [x] Multi-index vertex welding `(pos, uv, normal)` preserving UV seams and hard normal edges.
+  - [x] Normal generation fallback for models without explicit normals.
+  - [x] Scale factor option and object merge option.
+- [x] OBJ Exporter (`crates/forge-io/src/obj/exporter.rs`):
+  - [x] Single mesh and full scene export.
+  - [x] World-space transform application baking translation, rotation, scale into exported geometry.
+  - [x] Multi-object continuous indexing.
+- [x] History & Undo/Redo Integration:
+  - [x] Added `Action::ImportObjects` in `crates/forge-scene/src/history.rs`.
+  - [x] Atomic single `Ctrl+Z` undo removing all objects in a multi-object import.
+- [x] Forge3D Studio Integration (`apps/forge3d-studio`):
+  - [x] Added `File -> Import -> Wavefront (.obj)...` with native `rfd` file dialog.
+  - [x] Added `File -> Export -> Wavefront (.obj)...` (full scene and selected-only).
+  - [x] Immediate Outliner, Viewport, and Selection update on import.
+  - [x] Status bar feedback reporting object count, triangle count, and file path.
+- [x] Quality Gates & Test Suite:
+  - [x] 24 unit and integration tests in `crates/forge-io/tests/` (parser, import, export, roundtrip).
+  - [x] 5 integration tests in `apps/forge3d-studio/tests/obj_studio_integration.rs`.
+  - [x] Total **149/149 tests passing** across workspace.
+  - [x] `cargo fmt --check` clean.
+  - [x] `cargo clippy --workspace --all-targets -- -D warnings` clean (zero warnings).
+
+
 

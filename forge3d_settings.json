@@ -1,13 +1,14 @@
 {
   "toolbar_width": 52.0,
-  "toolbar_visible": false,
+  "toolbar_visible": true,
   "toolbar_mode": "IconOnly",
-  "sidebar_width": 300.0,
+  "sidebar_width": 513.0,
   "sidebar_visible": true,
-  "outliner_height_ratio": 0.45,
+  "outliner_height_ratio": 0.70037466,
   "timeline_height": 100.0,
   "timeline_visible": false,
-  "zoom_sensitivity": 1.0,
+  "zoom_sensitivity": 1.1,
   "zoom_to_cursor": true,
-  "smooth_zoom": true
+  "smooth_zoom": true,
+  "menu_bar_right_width": 200.0
 }
