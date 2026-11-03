@@ -18,9 +18,10 @@ pub use primitives::{
     generate_icosphere, generate_plane, generate_torus, generate_uv_sphere,
 };
 pub use topology::{
-    EdgeHandle, FaceHandle, HalfEdge, HalfEdgeEdge, HalfEdgeFace, HalfEdgeHandle, HalfEdgeMesh,
-    HalfEdgeVertex, IssueCategory, IssueSeverity, TopologyBuilder, TopologyError, TopologyReport,
-    TopologyValidator, ValidationIssue, ValidationReport, VertexHandle,
+    EdgeHandle, EdgeSelectionPath, FaceHandle, HalfEdge, HalfEdgeEdge, HalfEdgeFace,
+    HalfEdgeHandle, HalfEdgeMesh, HalfEdgeVertex, IssueCategory, IssueSeverity, TerminationReason,
+    TopologyBuilder, TopologyError, TopologyReport, TopologyValidator, ValidationIssue,
+    ValidationReport, VertexHandle,
 };
 pub use validation::validate_mesh_data;
 pub use vertex::{LineVertex, Vertex};

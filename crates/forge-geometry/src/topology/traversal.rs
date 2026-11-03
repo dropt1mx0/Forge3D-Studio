@@ -5,6 +5,7 @@ use forge_math::Vec3;
 use super::error::TopologyError;
 use super::handles::{EdgeHandle, FaceHandle, HalfEdgeHandle, VertexHandle};
 use super::mesh::HalfEdgeMesh;
+use super::selection::{self, EdgeSelectionPath, TerminationReason};
 
 impl HalfEdgeMesh {
     // --- Vertex Circulators & Queries ---
@@ -477,124 +478,42 @@ impl HalfEdgeMesh {
 
     /// Traverses a quad edge loop starting from edge `e`.
     ///
-    /// Steps across opposite edges in quad faces in both directions.
+    /// Returns an ordered list of edges forming an edge loop passing through `start_edge`.
     pub fn edge_loop(&self, start_edge: EdgeHandle) -> Vec<EdgeHandle> {
-        let mut loop_edges = Vec::new();
-        if !self.is_valid_edge(start_edge) {
-            return loop_edges;
-        }
-
-        loop_edges.push(start_edge);
-
-        let Some((h0, h1)) = self.edge_half_edges(start_edge) else {
-            return loop_edges;
-        };
-
-        // Advance along h0 side
-        self.advance_edge_loop(h0, &mut loop_edges);
-        // Advance along h1 side
-        let mut reverse_edges = Vec::new();
-        self.advance_edge_loop(h1, &mut reverse_edges);
-
-        reverse_edges.reverse();
-        reverse_edges.extend(loop_edges);
-
-        // Deduplicate in case of closed circular loop
-        let mut seen = HashSet::new();
-        reverse_edges.retain(|e| seen.insert(*e));
-        reverse_edges
+        self.edge_loop_path(start_edge).into_edges()
     }
 
-    fn advance_edge_loop(&self, start_he: HalfEdgeHandle, out: &mut Vec<EdgeHandle>) {
-        let mut curr_he = start_he;
-        let mut visited = HashSet::new();
-
-        while visited.insert(curr_he) {
-            let Some(he) = self.half_edge(curr_he) else {
-                break;
-            };
-            let Some(face_h) = he.face else {
-                break;
-            };
-
-            // Only continue through pure quads
-            let f_hes = self.face_half_edges(face_h);
-            if f_hes.len() != 4 {
-                break;
-            }
-
-            // Find index of curr_he in the quad
-            let Some(idx) = f_hes.iter().position(|&h| h == curr_he) else {
-                break;
-            };
-            let opp_he = f_hes[(idx + 2) % 4];
-            let opp_edge = self.half_edge(opp_he).unwrap().edge;
-            out.push(opp_edge);
-
-            // Step through twin to the next face
-            let next_he = self.half_edge(opp_he).unwrap().twin;
-            if self.half_edge(next_he).unwrap().is_boundary() {
-                break;
-            }
-            curr_he = next_he;
-        }
+    /// Returns the comprehensive topological edge loop path starting from `start_edge`.
+    pub fn edge_loop_path(&self, start_edge: EdgeHandle) -> EdgeSelectionPath {
+        selection::edge_loop(self, start_edge)
     }
 
-    /// Traverses a quad edge ring (parallel rails across quad strips) starting from edge `e`.
+    /// Returns an ordered list of edges forming an edge ring passing through `start_edge`.
     pub fn edge_ring(&self, start_edge: EdgeHandle) -> Vec<EdgeHandle> {
-        let mut ring_edges = Vec::new();
-        if !self.is_valid_edge(start_edge) {
-            return ring_edges;
-        }
-
-        ring_edges.push(start_edge);
-        let Some((h0, h1)) = self.edge_half_edges(start_edge) else {
-            return ring_edges;
-        };
-
-        self.advance_edge_ring(h0, &mut ring_edges);
-        let mut rev = Vec::new();
-        self.advance_edge_ring(h1, &mut rev);
-
-        rev.reverse();
-        rev.extend(ring_edges);
-
-        let mut seen = HashSet::new();
-        rev.retain(|e| seen.insert(*e));
-        rev
+        self.edge_ring_path(start_edge).into_edges()
     }
 
-    fn advance_edge_ring(&self, start_he: HalfEdgeHandle, out: &mut Vec<EdgeHandle>) {
-        let mut curr_he = start_he;
-        let mut visited = HashSet::new();
+    /// Returns the comprehensive topological edge ring path starting from `start_edge`.
+    pub fn edge_ring_path(&self, start_edge: EdgeHandle) -> EdgeSelectionPath {
+        selection::edge_ring(self, start_edge)
+    }
 
-        while visited.insert(curr_he) {
-            let Some(he) = self.half_edge(curr_he) else {
-                break;
-            };
-            let Some(face_h) = he.face else {
-                break;
-            };
+    /// Returns the next edge continuing an edge loop arriving at `at_vertex` from `edge`.
+    pub fn next_loop_edge(
+        &self,
+        edge: EdgeHandle,
+        at_vertex: VertexHandle,
+    ) -> (Option<EdgeHandle>, TerminationReason) {
+        selection::next_loop_edge(self, edge, at_vertex)
+    }
 
-            let f_hes = self.face_half_edges(face_h);
-            if f_hes.len() != 4 {
-                break;
-            }
-
-            let Some(idx) = f_hes.iter().position(|&h| h == curr_he) else {
-                break;
-            };
-            // Next parallel rail in quad
-            let rail_he = f_hes[(idx + 1) % 4];
-            let rail_edge = self.half_edge(rail_he).unwrap().edge;
-            out.push(rail_edge);
-
-            let next_he = self.half_edge(rail_he).unwrap().twin;
-            if self.half_edge(next_he).unwrap().is_boundary() {
-                break;
-            }
-            curr_he = next_he;
-        }
+    /// Returns the next edge continuing an edge ring from `edge` stepping across `across_face`.
+    pub fn next_ring_edge(
+        &self,
+        edge: EdgeHandle,
+        across_face: FaceHandle,
+    ) -> (Option<EdgeHandle>, TerminationReason) {
+        selection::next_ring_edge(self, edge, across_face)
     }
 
     /// Discovers and returns all closed boundary loops (cycles of virtual boundary half-edges).

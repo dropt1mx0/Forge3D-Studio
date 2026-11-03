@@ -22,6 +22,7 @@ pub mod half_edge;
 pub mod handles;
 pub mod mesh;
 pub mod operations;
+pub mod selection;
 pub mod traversal;
 pub mod validation;
 pub mod vertex;
@@ -33,6 +34,7 @@ pub use face::{Face, HalfEdgeFace};
 pub use half_edge::HalfEdge;
 pub use handles::{EdgeHandle, FaceHandle, HalfEdgeHandle, VertexHandle};
 pub use mesh::HalfEdgeMesh;
+pub use selection::{EdgeSelectionPath, TerminationReason};
 pub use validation::{
     IssueCategory, IssueSeverity, TopologyReport, TopologyValidator, ValidationIssue,
     ValidationReport,
