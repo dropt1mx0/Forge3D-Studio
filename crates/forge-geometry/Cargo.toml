@@ -10,6 +10,7 @@ forge-core = { workspace = true }
 forge-math = { workspace = true }
 glam = { workspace = true }
 bytemuck = { workspace = true }
+thiserror = { workspace = true }
 serde = { workspace = true, optional = true }
 
 [features]

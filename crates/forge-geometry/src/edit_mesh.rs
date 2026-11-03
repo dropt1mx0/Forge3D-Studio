@@ -192,6 +192,18 @@ impl EditableMesh {
         Mesh::new(out_vertices, out_indices)
     }
 
+    /// Converts this `EditableMesh` into a topological `HalfEdgeMesh`.
+    pub fn to_half_edge_mesh(
+        &self,
+    ) -> Result<crate::topology::HalfEdgeMesh, crate::topology::TopologyError> {
+        crate::topology::HalfEdgeMesh::from_editable_mesh(self)
+    }
+
+    /// Creates an `EditableMesh` from a `HalfEdgeMesh`.
+    pub fn from_half_edge_mesh(half_edge_mesh: &crate::topology::HalfEdgeMesh) -> Self {
+        half_edge_mesh.to_editable_mesh()
+    }
+
     /// Recalculates face normals and averages them for vertex normals.
     pub fn recalculate_normals(&mut self) {
         // Calculate face normals

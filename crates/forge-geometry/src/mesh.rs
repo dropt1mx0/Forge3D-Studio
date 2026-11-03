@@ -87,6 +87,19 @@ impl Mesh {
         validate_mesh_data(&self.vertices, &self.indices)
     }
 
+    /// Builds a topological `HalfEdgeMesh` from this GPU mesh, welding identical spatial positions
+    /// while preserving UV seams and hard normals per half-edge corner.
+    pub fn to_half_edge_mesh(
+        &self,
+    ) -> std::result::Result<crate::topology::HalfEdgeMesh, crate::topology::TopologyError> {
+        crate::topology::HalfEdgeMesh::from_mesh(self)
+    }
+
+    /// Reconstructs a triangulated GPU `Mesh` from a `HalfEdgeMesh`.
+    pub fn from_half_edge_mesh(half_edge_mesh: &crate::topology::HalfEdgeMesh) -> Self {
+        half_edge_mesh.to_mesh()
+    }
+
     /// Applies a 3D transform to all vertices, updating positions, normals, and bounding box.
     pub fn transform(&mut self, transform: &Transform) {
         let mat = transform.to_matrix();
