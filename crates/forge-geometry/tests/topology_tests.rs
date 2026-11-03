@@ -512,7 +512,11 @@ fn test_face_split() {
     let v0 = verts[0];
     let v2 = verts[2];
 
-    let (f_new, e_new) = mesh.split_face(f, v0, v2).expect("Split face failed");
+    let split_res = mesh.split_face(f, v0, v2).expect("Split face failed");
+    let (f_new, e_new) = (split_res.new_face, split_res.new_edge);
+    assert_eq!(split_res.original_face, f);
+    assert_eq!(split_res.face1_vertices.len(), 3);
+    assert_eq!(split_res.face2_vertices.len(), 3);
     assert!(mesh.is_valid_face(f_new));
     assert!(mesh.is_valid_edge(e_new));
     assert_eq!(mesh.num_faces(), 2);
