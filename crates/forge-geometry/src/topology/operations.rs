@@ -57,6 +57,51 @@ impl SplitEdgeResult {
     }
 }
 
+/// The typed result of a successful `flip_edge` topological operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct FlipEdgeResult {
+    /// The edge that was flipped (now connecting the opposite vertices).
+    pub edge: EdgeHandle,
+    /// The two triangular faces affected by the flip: `(f0, f1)`.
+    pub faces: (FaceHandle, FaceHandle),
+    /// The four vertices involved in the flip: `(v0, v1, v2, v3)`.
+    /// - `v0, v1`: original endpoints of the edge before flip.
+    /// - `v2, v3`: opposite vertices that now form the new diagonal.
+    pub vertices: (VertexHandle, VertexHandle, VertexHandle, VertexHandle),
+    /// The endpoints of the new diagonal: `(v2, v3)`.
+    pub new_diagonal: (VertexHandle, VertexHandle),
+    /// The two directed half-edges of the flipped edge: `(h0, h1)`.
+    pub half_edges: (HalfEdgeHandle, HalfEdgeHandle),
+}
+
+impl FlipEdgeResult {
+    #[inline]
+    pub fn edge(&self) -> EdgeHandle {
+        self.edge
+    }
+
+    #[inline]
+    pub fn faces(&self) -> (FaceHandle, FaceHandle) {
+        self.faces
+    }
+
+    #[inline]
+    pub fn vertices(&self) -> (VertexHandle, VertexHandle, VertexHandle, VertexHandle) {
+        self.vertices
+    }
+
+    #[inline]
+    pub fn new_diagonal(&self) -> (VertexHandle, VertexHandle) {
+        self.new_diagonal
+    }
+
+    #[inline]
+    pub fn half_edges(&self) -> (HalfEdgeHandle, HalfEdgeHandle) {
+        self.half_edges
+    }
+}
+
 impl HalfEdgeMesh {
     /// Inserts a new vertex along edge `e` at linear interpolation parameter `t` in (0, 1).
     ///
@@ -260,7 +305,7 @@ impl HalfEdgeMesh {
     ///
     /// Preserves orientations, normals, and cycle integrity.
     /// Transactionally rolls back if an invariant is violated.
-    pub fn flip_edge(&mut self, edge: EdgeHandle) -> Result<(), TopologyError> {
+    pub fn flip_edge(&mut self, edge: EdgeHandle) -> Result<FlipEdgeResult, TopologyError> {
         if !self.is_valid_edge(edge) {
             return Err(TopologyError::InvalidEdge(edge));
         }
@@ -271,14 +316,16 @@ impl HalfEdgeMesh {
             .edge_half_edges(edge)
             .ok_or(TopologyError::InvalidEdge(edge))?;
 
-        let f0 =
-            self.half_edge(h0).unwrap().face.ok_or_else(|| {
-                TopologyError::InvalidOperation("Cannot flip boundary edge".into())
-            })?;
-        let f1 =
-            self.half_edge(h1).unwrap().face.ok_or_else(|| {
-                TopologyError::InvalidOperation("Cannot flip boundary edge".into())
-            })?;
+        let f0 = self.half_edge(h0).unwrap().face.ok_or_else(|| {
+            TopologyError::InvalidOperation(
+                "Cannot flip boundary edge: edge must have two incident faces".into(),
+            )
+        })?;
+        let f1 = self.half_edge(h1).unwrap().face.ok_or_else(|| {
+            TopologyError::InvalidOperation(
+                "Cannot flip boundary edge: edge must have two incident faces".into(),
+            )
+        })?;
 
         if f0 == f1 {
             return Err(TopologyError::InvalidOperation(
@@ -291,7 +338,7 @@ impl HalfEdgeMesh {
         let f1_hes = self.face_half_edges(f1);
         if f0_hes.len() != 3 || f1_hes.len() != 3 {
             return Err(TopologyError::InvalidOperation(
-                "Edge flip is only supported between two triangular faces".into(),
+                "Flip edge is only supported between two triangular faces".into(),
             ));
         }
 
@@ -320,6 +367,18 @@ impl HalfEdgeMesh {
             ));
         }
 
+        // Check if an edge connecting v2 and v3 already exists
+        for eh in self.incident_edges(v2) {
+            if matches!(
+                self.edge_vertices(eh),
+                Some((va, vb)) if (va == v2 && vb == v3) || (va == v3 && vb == v2)
+            ) {
+                return Err(TopologyError::InvalidOperation(
+                    "Cannot flip edge: an edge connecting opposite vertices already exists".into(),
+                ));
+            }
+        }
+
         // Geometric convexity check: quad (v0, v3, v1, v2) must be strictly convex
         let p0 = self.vertex(v0).unwrap().position;
         let p1 = self.vertex(v1).unwrap().position;
@@ -329,21 +388,45 @@ impl HalfEdgeMesh {
         let n_old0 = (p1 - p0).cross(p2 - p0);
         let n_old1 = (p0 - p1).cross(p3 - p1);
 
+        if n_old0.length_squared() < 1e-12 || n_old1.length_squared() < 1e-12 {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot flip edge: incident triangles are degenerate or collinear".into(),
+            ));
+        }
+
         // New triangles with flipped diagonal (v2, v3):
         // Triangle f0 (v2, v3, v1):
         let n_new0 = (p3 - p2).cross(p1 - p2);
         // Triangle f1 (v3, v2, v0):
         let n_new1 = (p2 - p3).cross(p0 - p3);
 
+        if n_new0.length_squared() < 1e-12 || n_new1.length_squared() < 1e-12 {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot flip edge: resulting triangles would be degenerate or collinear".into(),
+            ));
+        }
+
         if n_new0.dot(n_old0) <= 0.0 || n_new1.dot(n_old1) <= 0.0 || n_new0.dot(n_new1) <= 0.0 {
             return Err(TopologyError::InvalidOperation(
-                "Cannot flip edge: resulting triangles would invert or fold".into(),
+                "Cannot flip edge: quad is non-convex or resulting triangles would invert/fold"
+                    .into(),
             ));
         }
 
         // Rewire origins: edge now connects v2 and v3
         self.half_edge_mut(h0).unwrap().origin = v2;
         self.half_edge_mut(h1).unwrap().origin = v3;
+
+        // Preserve wedge/corner attributes for new diagonal
+        let uv_v2_f0 = self.half_edge(h0_prev).unwrap().uv;
+        let norm_v2_f0 = self.half_edge(h0_prev).unwrap().normal;
+        self.half_edge_mut(h0).unwrap().uv = uv_v2_f0;
+        self.half_edge_mut(h0).unwrap().normal = norm_v2_f0;
+
+        let uv_v3_f1 = self.half_edge(h1_prev).unwrap().uv;
+        let norm_v3_f1 = self.half_edge(h1_prev).unwrap().normal;
+        self.half_edge_mut(h1).unwrap().uv = uv_v3_f1;
+        self.half_edge_mut(h1).unwrap().normal = norm_v3_f1;
 
         // Triangle f0: v2 -> v3 -> v1 -> v2
         // h0 (v2 -> v3) -> h1_prev (v3 -> v1) -> h0_next (v1 -> v2) -> h0
@@ -375,11 +458,23 @@ impl HalfEdgeMesh {
         self.face_mut(f0).unwrap().half_edge = h0;
         self.face_mut(f1).unwrap().half_edge = h1;
 
-        // Outgoing half-edges for vertices
-        self.vertex_mut(v0).unwrap().half_edge = Some(h1_next);
-        self.vertex_mut(v1).unwrap().half_edge = Some(h0_next);
-        self.vertex_mut(v2).unwrap().half_edge = Some(h0);
-        self.vertex_mut(v3).unwrap().half_edge = Some(h1);
+        // Outgoing half-edges for vertices (prefer boundary half-edge if on boundary)
+        for &vh in &[v0, v1, v2, v3] {
+            let mut bnd = None;
+            let mut any_out = None;
+            for (idx, he) in self.half_edges.iter().enumerate() {
+                if !he.deleted && he.origin == vh {
+                    let he_h = HalfEdgeHandle::new(idx as u32, he.generation);
+                    if he.is_boundary() {
+                        bnd = Some(he_h);
+                        break;
+                    } else if any_out.is_none() {
+                        any_out = Some(he_h);
+                    }
+                }
+            }
+            self.vertex_mut(vh).unwrap().half_edge = bnd.or(any_out);
+        }
 
         // Recalculate face normals
         let norm0 = self.face_normal(f0);
@@ -393,7 +488,13 @@ impl HalfEdgeMesh {
             return Err(e);
         }
 
-        Ok(())
+        Ok(FlipEdgeResult {
+            edge,
+            faces: (f0, f1),
+            vertices: (v0, v1, v2, v3),
+            new_diagonal: (v2, v3),
+            half_edges: (h0, h1),
+        })
     }
 
     /// Connects two non-adjacent vertices of face `f` with a new edge, splitting it into two faces.
@@ -1295,6 +1396,352 @@ mod tests {
         assert_eq!(mesh, mesh_backup);
 
         // 3. Topology must remain completely intact
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    fn make_two_triangles() -> HalfEdgeMesh {
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0), // 0
+            Vec3::new(2.0, 0.0, 0.0), // 1
+            Vec3::new(2.0, 2.0, 0.0), // 2
+            Vec3::new(0.0, 2.0, 0.0), // 3
+        ];
+        let faces = vec![
+            vec![0, 1, 2], // Face 0
+            vec![0, 2, 3], // Face 1
+        ];
+        TopologyBuilder::build(&positions, &faces).unwrap()
+    }
+
+    fn make_tetrahedron() -> HalfEdgeMesh {
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.732, 0.0),
+            Vec3::new(1.0, 0.577, 1.633),
+        ];
+        let faces = vec![vec![0, 2, 1], vec![0, 1, 3], vec![1, 2, 3], vec![2, 0, 3]];
+        TopologyBuilder::build(&positions, &faces).unwrap()
+    }
+
+    // Flip Edge Test 1: Flip edge between two adjacent triangles
+    #[test]
+    fn test_flip_1_adjacent_triangles() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.flip_edge(e).expect("flip succeeds");
+
+        assert_eq!(res.edge(), e);
+        assert!(mesh.is_valid_face(res.faces().0));
+        assert!(mesh.is_valid_face(res.faces().1));
+        assert_ne!(res.faces().0, res.faces().1);
+        assert!(mesh.is_valid_edge(res.edge()));
+    }
+
+    // Flip Edge Test 2: Check new diagonal connects opposite vertices v2 and v3
+    #[test]
+    fn test_flip_2_new_diagonal_opposite_vertices() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.flip_edge(e).unwrap();
+
+        let (diag_a, diag_b) = res.new_diagonal();
+        let idx_a = diag_a.index();
+        let idx_b = diag_b.index();
+        assert!((idx_a == 1 && idx_b == 3) || (idx_a == 3 && idx_b == 1));
+
+        let (va, vb) = mesh.edge_vertices(e).unwrap();
+        assert!((va.index() == 1 && vb.index() == 3) || (va.index() == 3 && vb.index() == 1));
+
+        let (h0, h1) = res.half_edges();
+        let orig0 = mesh.half_edge(h0).unwrap().origin;
+        let orig1 = mesh.half_edge(h1).unwrap().origin;
+        assert_eq!(orig0, diag_a);
+        assert_eq!(orig1, diag_b);
+    }
+
+    // Flip Edge Test 3: Check vertex count preserved
+    #[test]
+    fn test_flip_3_vertex_count_preserved() {
+        let mut mesh = make_two_triangles();
+        let initial_v = mesh.num_vertices();
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.flip_edge(e).unwrap();
+        assert_eq!(mesh.num_vertices(), initial_v);
+    }
+
+    // Flip Edge Test 4: Check edge count preserved
+    #[test]
+    fn test_flip_4_edge_count_preserved() {
+        let mut mesh = make_two_triangles();
+        let initial_e = mesh.num_edges();
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.flip_edge(e).unwrap();
+        assert_eq!(mesh.num_edges(), initial_e);
+    }
+
+    // Flip Edge Test 5: Check face count preserved
+    #[test]
+    fn test_flip_5_face_count_preserved() {
+        let mut mesh = make_two_triangles();
+        let initial_f = mesh.num_faces();
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.flip_edge(e).unwrap();
+        assert_eq!(mesh.num_faces(), initial_f);
+    }
+
+    // Flip Edge Test 6: Check half-edge count preserved
+    #[test]
+    fn test_flip_6_half_edge_count_preserved() {
+        let mut mesh = make_two_triangles();
+        let initial_he = mesh.half_edges.len();
+        let initial_active_he = mesh.half_edges().count();
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.flip_edge(e).unwrap();
+        assert_eq!(mesh.half_edges.len(), initial_he);
+        assert_eq!(mesh.half_edges().count(), initial_active_he);
+    }
+
+    // Flip Edge Test 7: Check Twin reciprocity after flip
+    #[test]
+    fn test_flip_7_twin_reciprocity() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.flip_edge(e).unwrap();
+        let (h0, h1) = res.half_edges();
+
+        assert_eq!(mesh.half_edge(h0).unwrap().twin, h1);
+        assert_eq!(mesh.half_edge(h1).unwrap().twin, h0);
+
+        for h in mesh.half_edges() {
+            let he = mesh.half_edge(h).unwrap();
+            let twin = mesh.half_edge(he.twin).unwrap();
+            assert_eq!(
+                twin.twin, h,
+                "Twin reciprocity must hold for all half-edges"
+            );
+        }
+    }
+
+    // Flip Edge Test 8: Check Next and Prev forms closed 3-cycles around F0 and F1
+    #[test]
+    fn test_flip_8_next_prev_closed_3_cycles() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.flip_edge(e).unwrap();
+
+        for f in [res.faces.0, res.faces.1] {
+            let hes = mesh.face_half_edges(f);
+            assert_eq!(hes.len(), 3);
+            for i in 0..3 {
+                let curr = hes[i];
+                let next = hes[(i + 1) % 3];
+                let prev = hes[(i + 2) % 3];
+                assert_eq!(mesh.half_edge(curr).unwrap().next, next);
+                assert_eq!(mesh.half_edge(curr).unwrap().prev, prev);
+                assert_eq!(mesh.half_edge(next).unwrap().prev, curr);
+                assert_eq!(mesh.half_edge(prev).unwrap().next, curr);
+                assert_eq!(mesh.half_edge(curr).unwrap().face, Some(f));
+            }
+        }
+    }
+
+    // Flip Edge Test 9: Check both faces contain correct 3-vertex cycles
+    #[test]
+    fn test_flip_9_correct_face_cycles() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.flip_edge(e).unwrap();
+
+        let mut verts0: Vec<usize> = mesh
+            .face_vertices(res.faces.0)
+            .into_iter()
+            .map(|v| v.index())
+            .collect();
+        let mut verts1: Vec<usize> = mesh
+            .face_vertices(res.faces.1)
+            .into_iter()
+            .map(|v| v.index())
+            .collect();
+
+        assert_eq!(verts0.len(), 3);
+        assert_eq!(verts1.len(), 3);
+
+        verts0.sort_unstable();
+        verts1.sort_unstable();
+
+        // The two faces must be {1, 2, 3} and {0, 1, 3} in either order
+        let case_a = verts0 == vec![1, 2, 3] && verts1 == vec![0, 1, 3];
+        let case_b = verts0 == vec![0, 1, 3] && verts1 == vec![1, 2, 3];
+        assert!(
+            case_a || case_b,
+            "Faces must contain {{1, 2, 3}} and {{0, 1, 3}}, got: {:?} and {:?}",
+            verts0,
+            verts1
+        );
+    }
+
+    // Flip Edge Test 10: Check vertex coordinates remain identical
+    #[test]
+    fn test_flip_10_vertex_coordinates_identical() {
+        let mut mesh = make_two_triangles();
+        let initial_positions: Vec<Vec3> = mesh
+            .vertices()
+            .map(|v| mesh.vertex(v).unwrap().position)
+            .collect();
+        let e = find_edge_between(&mesh, 0, 2);
+        mesh.flip_edge(e).unwrap();
+
+        for (v, orig_pos) in mesh.vertices().zip(initial_positions.iter()) {
+            assert_eq!(mesh.vertex(v).unwrap().position, *orig_pos);
+        }
+    }
+
+    // Flip Edge Test 11: Check preservation of UV seams across the quad
+    #[test]
+    fn test_flip_11_preserve_uv_seams() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let (h0, h1) = mesh.edge_half_edges(e).unwrap();
+        let h0_prev = mesh.half_edge(h0).unwrap().prev;
+        let h1_prev = mesh.half_edge(h1).unwrap().prev;
+
+        // Assign corner UVs to the opposite vertices
+        mesh.half_edge_mut(h0_prev).unwrap().uv = Some(Vec2::new(0.2, 0.3));
+        mesh.half_edge_mut(h1_prev).unwrap().uv = Some(Vec2::new(0.7, 0.8));
+
+        let res = mesh.flip_edge(e).unwrap();
+        let (h0_new, h1_new) = res.half_edges;
+
+        // h0 now originates at v2 (previously h0_prev's origin) and inherits its corner UV
+        assert_eq!(
+            mesh.half_edge(h0_new).unwrap().uv,
+            Some(Vec2::new(0.2, 0.3))
+        );
+        // h1 now originates at v3 (previously h1_prev's origin) and inherits its corner UV
+        assert_eq!(
+            mesh.half_edge(h1_new).unwrap().uv,
+            Some(Vec2::new(0.7, 0.8))
+        );
+    }
+
+    // Flip Edge Test 12: Attempt flip of boundary edge (returns Err(TopologyError::InvalidOperation))
+    #[test]
+    fn test_flip_12_boundary_edge_rejected() {
+        let mut mesh = make_two_triangles();
+        let e_bnd = find_edge_between(&mesh, 0, 1);
+        assert!(mesh.is_edge_boundary(e_bnd));
+        let res = mesh.flip_edge(e_bnd);
+        assert!(matches!(res, Err(TopologyError::InvalidOperation(_))));
+    }
+
+    // Flip Edge Test 13: Attempt flip of edge on Quad/N-gon (returns Err(TopologyError::InvalidOperation))
+    #[test]
+    fn test_flip_13_quad_or_ngon_rejected() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+        let res = mesh.flip_edge(e_mid);
+        assert!(matches!(res, Err(TopologyError::InvalidOperation(_))));
+    }
+
+    // Flip Edge Test 14: Handling of invalid EdgeHandle (NULL, out of bounds, wrong generation)
+    #[test]
+    fn test_flip_14_invalid_edge_handle() {
+        let mut mesh = make_two_triangles();
+
+        let res_null = mesh.flip_edge(EdgeHandle::NULL);
+        assert!(matches!(res_null, Err(TopologyError::InvalidEdge(_))));
+
+        let res_oob = mesh.flip_edge(EdgeHandle::new(9999, 0));
+        assert!(matches!(res_oob, Err(TopologyError::InvalidEdge(_))));
+
+        let valid_e = mesh.edges().next().unwrap();
+        let wrong_gen = EdgeHandle::new(valid_e.raw_index(), valid_e.generation() + 1);
+        let res_gen = mesh.flip_edge(wrong_gen);
+        assert!(matches!(res_gen, Err(TopologyError::InvalidEdge(_))));
+    }
+
+    // Flip Edge Test 15: Handling of duplicate new diagonal (e.g. in tetrahedron)
+    #[test]
+    fn test_flip_15_duplicate_diagonal_rejected() {
+        let mut mesh = make_tetrahedron();
+        // In the tetrahedron, face 0 is [0, 2, 1] and face 1 is [0, 1, 3]
+        // Shared edge connects 0 and 1
+        let e_shared = find_edge_between(&mesh, 0, 1);
+        let res = mesh.flip_edge(e_shared);
+        assert!(
+            matches!(res, Err(TopologyError::InvalidOperation(_))),
+            "Flipping edge where opposite vertices are already connected must be rejected"
+        );
+    }
+
+    // Flip Edge Test 16: Handling of non-convex/degenerate quad geometry
+    #[test]
+    fn test_flip_16_non_convex_or_degenerate_quad() {
+        // Non-convex quad (reflex angle at vertex 2)
+        let positions_concave = vec![
+            Vec3::new(0.0, 0.0, 0.0), // 0
+            Vec3::new(2.0, 0.0, 0.0), // 1
+            Vec3::new(1.0, 0.2, 0.0), // 2 (indented)
+            Vec3::new(1.0, 2.0, 0.0), // 3
+        ];
+        let faces_concave = vec![vec![0, 1, 2], vec![0, 2, 3]];
+        let mut mesh_concave = TopologyBuilder::build(&positions_concave, &faces_concave).unwrap();
+        let e_shared = find_edge_between(&mesh_concave, 0, 2);
+        let res_concave = mesh_concave.flip_edge(e_shared);
+        assert!(
+            matches!(res_concave, Err(TopologyError::InvalidOperation(_))),
+            "Non-convex quad flip must be rejected"
+        );
+
+        // Collinear / degenerate triangle
+        let positions_collinear = vec![
+            Vec3::new(0.0, 0.0, 0.0), // 0
+            Vec3::new(1.0, 0.0, 0.0), // 1
+            Vec3::new(2.0, 0.0, 0.0), // 2 (collinear with 0 and 1)
+            Vec3::new(1.0, 1.0, 0.0), // 3
+        ];
+        let faces_collinear = vec![vec![0, 1, 2], vec![0, 2, 3]];
+        let mut mesh_collinear =
+            TopologyBuilder::build(&positions_collinear, &faces_collinear).unwrap();
+        let e_collinear = find_edge_between(&mesh_collinear, 0, 2);
+        let res_collinear = mesh_collinear.flip_edge(e_collinear);
+        assert!(
+            matches!(res_collinear, Err(TopologyError::InvalidOperation(_))),
+            "Collinear triangle flip must be rejected"
+        );
+    }
+
+    // Flip Edge Test 17: Atomicity check on error (mesh unchanged if flip fails)
+    #[test]
+    fn test_flip_17_atomic_rollback_on_error() {
+        let mut mesh = make_two_triangles();
+        let mesh_backup = mesh.clone();
+
+        // 1. Error on boundary edge
+        let e_bnd = find_edge_between(&mesh, 0, 1);
+        assert!(mesh.flip_edge(e_bnd).is_err());
+        assert_eq!(mesh, mesh_backup);
+
+        // 2. Error on invalid handle
+        assert!(mesh.flip_edge(EdgeHandle::NULL).is_err());
+        assert_eq!(mesh, mesh_backup);
+
+        // 3. Topology must remain completely intact
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Flip Edge Test 18: Final mesh validation via TopologyValidator and check_invariants
+    #[test]
+    fn test_flip_18_validator_and_invariants() {
+        let mut mesh = make_two_triangles();
+        let e = find_edge_between(&mesh, 0, 2);
+        let res = mesh.flip_edge(e);
+        assert!(res.is_ok());
+
+        let report = TopologyValidator::validate(&mesh);
+        assert!(report.is_valid, "Report must be valid: {:?}", report.issues);
+        assert_eq!(report.error_count(), 0);
         assert!(mesh.check_invariants().is_ok());
     }
 }
