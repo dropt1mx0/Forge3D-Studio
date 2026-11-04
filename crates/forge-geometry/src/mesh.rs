@@ -30,6 +30,13 @@ impl Mesh {
         mesh
     }
 
+    /// Returns the approximate memory consumption of this mesh in bytes, including heap allocations.
+    pub fn memory_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.vertices.capacity() * std::mem::size_of::<Vertex>()
+            + self.indices.capacity() * std::mem::size_of::<u32>()
+    }
+
     /// Recalculates the axis-aligned bounding box from vertex positions.
     pub fn recalculate_aabb(&mut self) {
         let mut aabb = Aabb::EMPTY;

@@ -371,11 +371,11 @@ impl Scene {
 
         self.dirty = true;
 
-        Some(crate::history::Action::Join {
+        Some(crate::history::Action::join(
             active_id,
             old_mesh,
             removed_objects,
-        })
+        ))
     }
 
     /// Centers the mesh geometry around the object's origin (0, 0, 0) and moves the object position to the center.
@@ -402,13 +402,13 @@ impl Scene {
         obj.local_transform.translation += world_offset;
         self.dirty = true;
 
-        Some(crate::history::Action::SetOrigin {
+        Some(crate::history::Action::set_origin(
             id,
             old_transform,
             old_mesh,
-            new_transform: obj.local_transform,
-            new_mesh: obj.mesh.clone(),
-        })
+            obj.local_transform,
+            obj.mesh.clone(),
+        ))
     }
 
     /// Sets the object's origin to a specific point in world space.
@@ -440,13 +440,13 @@ impl Scene {
         obj.local_transform.translation += world_offset;
         self.dirty = true;
 
-        Some(crate::history::Action::SetOrigin {
+        Some(crate::history::Action::set_origin(
             id,
             old_transform,
             old_mesh,
-            new_transform: obj.local_transform,
-            new_mesh: obj.mesh.clone(),
-        })
+            obj.local_transform,
+            obj.mesh.clone(),
+        ))
     }
 
     /// Sets visibility for an object.

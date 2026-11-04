@@ -679,12 +679,12 @@ mod tests {
 
         // Modify mesh and push to history
         let sphere = generate_uv_sphere(1.0, 16, 8);
-        history.push(Action::ModifyMesh {
+        history.push(Action::modify_mesh(
             id,
-            old_mesh: initial_cube.clone(),
-            new_mesh: sphere.clone(),
-            name: "Modify Mesh to Sphere".to_string(),
-        });
+            initial_cube.clone(),
+            sphere.clone(),
+            "Modify Mesh to Sphere",
+        ));
         scene.get_object_mut(id).unwrap().set_mesh(sphere);
 
         // Frame 2: Render modified mesh (sphere)

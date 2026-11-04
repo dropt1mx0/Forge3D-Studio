@@ -237,12 +237,12 @@ impl Forge3dStudioApp {
                 r.invalidate_mesh(id);
             }
 
-            self.history.push(Action::ModifyMesh {
-                id: *id,
+            self.history.push(Action::modify_mesh(
+                *id,
                 old_mesh,
                 new_mesh,
-                name: "Edit Mesh Geometry".to_string(),
-            });
+                "Edit Mesh Geometry",
+            ));
         }
     }
 
@@ -488,11 +488,8 @@ impl Forge3dStudioApp {
             let old_transform = obj.local_transform;
             let old_mesh = obj.mesh.clone();
             self.scene.apply_transform_to_object(active_id);
-            self.history.push(Action::ApplyTransform {
-                id: active_id,
-                old_transform,
-                old_mesh,
-            });
+            self.history
+                .push(Action::apply_transform(active_id, old_transform, old_mesh));
             self.status_message = "Applied Transform".to_string();
         }
     }
