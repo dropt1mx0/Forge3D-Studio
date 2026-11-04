@@ -1061,8 +1061,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         } else if app.editor_state.edit_mode == EditMode::Edit
             && let Some((_obj_id, edit_mesh)) = &mut app.active_edit_mesh
         {
-            // Draw batched wireframe edges and vertex handles (CPU overlay used for handles or fallback edges)
+            // Draw batched wireframe edges and vertex handles (CPU overlay used for fallback if GPU disabled)
             let draw_cpu_edges = !app.editor_state.use_gpu_wireframe;
+            let draw_cpu_vertices = !app.editor_state.use_gpu_vertex_handles;
             render_edit_mode_overlay(
                 &mut app.edit_overlay_cache,
                 &painter,
@@ -1072,6 +1073,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 rect,
                 app.scene.dirty,
                 draw_cpu_edges,
+                draw_cpu_vertices,
             );
 
             let edit_mode_sel = match app.editor_state.selection_element {
@@ -1217,9 +1219,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         if input.modifiers.shift {
                             edit_mesh.vertices[v_idx].selected =
                                 !edit_mesh.vertices[v_idx].selected;
+                            if edit_mesh.vertices[v_idx].selected {
+                                app.editor_state.active_vertex = Some(v_idx);
+                            } else if app.editor_state.active_vertex == Some(v_idx) {
+                                app.editor_state.active_vertex = None;
+                            }
                         } else {
                             edit_mesh.deselect_all(EditSelectionMode::Vertex);
                             edit_mesh.vertices[v_idx].selected = true;
+                            app.editor_state.active_vertex = Some(v_idx);
                         }
                         app.status_message = format!("Selected Vertex #{}", v_idx);
                         app.sync_edit_mesh_to_scene();
@@ -1348,6 +1356,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             app.status_message = "Selection cleared".to_string();
                         } else if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
                             edit_mesh.deselect_all(EditSelectionMode::Vertex);
+                            app.editor_state.active_vertex = None;
                             app.sync_edit_mesh_to_scene();
                         }
                         ui.ctx().request_repaint();
@@ -1604,6 +1613,7 @@ pub struct EditOverlayCache {
     pub last_vert_count: usize,
     pub last_edge_count: usize,
     pub last_draw_edges: bool,
+    pub last_draw_vertices: bool,
     pub build_count: usize,
 }
 
@@ -1732,6 +1742,7 @@ pub fn render_edit_mode_overlay(
     rect: Rect,
     scene_dirty: bool,
     draw_edges: bool,
+    draw_vertices: bool,
 ) {
     let selected_verts = edit_mesh.vertices.iter().filter(|v| v.selected).count();
     let selected_edges = edit_mesh.edges.iter().filter(|e| e.selected).count();
@@ -1746,7 +1757,8 @@ pub fn render_edit_mode_overlay(
         && cache.last_edge_count == edit_mesh.edges.len()
         && cache.last_selected_verts == selected_verts
         && cache.last_selected_edges == selected_edges
-        && cache.last_draw_edges == draw_edges;
+        && cache.last_draw_edges == draw_edges
+        && cache.last_draw_vertices == draw_vertices;
 
     if cache_valid {
         if let Some(shape) = &cache.cached_shape {
@@ -1772,14 +1784,13 @@ pub fn render_edit_mode_overlay(
     let cull_rect_verts = rect.expand(10.0);
 
     let est_edges = if draw_edges { edit_mesh.edges.len() } else { 0 };
-    cache
-        .mesh
-        .vertices
-        .reserve(est_edges * 4 + edit_mesh.vertices.len() * 4);
-    cache
-        .mesh
-        .indices
-        .reserve(est_edges * 6 + edit_mesh.vertices.len() * 6);
+    let est_verts = if draw_vertices {
+        edit_mesh.vertices.len()
+    } else {
+        0
+    };
+    cache.mesh.vertices.reserve(est_edges * 4 + est_verts * 4);
+    cache.mesh.indices.reserve(est_edges * 6 + est_verts * 6);
 
     // 3. Batch wireframe edges (only if CPU edges are requested)
     if draw_edges {
@@ -1806,23 +1817,25 @@ pub fn render_edit_mode_overlay(
         }
     }
 
-    // 4. Batch vertex handles
-    let is_vertex_mode = selection_element == forge_scene::SelectionElement::Vertex;
-    for (idx, vertex) in edit_mesh.vertices.iter().enumerate() {
-        let Some(sp) = cache.projected_vertices[idx] else {
-            continue;
-        };
-        if !cull_rect_verts.contains(sp) {
-            continue;
-        }
+    // 4. Batch vertex handles (only if CPU vertices are requested)
+    if draw_vertices {
+        let is_vertex_mode = selection_element == forge_scene::SelectionElement::Vertex;
+        for (idx, vertex) in edit_mesh.vertices.iter().enumerate() {
+            let Some(sp) = cache.projected_vertices[idx] else {
+                continue;
+            };
+            if !cull_rect_verts.contains(sp) {
+                continue;
+            }
 
-        if vertex.selected {
-            // Highlighted selected vertex handle
-            add_box_quad(&mut cache.mesh, sp, 4.0, Color32::from_rgb(255, 180, 40));
-            add_box_quad(&mut cache.mesh, sp, 2.0, Color32::from_rgb(255, 230, 100));
-        } else if is_vertex_mode {
-            // Unselected vertex handle (only in Vertex selection mode)
-            add_box_quad(&mut cache.mesh, sp, 2.0, Color32::from_rgb(45, 50, 60));
+            if vertex.selected {
+                // Highlighted selected vertex handle
+                add_box_quad(&mut cache.mesh, sp, 4.0, Color32::from_rgb(255, 180, 40));
+                add_box_quad(&mut cache.mesh, sp, 2.0, Color32::from_rgb(255, 230, 100));
+            } else if is_vertex_mode {
+                // Unselected vertex handle (only in Vertex selection mode)
+                add_box_quad(&mut cache.mesh, sp, 2.0, Color32::from_rgb(45, 50, 60));
+            }
         }
     }
 
@@ -1838,6 +1851,7 @@ pub fn render_edit_mode_overlay(
     cache.last_selected_verts = selected_verts;
     cache.last_selected_edges = selected_edges;
     cache.last_draw_edges = draw_edges;
+    cache.last_draw_vertices = draw_vertices;
     cache.build_count += 1;
 
     painter.add(egui::Shape::Mesh(arc_mesh));
@@ -1878,6 +1892,7 @@ mod tests {
             rect,
             false,
             true,
+            true,
         );
         assert_eq!(cache.build_count, 1);
         assert!(cache.cached_shape.is_some());
@@ -1893,6 +1908,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
             true,
         );
         assert_eq!(
@@ -1925,6 +1941,7 @@ mod tests {
             rect,
             false,
             true,
+            true,
         );
         let elapsed = t0.elapsed();
 
@@ -1945,6 +1962,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
             true,
         );
         let cached_elapsed = t1.elapsed();
@@ -1979,6 +1997,7 @@ mod tests {
             rect,
             false,
             true,
+            true,
         );
         assert_eq!(cache.build_count, 1);
 
@@ -1995,6 +2014,7 @@ mod tests {
             new_view_proj,
             rect,
             false,
+            true,
             true,
         );
         assert_eq!(cache.build_count, 2);
@@ -2026,6 +2046,7 @@ mod tests {
             rect,
             false,
             true,
+            true,
         );
         assert_eq!(cache.build_count, 1);
         assert!(cache.cached_shape.is_some());
@@ -2053,6 +2074,7 @@ mod tests {
             rect,
             false,
             true,
+            true,
         );
         assert_eq!(cache.build_count, 1);
 
@@ -2066,6 +2088,7 @@ mod tests {
             view_proj,
             rect,
             true, // scene_dirty = true
+            true,
             true,
         );
         assert_eq!(
@@ -2096,6 +2119,7 @@ mod tests {
             rect,
             false,
             true,
+            true,
         );
         assert_eq!(cache.build_count, 1);
 
@@ -2109,6 +2133,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
             true,
         );
         assert_eq!(
@@ -2139,6 +2164,7 @@ mod tests {
             rect,
             false,
             true,
+            true,
         );
         assert!(cache.projected_vertices.capacity() > 0);
         assert!(cache.mesh.vertices.capacity() > 0);
@@ -2150,5 +2176,41 @@ mod tests {
         assert_eq!(cache.mesh.vertices.capacity(), 0);
         assert_eq!(cache.mesh.indices.capacity(), 0);
         assert!(cache.cached_shape.is_none());
+    }
+
+    #[test]
+    fn test_edit_mode_gpu_vertex_toggle_skips_cpu_vertex_generation() {
+        let cube = generate_cube(1.0);
+        let edit_mesh = EditableMesh::from_mesh(&cube);
+
+        let mut cache = EditOverlayCache::new();
+        let view_proj = make_test_camera_matrix(Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO);
+        let rect = Rect::from_min_size(Pos2::new(0.0, 0.0), EguiVec2::new(800.0, 600.0));
+
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), rect);
+
+        // When both GPU wireframe and GPU vertex handles are active:
+        // draw_edges = false, draw_vertices = false -> CPU overlay generates 0 vertices!
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+            false,
+            false,
+        );
+
+        assert_eq!(cache.build_count, 1);
+        let shape = cache.cached_shape.as_ref().unwrap();
+        assert_eq!(
+            shape.vertices.len(),
+            0,
+            "When GPU handles and edges are active, CPU overlay mesh should have 0 vertices"
+        );
+        assert_eq!(shape.indices.len(), 0);
     }
 }

@@ -1451,10 +1451,20 @@ impl Forge3dStudioApp {
                     && let (Some(renderer), Some(target_view)) =
                         (&mut self.renderer, &self.viewport_texture_view)
                 {
-                    let edit_obj = if self.editor_state.use_gpu_wireframe {
+                    let edit_obj = if self.editor_state.use_gpu_wireframe
+                        || self.editor_state.use_gpu_vertex_handles
+                    {
                         self.active_edit_mesh.as_ref().map(|(id, m)| (id, m))
                     } else {
                         None
+                    };
+
+                    let edit_options = forge_render::EditRenderOptions {
+                        draw_edges: self.editor_state.use_gpu_wireframe,
+                        draw_vertices: self.editor_state.use_gpu_vertex_handles,
+                        is_vertex_mode: self.editor_state.selection_element
+                            == forge_scene::SelectionElement::Vertex,
+                        active_vertex: self.editor_state.active_vertex,
                     };
 
                     renderer.render_with_edit_mesh(
@@ -1468,6 +1478,7 @@ impl Forge3dStudioApp {
                         &self.camera,
                         self.editor_state.show_grid,
                         edit_obj,
+                        edit_options,
                     );
                 }
             });

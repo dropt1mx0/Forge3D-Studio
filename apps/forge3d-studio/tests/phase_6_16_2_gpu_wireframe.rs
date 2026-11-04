@@ -16,6 +16,7 @@ use forge_geometry::primitives::{generate_cube, generate_plane, generate_uv_sphe
 use forge_geometry::{EditSelectionMode, EditableMesh};
 use forge_gpu::GpuContext;
 use forge_math::{Mat4, Vec3};
+use forge_render::EditRenderOptions;
 use forge_render::camera::Camera;
 use forge_render::renderer::ViewportRenderer;
 use forge_scene::{EditMode, PrimitiveType, Scene, SceneObject, SelectionElement, SelectionState};
@@ -85,6 +86,7 @@ fn test_gpu_wireframe_primitives_lifecycle() {
             &camera,
             false,
             Some((&id, &edit_mesh)),
+            EditRenderOptions::default(),
         );
 
         assert_eq!(
@@ -114,6 +116,7 @@ fn test_gpu_wireframe_primitives_lifecycle() {
             &camera,
             false,
             Some((&id, &edit_mesh)),
+            EditRenderOptions::default(),
         );
         assert_eq!(
             renderer.last_frame_stats.edit_edge_buffer_reallocs, 0,
@@ -137,6 +140,7 @@ fn test_gpu_wireframe_primitives_lifecycle() {
             &camera,
             false,
             None,
+            EditRenderOptions::default(),
         );
         assert!(
             renderer.edit_mesh_buffers.is_none(),
@@ -212,6 +216,7 @@ fn test_gpu_wireframe_scalability_10k_50k_100k() {
             &camera,
             false,
             Some((&id, &edit_mesh)),
+            EditRenderOptions::default(),
         );
         let init_dur = t0.elapsed();
 
@@ -231,6 +236,7 @@ fn test_gpu_wireframe_scalability_10k_50k_100k() {
             &camera,
             false,
             Some((&id, &edit_mesh)),
+            EditRenderOptions::default(),
         );
         let render_dur = t1.elapsed();
 
@@ -251,6 +257,7 @@ fn test_gpu_wireframe_scalability_10k_50k_100k() {
             &camera,
             false,
             Some((&id, &edit_mesh)),
+            EditRenderOptions::default(),
         );
         let orbit_dur = t2.elapsed();
 
@@ -279,6 +286,7 @@ fn test_gpu_wireframe_scalability_10k_50k_100k() {
             &camera,
             false,
             None,
+            EditRenderOptions::default(),
         );
         assert!(renderer.edit_mesh_buffers.is_none());
     }
@@ -321,6 +329,7 @@ fn test_gpu_wireframe_cpu_fallback_toggle() {
         rect,
         false,
         draw_cpu_edges,
+        true,
     );
     let egui_v_gpu_active = app.edit_overlay_cache.mesh.vertices.len();
     let egui_i_gpu_active = app.edit_overlay_cache.mesh.indices.len();
@@ -340,6 +349,7 @@ fn test_gpu_wireframe_cpu_fallback_toggle() {
         rect,
         false,
         draw_cpu_edges,
+        true,
     );
     let egui_v_fallback = app.edit_overlay_cache.mesh.vertices.len();
     let egui_i_fallback = app.edit_overlay_cache.mesh.indices.len();
@@ -404,6 +414,7 @@ fn test_gpu_wireframe_in_place_vertex_deformation() {
         &camera,
         false,
         Some((&id, &edit_mesh)),
+        EditRenderOptions::default(),
     );
     assert_eq!(renderer.last_frame_stats.edit_edge_buffer_reallocs, 1);
 
@@ -423,6 +434,7 @@ fn test_gpu_wireframe_in_place_vertex_deformation() {
         &camera,
         false,
         Some((&id, &edit_mesh)),
+        EditRenderOptions::default(),
     );
 
     assert_eq!(

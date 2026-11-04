@@ -38,3 +38,22 @@ impl ObjectUniform {
         }
     }
 }
+
+/// Edit Mode configuration uniform buffer matching WGSL bind group 2 layout.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub struct EditModeUniform {
+    pub viewport_size: [f32; 2], // Viewport width, height in physical pixels (8 bytes)
+    pub vertex_point_size: f32,  // Base marker diameter in screen pixels (4 bytes)
+    pub is_vertex_mode: u32,     // 1 if Vertex selection mode, 0 otherwise (4 bytes)
+}
+
+impl EditModeUniform {
+    pub fn new(viewport_size: [f32; 2], vertex_point_size: f32, is_vertex_mode: bool) -> Self {
+        Self {
+            viewport_size,
+            vertex_point_size,
+            is_vertex_mode: if is_vertex_mode { 1 } else { 0 },
+        }
+    }
+}

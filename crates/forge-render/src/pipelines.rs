@@ -1,4 +1,4 @@
-use crate::shaders::{EDIT_EDGE_SHADER, GRID_SHADER, MESH_SHADER};
+use crate::shaders::{EDIT_EDGE_SHADER, EDIT_VERTEX_SHADER, GRID_SHADER, MESH_SHADER};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -6,8 +6,10 @@ pub struct RenderPipelines {
     pub mesh_pipeline: wgpu::RenderPipeline,
     pub grid_pipeline: wgpu::RenderPipeline,
     pub edit_edge_pipeline: wgpu::RenderPipeline,
+    pub edit_vertex_pipeline: wgpu::RenderPipeline,
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
     pub object_bind_group_layout: wgpu::BindGroupLayout,
+    pub edit_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl RenderPipelines {
@@ -256,12 +258,120 @@ impl RenderPipelines {
             cache: None,
         });
 
+        // 11. Edit Mode uniform bind group layout (Group 2)
+        let edit_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Edit Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        // 12. Pipeline layout for Edit Vertex Pipeline
+        let edit_vertex_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Edit Vertex Pipeline Layout"),
+                bind_group_layouts: &[
+                    Some(&camera_bind_group_layout),
+                    Some(&object_bind_group_layout),
+                    Some(&edit_bind_group_layout),
+                ],
+                immediate_size: 0,
+            });
+
+        // 13. Edit Vertex Shader Module
+        let edit_vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Edit Vertex Shader"),
+            source: wgpu::ShaderSource::Wgsl(EDIT_VERTEX_SHADER.into()),
+        });
+
+        // 14. Edit Vertex Pipeline (Topology: TriangleList, Instanced billboard quads)
+        let edit_vertex_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Edit Vertex Render Pipeline"),
+            layout: Some(&edit_vertex_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &edit_vertex_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[
+                    // Slot 0: Unit Quad Vertices (step_mode: Vertex)
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: 8, // 2 * 4 = 8 bytes ([f32; 2] quad position)
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 0,
+                            shader_location: 0,
+                        }],
+                    }),
+                    // Slot 1: Instance Position (step_mode: Instance, reused from EditVertexBuffer)
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: 12, // 3 * 4 = 12 bytes ([f32; 3] center position)
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x3,
+                            offset: 0,
+                            shader_location: 1,
+                        }],
+                    }),
+                    // Slot 2: Instance Flags (step_mode: Instance, from selection state buffer)
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: 4, // 4 bytes (u32 state flags)
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Uint32,
+                            offset: 0,
+                            shader_location: 2,
+                        }],
+                    }),
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &edit_vertex_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             mesh_pipeline,
             grid_pipeline,
             edit_edge_pipeline,
+            edit_vertex_pipeline,
             camera_bind_group_layout,
             object_bind_group_layout,
+            edit_bind_group_layout,
         }
     }
 }

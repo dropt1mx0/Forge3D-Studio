@@ -353,6 +353,7 @@ fn benchmark_2_edit_mode_overlay() {
             rect,
             false,
             true,
+            true,
         );
         let t_init_ms = t_init_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -372,6 +373,7 @@ fn benchmark_2_edit_mode_overlay() {
                 rect,
                 false,
                 true,
+                true,
             );
             static_durations.push(t_static_start.elapsed().as_micros());
         }
@@ -389,6 +391,7 @@ fn benchmark_2_edit_mode_overlay() {
             rect,
             false,
             true,
+            true,
         );
         let t_cam_ms = t_cam_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -405,6 +408,7 @@ fn benchmark_2_edit_mode_overlay() {
             rect,
             false,
             true,
+            true,
         );
         let t_geom_ms = t_geom_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -420,6 +424,7 @@ fn benchmark_2_edit_mode_overlay() {
             view_proj_orbit,
             rect,
             false,
+            true,
             true,
         );
         let t_sel_ms = t_sel_start.elapsed().as_secs_f64() * 1000.0;
@@ -524,6 +529,7 @@ fn benchmark_3_system_memory_scenarios() {
             view_proj,
             rect,
             false,
+            true,
             true,
         );
     }

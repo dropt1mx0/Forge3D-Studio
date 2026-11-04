@@ -313,6 +313,7 @@ pub struct EditorState {
     pub show_axes: bool,
     pub show_wireframe: bool,
     pub use_gpu_wireframe: bool,
+    pub use_gpu_vertex_handles: bool,
     pub proportional_editing: bool,
     pub proportional_radius: f32,
     pub emulate_numpad: bool,
@@ -334,6 +335,8 @@ pub struct EditorState {
     #[serde(skip)]
     pub pointer_press_pos: Option<Vec2>,
     #[serde(skip)]
+    pub active_vertex: Option<usize>,
+    #[serde(skip)]
     pub show_debug_info: bool,
 }
 
@@ -353,6 +356,7 @@ impl Default for EditorState {
             show_axes: true,
             show_wireframe: false,
             use_gpu_wireframe: true,
+            use_gpu_vertex_handles: true,
             proportional_editing: false,
             proportional_radius: 1.0,
             emulate_numpad: false,
@@ -364,6 +368,7 @@ impl Default for EditorState {
             box_select_start: None,
             pointer_state: PointerInteractionState::Idle,
             pointer_press_pos: None,
+            active_vertex: None,
             show_debug_info: false,
         }
     }

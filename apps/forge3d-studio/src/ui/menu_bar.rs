@@ -762,6 +762,11 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             .on_hover_text(
                 "Render Edit Mode mesh edges directly via GPU pipeline instead of CPU overlay",
             );
+            ui.checkbox(
+                &mut app.editor_state.use_gpu_vertex_handles,
+                "GPU Edit Vertex Handles",
+            )
+            .on_hover_text("Render Edit Mode vertex markers directly via GPU instanced pipeline");
 
             ui.separator();
             ui.label(egui::RichText::new("Viewport Zoom").weak().size(11.0));
