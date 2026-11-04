@@ -211,14 +211,19 @@ impl ViewportRenderer {
     /// Invalidate GPU cache for a specific object mesh.
     pub fn invalidate_mesh(&mut self, id: &ObjectId) {
         self.mesh_cache.remove(id);
-        self.picking_ctx.invalidate();
+        self.picking_ctx.invalidate_mesh(id);
     }
 
     /// Clear all cached GPU meshes.
     pub fn invalidate_all_meshes(&mut self) {
         self.mesh_cache.clear();
         self.edit_mesh_buffers = None;
-        self.picking_ctx.invalidate();
+        self.picking_ctx.invalidate_all();
+    }
+
+    /// Returns true if the GPU mesh cache contains an entry for the given object.
+    pub fn has_cached_mesh(&self, id: &ObjectId) -> bool {
+        self.mesh_cache.contains_key(id)
     }
 
     /// Re-allocates the depth texture if the viewport dimensions change.
@@ -492,7 +497,9 @@ impl ViewportRenderer {
         }
 
         // 3.5. Sync GPU Edit Mode wireframe and vertex buffers
-        if let Some((&edit_id, edit_mesh)) = active_edit_mesh {
+        if (options.draw_edges || options.draw_vertices)
+            && let Some((&edit_id, edit_mesh)) = active_edit_mesh
+        {
             // Update Edit Mode uniform buffer (Group 2)
             let edit_uniform = EditModeUniform::new(
                 [viewport_width as f32, viewport_height as f32],
@@ -641,6 +648,7 @@ impl ViewportRenderer {
             }
         } else if self.edit_mesh_buffers.is_some() {
             self.edit_mesh_buffers = None;
+            self.picking_ctx.invalidate();
         }
 
         // 4. Command Encoder & Render Pass

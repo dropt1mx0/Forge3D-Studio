@@ -1140,18 +1140,19 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 (&mut app.renderer, app.wgpu_render_state.clone())
         {
             // 1. Poll previous hover pick request if available
-            if let Some(req_id) = app.pending_hover_pick_request.take()
-                && let Some(pick_result) = renderer.poll_pick_result(req_id)
-            {
-                match pick_result {
-                    PickResult::Object(id) => app.selection.set_hovered(Some(id)),
-                    _ => app.selection.set_hovered(None),
+            if let Some(req_id) = app.pending_hover_pick_request {
+                if let Some(pick_result) = renderer.poll_pick_result(req_id) {
+                    app.pending_hover_pick_request = None;
+                    match pick_result {
+                        PickResult::Object(id) => app.selection.set_hovered(Some(id)),
+                        _ => app.selection.set_hovered(None),
+                    }
                 }
             }
 
             // 2. Schedule non-blocking async pick request for current cursor position
             let active_mesh_ref = app.active_edit_mesh.as_ref().map(|(id, m)| (id, m));
-            app.pending_hover_pick_request = renderer.schedule_pick_request(
+            if let Some(new_req) = renderer.schedule_pick_request(
                 &wgpu_state.device,
                 &wgpu_state.queue,
                 tex_w,
@@ -1163,7 +1164,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 active_mesh_ref,
                 px,
                 py,
-            );
+            ) {
+                app.pending_hover_pick_request = Some(new_req);
+            }
         } else {
             // CPU fallback raycast
             let local_pos = pos - rect.min;
@@ -1217,20 +1220,30 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     && let (Some(renderer), Some(wgpu_state)) =
                         (&mut app.renderer, app.wgpu_render_state.clone())
                 {
-                    let active_mesh_ref = app.active_edit_mesh.as_ref().map(|(id, m)| (id, m));
-                    Some(renderer.pick_sync(
-                        &wgpu_state.device,
-                        &wgpu_state.queue,
-                        tex_w,
-                        tex_h,
-                        &app.scene,
-                        &app.camera,
-                        app.editor_state.edit_mode,
-                        app.editor_state.selection_element,
-                        active_mesh_ref,
-                        px,
-                        py,
-                    ))
+                    // Check if an in-flight hover picking request at this position is already completed
+                    let cached_result = app
+                        .pending_hover_pick_request
+                        .take()
+                        .and_then(|req_id| renderer.poll_pick_result(req_id));
+
+                    if let Some(res) = cached_result {
+                        Some(res)
+                    } else {
+                        let active_mesh_ref = app.active_edit_mesh.as_ref().map(|(id, m)| (id, m));
+                        Some(renderer.pick_sync(
+                            &wgpu_state.device,
+                            &wgpu_state.queue,
+                            tex_w,
+                            tex_h,
+                            &app.scene,
+                            &app.camera,
+                            app.editor_state.edit_mode,
+                            app.editor_state.selection_element,
+                            active_mesh_ref,
+                            px,
+                            py,
+                        ))
+                    }
                 } else {
                     None
                 };

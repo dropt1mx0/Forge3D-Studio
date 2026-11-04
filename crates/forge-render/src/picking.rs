@@ -4,6 +4,7 @@
 //! single-pixel asynchronous readbacks for sub-millisecond picking of 3D objects,
 //! vertices, edges, and polygon faces without CPU raycasting stalls.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -139,6 +140,8 @@ pub enum StagingSlotStatus {
     CopyPending,
     /// Buffer mapped on CPU; ready to read and must be unmapped before reuse.
     Mapped,
+    /// Invalidated while map_async was in-flight. Cannot be reused until map completes and is unmapped.
+    InvalidatedPending,
 }
 
 /// A pre-allocated staging buffer slot aligned for 1-pixel GPU readback.
@@ -187,8 +190,23 @@ impl StagingBufferPool {
         Self { slots }
     }
 
+    /// Cleans up any mapped or invalidated slots whose map_async has completed.
+    pub fn cleanup_ready_slots(&mut self) {
+        for slot in &mut self.slots {
+            if (slot.status == StagingSlotStatus::InvalidatedPending
+                || slot.status == StagingSlotStatus::Mapped)
+                && slot.map_ready.load(Ordering::SeqCst)
+            {
+                slot.buffer.unmap();
+                slot.status = StagingSlotStatus::Idle;
+                slot.map_ready.store(false, Ordering::SeqCst);
+            }
+        }
+    }
+
     /// Acquires an idle slot from the pool. Returns `None` if all slots are actively in use.
     pub fn acquire_idle_slot(&mut self) -> Option<usize> {
+        self.cleanup_ready_slots();
         for (i, slot) in self.slots.iter().enumerate() {
             if slot.status == StagingSlotStatus::Idle {
                 return Some(i);
@@ -221,12 +239,27 @@ impl StagingBufferPool {
     /// Invalidates all pending or mapped slots whose epoch is older than `current_epoch`.
     pub fn invalidate_older_than(&mut self, current_epoch: u64) {
         for slot in &mut self.slots {
-            if slot.status != StagingSlotStatus::Idle && slot.epoch < current_epoch {
-                if slot.status == StagingSlotStatus::Mapped {
-                    slot.buffer.unmap();
+            if slot.epoch < current_epoch {
+                match slot.status {
+                    StagingSlotStatus::Idle => {}
+                    StagingSlotStatus::CopyPending => {
+                        // Cannot unmap yet because map_async is still in-flight on GPU.
+                        // Mark as InvalidatedPending so acquire_idle_slot won't touch it until map finishes.
+                        slot.status = StagingSlotStatus::InvalidatedPending;
+                    }
+                    StagingSlotStatus::Mapped => {
+                        slot.buffer.unmap();
+                        slot.status = StagingSlotStatus::Idle;
+                        slot.map_ready.store(false, Ordering::SeqCst);
+                    }
+                    StagingSlotStatus::InvalidatedPending => {
+                        if slot.map_ready.load(Ordering::SeqCst) {
+                            slot.buffer.unmap();
+                            slot.status = StagingSlotStatus::Idle;
+                            slot.map_ready.store(false, Ordering::SeqCst);
+                        }
+                    }
                 }
-                slot.status = StagingSlotStatus::Idle;
-                slot.map_ready.store(false, Ordering::SeqCst);
             }
         }
     }
@@ -560,6 +593,34 @@ impl EditPickingPipeline {
     }
 }
 
+/// Cached GPU mesh picking buffers for an object in the scene.
+pub struct PickingMeshEntry {
+    pub vertex_buffer: GpuBuffer<[f32; 3]>,
+    pub id_buffer: GpuBuffer<u32>,
+    pub index_buffer: GpuBuffer<u32>,
+    pub generation: u64,
+    pub world_matrix: [[f32; 4]; 4],
+}
+
+/// Cached GPU picking geometry for the active mesh in Edit Mode.
+pub struct PickingEditGeometryCache {
+    pub object_id: ObjectId,
+    pub generation: u64,
+    pub vert_count: usize,
+    pub edge_count: usize,
+    pub face_count: usize,
+    pub world_matrix: [[f32; 4]; 4],
+    // Vertex picking buffers:
+    pub vertex_pos_buffer: GpuBuffer<[f32; 3]>,
+    pub vertex_id_buffer: GpuBuffer<u32>,
+    // Edge picking buffers:
+    pub edge_quad_buffer: GpuBuffer<EdgePickingVertex>,
+    pub edge_index_buffer: GpuBuffer<u32>,
+    // Face picking buffers:
+    pub face_vert_buffer: GpuBuffer<FacePickingVertex>,
+    pub face_index_buffer: GpuBuffer<u32>,
+}
+
 /// Managed GPU Picking context with cached ID target textures and staging readback pool.
 pub struct GpuPickingContext {
     pub pipelines: EditPickingPipeline,
@@ -575,6 +636,8 @@ pub struct GpuPickingContext {
     pub cfg_bind_group: wgpu::BindGroup,
     pub unit_quad_vertex_buffer: GpuBuffer<[f32; 2]>,
     pub unit_quad_index_buffer: GpuBuffer<u32>,
+    pub mesh_cache: HashMap<ObjectId, PickingMeshEntry>,
+    pub edit_cache: Option<PickingEditGeometryCache>,
     pub next_request_id: u64,
     pub invalidation_epoch: u64,
 }
@@ -636,6 +699,8 @@ impl GpuPickingContext {
             cfg_bind_group,
             unit_quad_vertex_buffer,
             unit_quad_index_buffer,
+            mesh_cache: HashMap::new(),
+            edit_cache: None,
             next_request_id: 1,
             invalidation_epoch: 1,
         }
@@ -646,6 +711,29 @@ impl GpuPickingContext {
         self.invalidation_epoch = self.invalidation_epoch.wrapping_add(1);
         self.staging_pool
             .invalidate_older_than(self.invalidation_epoch);
+    }
+
+    /// Invalidates cached picking buffers for a specific object and drops stale readbacks.
+    pub fn invalidate_mesh(&mut self, id: &ObjectId) {
+        self.mesh_cache.remove(id);
+        if let Some(c) = &self.edit_cache {
+            if c.object_id == *id {
+                self.edit_cache = None;
+            }
+        }
+        self.invalidate();
+    }
+
+    /// Clears all cached GPU picking geometry and invalidates all pending queries.
+    pub fn invalidate_all(&mut self) {
+        self.mesh_cache.clear();
+        self.edit_cache = None;
+        self.invalidate();
+    }
+
+    /// Returns true if the picking mesh cache contains an entry for the given object.
+    pub fn has_cached_mesh(&self, id: &ObjectId) -> bool {
+        self.mesh_cache.contains_key(id)
     }
 
     /// Ensures that the ID and depth textures match the viewport resolution.
@@ -774,6 +862,8 @@ impl GpuPickingContext {
                 EditMode::Object => {
                     // Render all visible scene objects with their encoded ObjectId as instance attribute
                     pass.set_pipeline(&self.pipelines.mesh_pipeline);
+                    self.mesh_cache
+                        .retain(|id, _| scene.objects.contains_key(id));
 
                     for (&id, obj) in &scene.objects {
                         if !obj.visible {
@@ -784,46 +874,73 @@ impl GpuPickingContext {
                         };
 
                         let world_tf = scene.world_transform(id);
-                        let eval_mesh = obj.evaluated_mesh();
-                        let world_positions: Vec<[f32; 3]> = eval_mesh
-                            .vertices
-                            .iter()
-                            .map(|v| {
-                                world_tf
-                                    .transform_point(Vec3::from_array(v.position))
-                                    .to_array()
-                            })
-                            .collect();
+                        let world_mat = world_tf.to_matrix().to_cols_array_2d();
 
-                        if !world_positions.is_empty() && !eval_mesh.indices.is_empty() {
-                            let v_buf = GpuBuffer::new_vertex_buffer(
-                                device,
-                                "Picking Temp Mesh VBuf",
-                                &world_positions,
-                            );
-                            let id_buf = GpuBuffer::new_vertex_buffer(
-                                device,
-                                "Picking Temp Mesh IDBuf",
-                                &[encoded_id],
-                            );
-                            let i_buf = GpuBuffer::new_index_buffer(
-                                device,
-                                "Picking Temp Mesh IBuf",
-                                &eval_mesh.indices,
-                            );
-                            pass.set_vertex_buffer(0, v_buf.buffer.slice(..));
-                            pass.set_vertex_buffer(1, id_buf.buffer.slice(..));
+                        let needs_update = match self.mesh_cache.get(&id) {
+                            Some(entry) => {
+                                entry.generation != obj.generation
+                                    || entry.world_matrix != world_mat
+                            }
+                            None => true,
+                        };
+
+                        if needs_update {
+                            let eval_mesh = obj.evaluated_mesh();
+                            let world_positions: Vec<[f32; 3]> = eval_mesh
+                                .vertices
+                                .iter()
+                                .map(|v| {
+                                    world_tf
+                                        .transform_point(Vec3::from_array(v.position))
+                                        .to_array()
+                                })
+                                .collect();
+
+                            if !world_positions.is_empty() && !eval_mesh.indices.is_empty() {
+                                let v_buf = GpuBuffer::new_vertex_buffer(
+                                    device,
+                                    "Picking Mesh VBuf",
+                                    &world_positions,
+                                );
+                                let id_buf = GpuBuffer::new_vertex_buffer(
+                                    device,
+                                    "Picking Mesh IDBuf",
+                                    &[encoded_id],
+                                );
+                                let i_buf = GpuBuffer::new_index_buffer(
+                                    device,
+                                    "Picking Mesh IBuf",
+                                    &eval_mesh.indices,
+                                );
+                                self.mesh_cache.insert(
+                                    id,
+                                    PickingMeshEntry {
+                                        vertex_buffer: v_buf,
+                                        id_buffer: id_buf,
+                                        index_buffer: i_buf,
+                                        generation: obj.generation,
+                                        world_matrix: world_mat,
+                                    },
+                                );
+                            }
+                        }
+
+                        if let Some(entry) = self.mesh_cache.get(&id) {
+                            pass.set_vertex_buffer(0, entry.vertex_buffer.buffer.slice(..));
+                            pass.set_vertex_buffer(1, entry.id_buffer.buffer.slice(..));
                             pass.set_index_buffer(
-                                i_buf.buffer.slice(..),
+                                entry.index_buffer.buffer.slice(..),
                                 wgpu::IndexFormat::Uint32,
                             );
-                            pass.draw_indexed(0..i_buf.count as u32, 0, 0..1);
+                            pass.draw_indexed(0..entry.index_buffer.count as u32, 0, 0..1);
                         }
                     }
                 }
                 EditMode::Edit => {
                     // 1. Render all solid scene meshes first to populate the depth buffer and provide occlusion
                     pass.set_pipeline(&self.pipelines.mesh_pipeline);
+                    self.mesh_cache
+                        .retain(|id, _| scene.objects.contains_key(id));
 
                     for (&id, obj) in &scene.objects {
                         if !obj.visible {
@@ -834,213 +951,285 @@ impl GpuPickingContext {
                         };
 
                         let world_tf = scene.world_transform(id);
-                        let eval_mesh = obj.evaluated_mesh();
-                        let world_positions: Vec<[f32; 3]> = eval_mesh
-                            .vertices
-                            .iter()
-                            .map(|v| {
-                                world_tf
-                                    .transform_point(Vec3::from_array(v.position))
-                                    .to_array()
-                            })
-                            .collect();
+                        let world_mat = world_tf.to_matrix().to_cols_array_2d();
 
-                        if !world_positions.is_empty() && !eval_mesh.indices.is_empty() {
-                            let v_buf = GpuBuffer::new_vertex_buffer(
-                                device,
-                                "Picking Temp Mesh VBuf",
-                                &world_positions,
-                            );
-                            let id_buf = GpuBuffer::new_vertex_buffer(
-                                device,
-                                "Picking Temp Mesh IDBuf",
-                                &[encoded_id],
-                            );
-                            let i_buf = GpuBuffer::new_index_buffer(
-                                device,
-                                "Picking Temp Mesh IBuf",
-                                &eval_mesh.indices,
-                            );
-                            pass.set_vertex_buffer(0, v_buf.buffer.slice(..));
-                            pass.set_vertex_buffer(1, id_buf.buffer.slice(..));
+                        let needs_update = match self.mesh_cache.get(&id) {
+                            Some(entry) => {
+                                entry.generation != obj.generation
+                                    || entry.world_matrix != world_mat
+                            }
+                            None => true,
+                        };
+
+                        if needs_update {
+                            let eval_mesh = obj.evaluated_mesh();
+                            let world_positions: Vec<[f32; 3]> = eval_mesh
+                                .vertices
+                                .iter()
+                                .map(|v| {
+                                    world_tf
+                                        .transform_point(Vec3::from_array(v.position))
+                                        .to_array()
+                                })
+                                .collect();
+
+                            if !world_positions.is_empty() && !eval_mesh.indices.is_empty() {
+                                let v_buf = GpuBuffer::new_vertex_buffer(
+                                    device,
+                                    "Picking Mesh VBuf",
+                                    &world_positions,
+                                );
+                                let id_buf = GpuBuffer::new_vertex_buffer(
+                                    device,
+                                    "Picking Mesh IDBuf",
+                                    &[encoded_id],
+                                );
+                                let i_buf = GpuBuffer::new_index_buffer(
+                                    device,
+                                    "Picking Mesh IBuf",
+                                    &eval_mesh.indices,
+                                );
+                                self.mesh_cache.insert(
+                                    id,
+                                    PickingMeshEntry {
+                                        vertex_buffer: v_buf,
+                                        id_buffer: id_buf,
+                                        index_buffer: i_buf,
+                                        generation: obj.generation,
+                                        world_matrix: world_mat,
+                                    },
+                                );
+                            }
+                        }
+
+                        if let Some(entry) = self.mesh_cache.get(&id) {
+                            pass.set_vertex_buffer(0, entry.vertex_buffer.buffer.slice(..));
+                            pass.set_vertex_buffer(1, entry.id_buffer.buffer.slice(..));
                             pass.set_index_buffer(
-                                i_buf.buffer.slice(..),
+                                entry.index_buffer.buffer.slice(..),
                                 wgpu::IndexFormat::Uint32,
                             );
-                            pass.draw_indexed(0..i_buf.count as u32, 0, 0..1);
+                            pass.draw_indexed(0..entry.index_buffer.count as u32, 0, 0..1);
                         }
                     }
 
                     // 2. Render edit mode handles/elements with depth offset on top of the solid geometry
                     if let Some((&edit_id, edit_mesh)) = active_edit_mesh {
                         let world_tf = scene.world_transform(edit_id);
-                        let world_positions: Vec<Vec3> = edit_mesh
-                            .vertices
-                            .iter()
-                            .map(|v| world_tf.transform_point(v.position))
-                            .collect();
+                        let world_mat = world_tf.to_matrix().to_cols_array_2d();
+                        let obj_gen = scene.get_object(edit_id).map(|o| o.generation).unwrap_or(0);
 
-                        let cfg = PickingUniform::new(0, [width as f32, height as f32], 6.0);
-                        queue.write_buffer(&self.cfg_buffer, 0, bytes_of(&cfg));
-                        pass.set_bind_group(1, &self.cfg_bind_group, &[]);
+                        let v_len = edit_mesh.vertices.len();
+                        let e_len = edit_mesh.edges.len();
+                        let f_len = edit_mesh.faces.len();
 
-                        match selection_element {
-                            SelectionElement::Vertex => {
-                                // Instanced vertex handles
-                                let pos_arrays: Vec<[f32; 3]> =
-                                    world_positions.iter().map(|p| p.to_array()).collect();
-                                let id_arrays: Vec<u32> = (0..edit_mesh.vertices.len() as u32)
-                                    .map(|i| encode_id(ID_TYPE_VERTEX, i).unwrap_or(0))
-                                    .collect();
+                        let needs_update = match &self.edit_cache {
+                            Some(c) => {
+                                c.object_id != edit_id
+                                    || c.generation != obj_gen
+                                    || c.vert_count != v_len
+                                    || c.edge_count != e_len
+                                    || c.face_count != f_len
+                                    || c.world_matrix != world_mat
+                            }
+                            None => true,
+                        };
 
-                                if !pos_arrays.is_empty() {
-                                    let pos_buf = GpuBuffer::new_vertex_buffer(
-                                        device,
-                                        "Pick Vert Pos",
-                                        &pos_arrays,
-                                    );
-                                    let id_buf = GpuBuffer::new_vertex_buffer(
-                                        device,
-                                        "Pick Vert IDs",
-                                        &id_arrays,
-                                    );
+                        if needs_update {
+                            let world_positions: Vec<Vec3> = edit_mesh
+                                .vertices
+                                .iter()
+                                .map(|v| world_tf.transform_point(v.position))
+                                .collect();
 
-                                    pass.set_pipeline(&self.pipelines.vertex_pipeline);
-                                    pass.set_vertex_buffer(
-                                        0,
-                                        self.unit_quad_vertex_buffer.buffer.slice(..),
-                                    );
-                                    pass.set_vertex_buffer(1, pos_buf.buffer.slice(..));
-                                    pass.set_vertex_buffer(2, id_buf.buffer.slice(..));
-                                    pass.set_index_buffer(
-                                        self.unit_quad_index_buffer.buffer.slice(..),
-                                        wgpu::IndexFormat::Uint32,
-                                    );
-                                    pass.draw_indexed(0..6, 0, 0..edit_mesh.vertices.len() as u32);
+                            // Vertex picking buffers
+                            let pos_arrays: Vec<[f32; 3]> =
+                                world_positions.iter().map(|p| p.to_array()).collect();
+                            let id_arrays: Vec<u32> = (0..v_len as u32)
+                                .map(|i| encode_id(ID_TYPE_VERTEX, i).unwrap_or(0))
+                                .collect();
+                            let vertex_pos_buffer =
+                                GpuBuffer::new_vertex_buffer(device, "Pick Vert Pos", &pos_arrays);
+                            let vertex_id_buffer =
+                                GpuBuffer::new_vertex_buffer(device, "Pick Vert IDs", &id_arrays);
+
+                            // Edge picking buffers (expanded quads)
+                            let mut edge_quads = Vec::with_capacity(e_len * 4);
+                            let mut edge_indices = Vec::with_capacity(e_len * 6);
+                            for (e_idx, edge) in edit_mesh.edges.iter().enumerate() {
+                                if edge.v0 >= world_positions.len()
+                                    || edge.v1 >= world_positions.len()
+                                {
+                                    continue;
+                                }
+                                let pa = world_positions[edge.v0].to_array();
+                                let pb = world_positions[edge.v1].to_array();
+                                let eid = encode_id(ID_TYPE_EDGE, e_idx as u32).unwrap_or(0);
+
+                                let base = edge_quads.len() as u32;
+                                edge_quads.push(EdgePickingVertex {
+                                    pos_a: pa,
+                                    pos_b: pb,
+                                    quad_corner: [-1.0, -1.0],
+                                    edge_id: eid,
+                                });
+                                edge_quads.push(EdgePickingVertex {
+                                    pos_a: pa,
+                                    pos_b: pb,
+                                    quad_corner: [1.0, -1.0],
+                                    edge_id: eid,
+                                });
+                                edge_quads.push(EdgePickingVertex {
+                                    pos_a: pa,
+                                    pos_b: pb,
+                                    quad_corner: [1.0, 1.0],
+                                    edge_id: eid,
+                                });
+                                edge_quads.push(EdgePickingVertex {
+                                    pos_a: pa,
+                                    pos_b: pb,
+                                    quad_corner: [-1.0, 1.0],
+                                    edge_id: eid,
+                                });
+
+                                edge_indices.extend_from_slice(&[
+                                    base,
+                                    base + 1,
+                                    base + 2,
+                                    base,
+                                    base + 2,
+                                    base + 3,
+                                ]);
+                            }
+                            let edge_quad_buffer = GpuBuffer::new_vertex_buffer(
+                                device,
+                                "Pick Edge Quads",
+                                &edge_quads,
+                            );
+                            let edge_index_buffer = GpuBuffer::new_index_buffer(
+                                device,
+                                "Pick Edge Indices",
+                                &edge_indices,
+                            );
+
+                            // Face picking buffers
+                            let mut face_verts = Vec::new();
+                            let mut face_indices = Vec::new();
+                            for (f_idx, face) in edit_mesh.faces.iter().enumerate() {
+                                if face.vertices.len() < 3 {
+                                    continue;
+                                }
+                                let fid = encode_id(ID_TYPE_FACE, f_idx as u32).unwrap_or(0);
+                                let start_v = face_verts.len() as u32;
+
+                                for &vi in &face.vertices {
+                                    if vi < world_positions.len() {
+                                        face_verts.push(FacePickingVertex {
+                                            position: world_positions[vi].to_array(),
+                                            face_id: fid,
+                                        });
+                                    }
+                                }
+
+                                let n = face.vertices.len() as u32;
+                                for i in 1..(n - 1) {
+                                    face_indices.push(start_v);
+                                    face_indices.push(start_v + i);
+                                    face_indices.push(start_v + i + 1);
                                 }
                             }
-                            SelectionElement::Edge => {
-                                // Screen-space expanded edge quads
-                                let mut edge_quads = Vec::with_capacity(edit_mesh.edges.len() * 4);
-                                let mut edge_indices =
-                                    Vec::with_capacity(edit_mesh.edges.len() * 6);
+                            let face_vert_buffer = GpuBuffer::new_vertex_buffer(
+                                device,
+                                "Pick Face Verts",
+                                &face_verts,
+                            );
+                            let face_index_buffer = GpuBuffer::new_index_buffer(
+                                device,
+                                "Pick Face Indices",
+                                &face_indices,
+                            );
 
-                                for (e_idx, edge) in edit_mesh.edges.iter().enumerate() {
-                                    if edge.v0 >= world_positions.len()
-                                        || edge.v1 >= world_positions.len()
-                                    {
-                                        continue;
-                                    }
-                                    let pa = world_positions[edge.v0].to_array();
-                                    let pb = world_positions[edge.v1].to_array();
-                                    let eid = encode_id(ID_TYPE_EDGE, e_idx as u32).unwrap_or(0);
+                            self.edit_cache = Some(PickingEditGeometryCache {
+                                object_id: edit_id,
+                                generation: obj_gen,
+                                vert_count: v_len,
+                                edge_count: e_len,
+                                face_count: f_len,
+                                world_matrix: world_mat,
+                                vertex_pos_buffer,
+                                vertex_id_buffer,
+                                edge_quad_buffer,
+                                edge_index_buffer,
+                                face_vert_buffer,
+                                face_index_buffer,
+                            });
+                        }
 
-                                    let base = edge_quads.len() as u32;
-                                    edge_quads.push(EdgePickingVertex {
-                                        pos_a: pa,
-                                        pos_b: pb,
-                                        quad_corner: [-1.0, -1.0],
-                                        edge_id: eid,
-                                    });
-                                    edge_quads.push(EdgePickingVertex {
-                                        pos_a: pa,
-                                        pos_b: pb,
-                                        quad_corner: [1.0, -1.0],
-                                        edge_id: eid,
-                                    });
-                                    edge_quads.push(EdgePickingVertex {
-                                        pos_a: pa,
-                                        pos_b: pb,
-                                        quad_corner: [1.0, 1.0],
-                                        edge_id: eid,
-                                    });
-                                    edge_quads.push(EdgePickingVertex {
-                                        pos_a: pa,
-                                        pos_b: pb,
-                                        quad_corner: [-1.0, 1.0],
-                                        edge_id: eid,
-                                    });
-
-                                    edge_indices.extend_from_slice(&[
-                                        base,
-                                        base + 1,
-                                        base + 2,
-                                        base,
-                                        base + 2,
-                                        base + 3,
-                                    ]);
-                                }
-
-                                if !edge_quads.is_empty() {
-                                    let v_buf = GpuBuffer::new_vertex_buffer(
-                                        device,
-                                        "Pick Edge Quads",
-                                        &edge_quads,
-                                    );
-                                    let i_buf = GpuBuffer::new_index_buffer(
-                                        device,
-                                        "Pick Edge Indices",
-                                        &edge_indices,
-                                    );
-                                    pass.set_pipeline(&self.pipelines.edge_pipeline);
-                                    pass.set_vertex_buffer(0, v_buf.buffer.slice(..));
-                                    pass.set_index_buffer(
-                                        i_buf.buffer.slice(..),
-                                        wgpu::IndexFormat::Uint32,
-                                    );
-                                    pass.draw_indexed(0..i_buf.count as u32, 0, 0..1);
-                                }
-                            }
-                            SelectionElement::Face => {
-                                // Triangulated faces encoding parent face_id
-                                let mut face_verts = Vec::new();
-                                let mut face_indices = Vec::new();
-
-                                for (f_idx, face) in edit_mesh.faces.iter().enumerate() {
-                                    if face.vertices.len() < 3 {
-                                        continue;
-                                    }
-                                    let fid = encode_id(ID_TYPE_FACE, f_idx as u32).unwrap_or(0);
-                                    let start_v = face_verts.len() as u32;
-
-                                    for &v_idx in &face.vertices {
-                                        if v_idx < world_positions.len() {
-                                            face_verts.push(FacePickingVertex {
-                                                position: world_positions[v_idx].to_array(),
-                                                face_id: fid,
-                                            });
-                                        }
-                                    }
-
-                                    let n = face.vertices.len() as u32;
-                                    for i in 1..(n - 1) {
-                                        face_indices.push(start_v);
-                                        face_indices.push(start_v + i);
-                                        face_indices.push(start_v + i + 1);
+                        // Draw from cached picking buffers
+                        if let Some(cache) = &self.edit_cache {
+                            match selection_element {
+                                SelectionElement::Vertex => {
+                                    if cache.vert_count > 0 {
+                                        pass.set_pipeline(&self.pipelines.vertex_pipeline);
+                                        pass.set_vertex_buffer(
+                                            0,
+                                            self.unit_quad_vertex_buffer.buffer.slice(..),
+                                        );
+                                        pass.set_vertex_buffer(
+                                            1,
+                                            cache.vertex_pos_buffer.buffer.slice(..),
+                                        );
+                                        pass.set_vertex_buffer(
+                                            2,
+                                            cache.vertex_id_buffer.buffer.slice(..),
+                                        );
+                                        pass.set_index_buffer(
+                                            self.unit_quad_index_buffer.buffer.slice(..),
+                                            wgpu::IndexFormat::Uint32,
+                                        );
+                                        pass.draw_indexed(0..6, 0, 0..cache.vert_count as u32);
                                     }
                                 }
-
-                                if !face_verts.is_empty() {
-                                    let v_buf = GpuBuffer::new_vertex_buffer(
-                                        device,
-                                        "Pick Face Verts",
-                                        &face_verts,
-                                    );
-                                    let i_buf = GpuBuffer::new_index_buffer(
-                                        device,
-                                        "Pick Face Indices",
-                                        &face_indices,
-                                    );
-                                    pass.set_pipeline(&self.pipelines.face_pipeline);
-                                    pass.set_vertex_buffer(0, v_buf.buffer.slice(..));
-                                    pass.set_index_buffer(
-                                        i_buf.buffer.slice(..),
-                                        wgpu::IndexFormat::Uint32,
-                                    );
-                                    pass.draw_indexed(0..i_buf.count as u32, 0, 0..1);
+                                SelectionElement::Edge => {
+                                    if cache.edge_index_buffer.count > 0 {
+                                        pass.set_pipeline(&self.pipelines.edge_pipeline);
+                                        pass.set_vertex_buffer(
+                                            0,
+                                            cache.edge_quad_buffer.buffer.slice(..),
+                                        );
+                                        pass.set_index_buffer(
+                                            cache.edge_index_buffer.buffer.slice(..),
+                                            wgpu::IndexFormat::Uint32,
+                                        );
+                                        pass.draw_indexed(
+                                            0..cache.edge_index_buffer.count as u32,
+                                            0,
+                                            0..1,
+                                        );
+                                    }
+                                }
+                                SelectionElement::Face => {
+                                    if cache.face_index_buffer.count > 0 {
+                                        pass.set_pipeline(&self.pipelines.face_pipeline);
+                                        pass.set_vertex_buffer(
+                                            0,
+                                            cache.face_vert_buffer.buffer.slice(..),
+                                        );
+                                        pass.set_index_buffer(
+                                            cache.face_index_buffer.buffer.slice(..),
+                                            wgpu::IndexFormat::Uint32,
+                                        );
+                                        pass.draw_indexed(
+                                            0..cache.face_index_buffer.count as u32,
+                                            0,
+                                            0..1,
+                                        );
+                                    }
                                 }
                             }
                         }
+                    } else if self.edit_cache.is_some() {
+                        self.edit_cache = None;
                     }
                 }
             }
@@ -1270,8 +1459,27 @@ mod tests {
         let s0_again = pool.acquire_idle_slot().unwrap();
         assert_eq!(s0_again, 0);
 
-        // Invalidate older epoch
+        // Invalidate older epoch - since slot 1 is CopyPending, it becomes InvalidatedPending
+        // to protect against premature buffer reuse while map_async is active.
         pool.invalidate_older_than(11);
+        assert_eq!(pool.slots[1].status, StagingSlotStatus::InvalidatedPending);
+
+        // When GPU mapping completes, cleanup_ready_slots unmaps and returns it to Idle safely.
+        let ready_flag = Arc::clone(&pool.slots[1].map_ready);
+        pool.slots[1]
+            .buffer
+            .slice(0..4)
+            .map_async(wgpu::MapMode::Read, move |res| {
+                if res.is_ok() {
+                    ready_flag.store(true, Ordering::SeqCst);
+                }
+            });
+        let _ = ctx.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        assert!(pool.slots[1].map_ready.load(Ordering::SeqCst));
+        pool.cleanup_ready_slots();
         assert_eq!(pool.slots[1].status, StagingSlotStatus::Idle);
     }
 }
