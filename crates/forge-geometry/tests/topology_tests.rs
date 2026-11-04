@@ -1057,3 +1057,50 @@ fn test_inset_face() {
     assert_eq!(report.boundary_loop_count, 1);
     assert_eq!(report.euler_characteristic, 1);
 }
+
+#[test]
+fn test_bevel_edge() {
+    let positions = vec![
+        Vec3::new(0.0, 0.0, 0.0), // 0
+        Vec3::new(2.0, 0.0, 0.0), // 1
+        Vec3::new(2.0, 2.0, 0.0), // 2
+        Vec3::new(0.0, 2.0, 0.0), // 3
+    ];
+    let faces = vec![
+        vec![0, 1, 2], // Face 0
+        vec![0, 2, 3], // Face 1
+    ];
+    let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
+
+    // Find the internal edge between vertex 0 and vertex 2
+    let internal_edge = mesh
+        .edges()
+        .find(|&eh| {
+            let (v0, v1) = mesh.edge_vertices(eh).unwrap();
+            (v0.index() == 0 && v1.index() == 2) || (v0.index() == 2 && v1.index() == 0)
+        })
+        .expect("internal edge between 0 and 2");
+
+    let res = mesh
+        .bevel_edge(internal_edge, 0.2)
+        .expect("bevel edge failed");
+    assert_eq!(res.original_edge(), internal_edge);
+    assert!(mesh.is_valid_face(res.bevel_face()));
+    assert_eq!(res.face(), res.bevel_face());
+    assert_eq!(*res, res.bevel_face());
+    assert_eq!(res.new_vertices().len(), 4);
+    assert_eq!(res.new_edges().len(), 4);
+    assert_eq!(res.new_half_edges().len(), 8);
+
+    assert_eq!(mesh.num_vertices(), 6);
+    assert_eq!(mesh.num_edges(), 8);
+    assert_eq!(mesh.num_faces(), 3);
+    assert_eq!(mesh.num_half_edges(), 16);
+
+    let report = mesh.validate_topology();
+    assert!(report.is_valid);
+    assert!(report.is_manifold);
+    assert_eq!(report.boundary_loop_count, 1);
+    assert_eq!(report.euler_characteristic, 1);
+    assert!(mesh.check_invariants().is_ok());
+}

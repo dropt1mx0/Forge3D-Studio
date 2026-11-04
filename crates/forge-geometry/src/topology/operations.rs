@@ -529,6 +529,77 @@ impl From<InsetFaceResult> for FaceHandle {
     }
 }
 
+/// The typed result of a successful `bevel_edge` topological operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BevelEdgeResult {
+    /// The original edge handle that was beveled and removed.
+    pub original_edge: EdgeHandle,
+    /// The newly created bevel (chamfer) face handle.
+    pub bevel_face: FaceHandle,
+    /// The newly created vertex handles (length = 4: [v_a0, v_b0, v_b1, v_a1]).
+    pub new_vertices: Vec<VertexHandle>,
+    /// The newly created edge handles (length = 4: [e_0_new, e_1_new, e_a, e_b]).
+    pub new_edges: Vec<EdgeHandle>,
+    /// The newly created half-edge handles (length = 8).
+    pub new_half_edges: Vec<HalfEdgeHandle>,
+    /// The handles of the two affected adjacent faces (f0, f1).
+    pub affected_faces: (FaceHandle, FaceHandle),
+}
+
+impl BevelEdgeResult {
+    #[inline]
+    pub fn original_edge(&self) -> EdgeHandle {
+        self.original_edge
+    }
+
+    #[inline]
+    pub fn bevel_face(&self) -> FaceHandle {
+        self.bevel_face
+    }
+
+    #[inline]
+    pub fn face(&self) -> FaceHandle {
+        self.bevel_face
+    }
+
+    #[inline]
+    pub fn new_vertices(&self) -> &[VertexHandle] {
+        &self.new_vertices
+    }
+
+    #[inline]
+    pub fn new_edges(&self) -> &[EdgeHandle] {
+        &self.new_edges
+    }
+
+    #[inline]
+    pub fn new_half_edges(&self) -> &[HalfEdgeHandle] {
+        &self.new_half_edges
+    }
+
+    #[inline]
+    pub fn affected_faces(&self) -> (FaceHandle, FaceHandle) {
+        self.affected_faces
+    }
+}
+
+impl std::ops::Deref for BevelEdgeResult {
+    type Target = FaceHandle;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.bevel_face
+    }
+}
+
+impl From<BevelEdgeResult> for FaceHandle {
+    #[inline]
+    fn from(res: BevelEdgeResult) -> Self {
+        res.bevel_face
+    }
+}
+
 impl HalfEdgeMesh {
     /// Inserts a new vertex along edge `e` at linear interpolation parameter `t` in (0, 1).
     ///
@@ -2233,6 +2304,573 @@ impl HalfEdgeMesh {
             new_edges,
             new_side_faces: side_faces[1..].to_vec(),
             new_half_edges,
+        })
+    }
+
+    /// Bevels one internal edge by replacing it with a narrow chamfer quad face.
+    ///
+    /// The edge must be shared by exactly two valid triangular or convex planar polygon faces,
+    /// and its endpoints must be incident only to these two faces.
+    /// Transactionally rolls back if an invariant is violated.
+    pub fn bevel_edge(
+        &mut self,
+        edge: EdgeHandle,
+        width: f32,
+    ) -> Result<BevelEdgeResult, TopologyError> {
+        // 1. Pre-validation of arguments and handles
+        if !self.is_valid_edge(edge) {
+            return Err(TopologyError::InvalidEdge(edge));
+        }
+
+        if !width.is_finite() || width <= 0.0 {
+            return Err(TopologyError::InvalidOperation(
+                "Bevel width must be finite and strictly positive".into(),
+            ));
+        }
+
+        if self.is_edge_boundary(edge) {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot bevel a boundary edge".into(),
+            ));
+        }
+
+        let h0 = self.edge(edge).unwrap().half_edge;
+        let h1 = self.half_edge(h0).unwrap().twin;
+        let f0_opt = self.half_edge(h0).unwrap().face;
+        let f1_opt = self.half_edge(h1).unwrap().face;
+
+        let (f0, f1) = match (f0_opt, f1_opt) {
+            (Some(a), Some(b)) => (a, b),
+            _ => {
+                return Err(TopologyError::InvalidOperation(
+                    "Cannot bevel edge: missing incident face on internal edge".into(),
+                ));
+            }
+        };
+
+        if f0 == f1 {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot bevel edge shared by the same face".into(),
+            ));
+        }
+
+        if !self.is_valid_face(f0) {
+            return Err(TopologyError::InvalidFace(f0));
+        }
+        if !self.is_valid_face(f1) {
+            return Err(TopologyError::InvalidFace(f1));
+        }
+
+        let v_a = self.half_edge(h0).unwrap().origin;
+        let v_b = self.half_edge(h1).unwrap().origin;
+
+        if v_a == v_b {
+            return Err(TopologyError::Degenerate(
+                "Cannot bevel edge with identical endpoints".into(),
+            ));
+        }
+
+        if !self.is_valid_vertex(v_a) {
+            return Err(TopologyError::InvalidVertex(v_a));
+        }
+        if !self.is_valid_vertex(v_b) {
+            return Err(TopologyError::InvalidVertex(v_b));
+        }
+
+        // Check endpoint face valences (only f0 and f1 allowed)
+        let faces_a = self.adjacent_faces(v_a);
+        let faces_b = self.adjacent_faces(v_b);
+        if faces_a.len() != 2 || !faces_a.contains(&f0) || !faces_a.contains(&f1) {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot bevel edge: endpoint A is incident to other faces (multi-edge vertex beveling is unsupported)".into(),
+            ));
+        }
+        if faces_b.len() != 2 || !faces_b.contains(&f0) || !faces_b.contains(&f1) {
+            return Err(TopologyError::InvalidOperation(
+                "Cannot bevel edge: endpoint B is incident to other faces (multi-edge vertex beveling is unsupported)".into(),
+            ));
+        }
+
+        // Face loops
+        let loop0 = self.face_loop_safe(f0)?;
+        let loop1 = self.face_loop_safe(f1)?;
+        let n0 = loop0.len();
+        let n1 = loop1.len();
+
+        if n0 < 3 {
+            return Err(TopologyError::Degenerate(format!(
+                "Face {f0} has fewer than 3 vertices ({n0})"
+            )));
+        }
+        if n1 < 3 {
+            return Err(TopologyError::Degenerate(format!(
+                "Face {f1} has fewer than 3 vertices ({n1})"
+            )));
+        }
+
+        // Half-edges adjacent to h0 and h1
+        let h0_next = self.half_edge(h0).unwrap().next;
+        let h0_prev = self.half_edge(h0).unwrap().prev;
+        let h1_next = self.half_edge(h1).unwrap().next;
+        let h1_prev = self.half_edge(h1).unwrap().prev;
+
+        let b0_a = self.half_edge(h0_prev).unwrap().twin;
+        let b1_a = self.half_edge(h1_next).unwrap().twin;
+        let b0_b = self.half_edge(h0_next).unwrap().twin;
+        let b1_b = self.half_edge(h1_prev).unwrap().twin;
+
+        if self.half_edge(b0_a).unwrap().face.is_some()
+            || self.half_edge(b1_a).unwrap().face.is_some()
+            || self.half_edge(b0_b).unwrap().face.is_some()
+            || self.half_edge(b1_b).unwrap().face.is_some()
+        {
+            return Err(TopologyError::InvalidOperation(
+                "Endpoints have non-boundary exterior edges (multi-edge vertex beveling is unsupported)".into(),
+            ));
+        }
+
+        if self.half_edge(b1_a).unwrap().next != b0_a || self.half_edge(b0_a).unwrap().prev != b1_a
+        {
+            return Err(TopologyError::InvalidOperation(
+                "Unexpected boundary connectivity at endpoint A".into(),
+            ));
+        }
+        if self.half_edge(b0_b).unwrap().next != b1_b || self.half_edge(b1_b).unwrap().prev != b0_b
+        {
+            return Err(TopologyError::InvalidOperation(
+                "Unexpected boundary connectivity at endpoint B".into(),
+            ));
+        }
+
+        // 2. Geometric validation
+        let p_a = self.vertex(v_a).unwrap().position;
+        let p_b = self.vertex(v_b).unwrap().position;
+        let edge_vec = p_b - p_a;
+        let edge_len = edge_vec.length();
+        if edge_len < 1e-6 {
+            return Err(TopologyError::Degenerate(
+                "Cannot bevel zero-length edge".into(),
+            ));
+        }
+        let tangent = edge_vec / edge_len;
+
+        let norm_0 = self.face_normal(f0);
+        let norm_1 = self.face_normal(f1);
+        if norm_0.length_squared() < 1e-12 || norm_1.length_squared() < 1e-12 {
+            return Err(TopologyError::Degenerate(
+                "Adjacent face has near-zero normal or degenerate geometry".into(),
+            ));
+        }
+
+        let area_0 = self.face_area(f0);
+        let area_1 = self.face_area(f1);
+        if area_0 <= 1e-8 || area_1 <= 1e-8 {
+            return Err(TopologyError::Degenerate(
+                "Cannot bevel edge with near-zero area adjacent face".into(),
+            ));
+        }
+
+        // Planarity and convexity check for F0
+        let mut pos_0 = Vec::with_capacity(n0);
+        for &h in &loop0 {
+            let v = self.half_edge(h).unwrap().origin;
+            pos_0.push(self.vertex(v).unwrap().position);
+        }
+        let p0_ref = pos_0[0];
+        for &pos in &pos_0[1..] {
+            if ((pos - p0_ref).dot(norm_0)).abs() > 1e-3 {
+                return Err(TopologyError::InvalidOperation(
+                    "Adjacent face 0 is not planar".into(),
+                ));
+            }
+        }
+        let mut tangents_0 = Vec::with_capacity(n0);
+        for i in 0..n0 {
+            let next_i = (i + 1) % n0;
+            let ev = pos_0[next_i] - pos_0[i];
+            let elen = ev.length();
+            if elen < 1e-6 {
+                return Err(TopologyError::Degenerate(
+                    "Face 0 contains degenerate edge".into(),
+                ));
+            }
+            tangents_0.push(ev / elen);
+        }
+        for i in 0..n0 {
+            let prev_i = (i + n0 - 1) % n0;
+            let turn = tangents_0[prev_i].cross(tangents_0[i]).dot(norm_0);
+            if turn <= 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Face 0 is not strictly convex".into(),
+                ));
+            }
+        }
+
+        // Planarity and convexity check for F1
+        let mut pos_1 = Vec::with_capacity(n1);
+        for &h in &loop1 {
+            let v = self.half_edge(h).unwrap().origin;
+            pos_1.push(self.vertex(v).unwrap().position);
+        }
+        let p1_ref = pos_1[0];
+        for &pos in &pos_1[1..] {
+            if ((pos - p1_ref).dot(norm_1)).abs() > 1e-3 {
+                return Err(TopologyError::InvalidOperation(
+                    "Adjacent face 1 is not planar".into(),
+                ));
+            }
+        }
+        let mut tangents_1 = Vec::with_capacity(n1);
+        for i in 0..n1 {
+            let next_i = (i + 1) % n1;
+            let ev = pos_1[next_i] - pos_1[i];
+            let elen = ev.length();
+            if elen < 1e-6 {
+                return Err(TopologyError::Degenerate(
+                    "Face 1 contains degenerate edge".into(),
+                ));
+            }
+            tangents_1.push(ev / elen);
+        }
+        for i in 0..n1 {
+            let prev_i = (i + n1 - 1) % n1;
+            let turn = tangents_1[prev_i].cross(tangents_1[i]).dot(norm_1);
+            if turn <= 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Face 1 is not strictly convex".into(),
+                ));
+            }
+        }
+
+        // Compute inward normals and offset positions
+        let m_0 = norm_0.cross(tangent).normalize_or_zero();
+        let m_1 = norm_1.cross(-tangent).normalize_or_zero();
+        let d = width * 0.5;
+
+        let p_a0 = p_a + m_0 * d;
+        let p_b0 = p_b + m_0 * d;
+        let p_b1 = p_b + m_1 * d;
+        let p_a1 = p_a + m_1 * d;
+
+        if !p_a0.x.is_finite()
+            || !p_a0.y.is_finite()
+            || !p_a0.z.is_finite()
+            || !p_b0.x.is_finite()
+            || !p_b0.y.is_finite()
+            || !p_b0.z.is_finite()
+            || !p_b1.x.is_finite()
+            || !p_b1.y.is_finite()
+            || !p_b1.z.is_finite()
+            || !p_a1.x.is_finite()
+            || !p_a1.y.is_finite()
+            || !p_a1.z.is_finite()
+        {
+            return Err(TopologyError::Degenerate(
+                "Generated bevel vertex positions contain non-finite coordinates".into(),
+            ));
+        }
+
+        // Bevel face area check
+        let tri1_area = 0.5 * (p_a0 - p_b0).cross(p_a1 - p_b0).length();
+        let tri2_area = 0.5 * (p_a1 - p_b0).cross(p_b1 - p_b0).length();
+        let bev_area = tri1_area + tri2_area;
+        if bev_area <= 1e-6 {
+            return Err(TopologyError::Degenerate(
+                "Generated bevel face has near-zero area".into(),
+            ));
+        }
+
+        // Validate modified F0
+        let mut new_pos_0 = pos_0.clone();
+        for (i, &h) in loop0.iter().enumerate() {
+            let v = self.half_edge(h).unwrap().origin;
+            if v == v_a {
+                new_pos_0[i] = p_a0;
+            } else if v == v_b {
+                new_pos_0[i] = p_b0;
+            }
+        }
+        let mut area_vec_0 = Vec3::ZERO;
+        for i in 0..n0 {
+            let next_i = (i + 1) % n0;
+            area_vec_0 += new_pos_0[i].cross(new_pos_0[next_i]);
+        }
+        let new_area_0 = 0.5 * area_vec_0.dot(norm_0);
+        if new_area_0 <= 1e-6 {
+            return Err(TopologyError::InvalidOperation(
+                "Bevel width too large: adjacent face 0 collapsed or inverted".into(),
+            ));
+        }
+        let mut new_t_0 = Vec::with_capacity(n0);
+        for i in 0..n0 {
+            let next_i = (i + 1) % n0;
+            let ev = new_pos_0[next_i] - new_pos_0[i];
+            let elen = ev.length();
+            if elen < 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Bevel width too large: edge in face 0 collapsed".into(),
+                ));
+            }
+            new_t_0.push(ev / elen);
+        }
+        for i in 0..n0 {
+            let prev_i = (i + n0 - 1) % n0;
+            let turn = new_t_0[prev_i].cross(new_t_0[i]).dot(norm_0);
+            if turn <= 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Bevel width too large: adjacent face 0 inverted or non-convex".into(),
+                ));
+            }
+        }
+
+        // Validate modified F1
+        let mut new_pos_1 = pos_1.clone();
+        for (i, &h) in loop1.iter().enumerate() {
+            let v = self.half_edge(h).unwrap().origin;
+            if v == v_b {
+                new_pos_1[i] = p_b1;
+            } else if v == v_a {
+                new_pos_1[i] = p_a1;
+            }
+        }
+        let mut area_vec_1 = Vec3::ZERO;
+        for i in 0..n1 {
+            let next_i = (i + 1) % n1;
+            area_vec_1 += new_pos_1[i].cross(new_pos_1[next_i]);
+        }
+        let new_area_1 = 0.5 * area_vec_1.dot(norm_1);
+        if new_area_1 <= 1e-6 {
+            return Err(TopologyError::InvalidOperation(
+                "Bevel width too large: adjacent face 1 collapsed or inverted".into(),
+            ));
+        }
+        let mut new_t_1 = Vec::with_capacity(n1);
+        for i in 0..n1 {
+            let next_i = (i + 1) % n1;
+            let ev = new_pos_1[next_i] - new_pos_1[i];
+            let elen = ev.length();
+            if elen < 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Bevel width too large: edge in face 1 collapsed".into(),
+                ));
+            }
+            new_t_1.push(ev / elen);
+        }
+        for i in 0..n1 {
+            let prev_i = (i + n1 - 1) % n1;
+            let turn = new_t_1[prev_i].cross(new_t_1[i]).dot(norm_1);
+            if turn <= 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Bevel width too large: adjacent face 1 inverted or non-convex".into(),
+                ));
+            }
+        }
+
+        // Snapshot state for atomic rollback
+        let backup = self.clone();
+
+        // 3. Attribute collection before mutations
+        let (v_a_uv, v_a_color, v_a_normal) = {
+            let va = self.vertex(v_a).unwrap();
+            (va.uv, va.color, va.normal)
+        };
+        let (v_b_uv, v_b_color, v_b_normal) = {
+            let vb = self.vertex(v_b).unwrap();
+            (vb.uv, vb.color, vb.normal)
+        };
+
+        let h0_uv = self.half_edge(h0).unwrap().uv;
+        let h0_normal = self.half_edge(h0).unwrap().normal;
+        let h1_uv = self.half_edge(h1).unwrap().uv;
+        let h1_normal = self.half_edge(h1).unwrap().normal;
+        let h0_next_uv = self.half_edge(h0_next).unwrap().uv;
+        let h1_next_uv = self.half_edge(h1_next).unwrap().uv;
+        let orig_mat_id = self.face(f0).unwrap().material_id;
+
+        // 4. Allocate 4 new vertices
+        let v_a0 = self.add_vertex(p_a0);
+        let va0_data = self.vertex_mut(v_a0).unwrap();
+        va0_data.uv = h0_uv.or(v_a_uv);
+        va0_data.color = v_a_color;
+        va0_data.normal = v_a_normal.or(Some(norm_0));
+
+        let v_b0 = self.add_vertex(p_b0);
+        let vb0_data = self.vertex_mut(v_b0).unwrap();
+        vb0_data.uv = h0_next_uv.or(v_b_uv);
+        vb0_data.color = v_b_color;
+        vb0_data.normal = v_b_normal.or(Some(norm_0));
+
+        let v_b1 = self.add_vertex(p_b1);
+        let vb1_data = self.vertex_mut(v_b1).unwrap();
+        vb1_data.uv = h1_uv.or(v_b_uv);
+        vb1_data.color = v_b_color;
+        vb1_data.normal = v_b_normal.or(Some(norm_1));
+
+        let v_a1 = self.add_vertex(p_a1);
+        let va1_data = self.vertex_mut(v_a1).unwrap();
+        va1_data.uv = h1_next_uv.or(v_a_uv);
+        va1_data.color = v_a_color;
+        va1_data.normal = v_a_normal.or(Some(norm_1));
+
+        // 5. Allocate bevel face
+        let dummy_he = HalfEdgeHandle::new(u32::MAX, 0);
+        let f_bev = self.add_face(dummy_he);
+        self.face_mut(f_bev).unwrap().material_id = orig_mat_id;
+
+        // 6. Allocate 4 new edges
+        let e_0_new = self.add_edge(dummy_he);
+        let e_1_new = self.add_edge(dummy_he);
+        let e_a = self.add_edge(dummy_he);
+        let e_b = self.add_edge(dummy_he);
+
+        // 7. Allocate 8 new half-edges
+        let h0_new = self.add_half_edge(v_a0, e_0_new, Some(f0));
+        let t0_bev = self.add_half_edge(v_b0, e_0_new, Some(f_bev));
+
+        let h1_new = self.add_half_edge(v_b1, e_1_new, Some(f1));
+        let t1_bev = self.add_half_edge(v_a1, e_1_new, Some(f_bev));
+
+        let ha_bev = self.add_half_edge(v_a0, e_a, Some(f_bev));
+        let ha_bnd = self.add_half_edge(v_a1, e_a, None);
+
+        let hb_bev = self.add_half_edge(v_b1, e_b, Some(f_bev));
+        let hb_bnd = self.add_half_edge(v_b0, e_b, None);
+
+        // Connect twins and edge half-edges
+        self.half_edge_mut(h0_new).unwrap().twin = t0_bev;
+        self.half_edge_mut(t0_bev).unwrap().twin = h0_new;
+        self.edge_mut(e_0_new).unwrap().half_edge = h0_new;
+
+        self.half_edge_mut(h1_new).unwrap().twin = t1_bev;
+        self.half_edge_mut(t1_bev).unwrap().twin = h1_new;
+        self.edge_mut(e_1_new).unwrap().half_edge = h1_new;
+
+        self.half_edge_mut(ha_bev).unwrap().twin = ha_bnd;
+        self.half_edge_mut(ha_bnd).unwrap().twin = ha_bev;
+        self.edge_mut(e_a).unwrap().half_edge = ha_bev;
+
+        self.half_edge_mut(hb_bev).unwrap().twin = hb_bnd;
+        self.half_edge_mut(hb_bnd).unwrap().twin = hb_bev;
+        self.edge_mut(e_b).unwrap().half_edge = hb_bev;
+
+        // 8. Wire Face 0 cycle
+        self.half_edge_mut(h0_prev).unwrap().next = h0_new;
+        self.half_edge_mut(h0_next).unwrap().prev = h0_new;
+        self.half_edge_mut(h0_new).unwrap().prev = h0_prev;
+        self.half_edge_mut(h0_new).unwrap().next = h0_next;
+        self.half_edge_mut(h0_next).unwrap().origin = v_b0;
+        self.half_edge_mut(h0_new).unwrap().uv = h0_uv;
+        self.half_edge_mut(h0_new).unwrap().normal = h0_normal.or(Some(norm_0));
+        self.face_mut(f0).unwrap().half_edge = h0_new;
+
+        // 9. Wire Face 1 cycle
+        self.half_edge_mut(h1_prev).unwrap().next = h1_new;
+        self.half_edge_mut(h1_next).unwrap().prev = h1_new;
+        self.half_edge_mut(h1_new).unwrap().prev = h1_prev;
+        self.half_edge_mut(h1_new).unwrap().next = h1_next;
+        self.half_edge_mut(h1_next).unwrap().origin = v_a1;
+        self.half_edge_mut(h1_new).unwrap().uv = h1_uv;
+        self.half_edge_mut(h1_new).unwrap().normal = h1_normal.or(Some(norm_1));
+        self.face_mut(f1).unwrap().half_edge = h1_new;
+
+        // 10. Wire Bevel Face cycle: t0_bev -> ha_bev -> t1_bev -> hb_bev -> t0_bev
+        self.half_edge_mut(t0_bev).unwrap().next = ha_bev;
+        self.half_edge_mut(t0_bev).unwrap().prev = hb_bev;
+
+        self.half_edge_mut(ha_bev).unwrap().next = t1_bev;
+        self.half_edge_mut(ha_bev).unwrap().prev = t0_bev;
+
+        self.half_edge_mut(t1_bev).unwrap().next = hb_bev;
+        self.half_edge_mut(t1_bev).unwrap().prev = ha_bev;
+
+        self.half_edge_mut(hb_bev).unwrap().next = t0_bev;
+        self.half_edge_mut(hb_bev).unwrap().prev = t1_bev;
+
+        self.face_mut(f_bev).unwrap().half_edge = t0_bev;
+
+        // Recalculate face normal for bevel face
+        let norm_bev = self.face_normal(f_bev);
+        self.face_mut(f_bev).unwrap().normal = Some(norm_bev);
+
+        // Corner attributes for bevel face
+        self.half_edge_mut(t0_bev).unwrap().uv = h0_next_uv.or(v_b_uv);
+        self.half_edge_mut(t0_bev).unwrap().normal = Some(norm_bev);
+
+        self.half_edge_mut(ha_bev).unwrap().uv = h0_uv.or(v_a_uv);
+        self.half_edge_mut(ha_bev).unwrap().normal = Some(norm_bev);
+
+        self.half_edge_mut(t1_bev).unwrap().uv = h1_next_uv.or(v_a_uv);
+        self.half_edge_mut(t1_bev).unwrap().normal = Some(norm_bev);
+
+        self.half_edge_mut(hb_bev).unwrap().uv = h1_uv.or(v_b_uv);
+        self.half_edge_mut(hb_bev).unwrap().normal = Some(norm_bev);
+
+        // 11. Wire Boundary half-edges
+        // At endpoint A: b1_a -> ha_bnd -> b0_a
+        self.half_edge_mut(b0_a).unwrap().origin = v_a0;
+        self.half_edge_mut(b1_a).unwrap().next = ha_bnd;
+        self.half_edge_mut(ha_bnd).unwrap().prev = b1_a;
+        self.half_edge_mut(ha_bnd).unwrap().next = b0_a;
+        self.half_edge_mut(b0_a).unwrap().prev = ha_bnd;
+
+        // At endpoint B: b0_b -> hb_bnd -> b1_b
+        self.half_edge_mut(b1_b).unwrap().origin = v_b1;
+        self.half_edge_mut(b0_b).unwrap().next = hb_bnd;
+        self.half_edge_mut(hb_bnd).unwrap().prev = b0_b;
+        self.half_edge_mut(hb_bnd).unwrap().next = b1_b;
+        self.half_edge_mut(b1_b).unwrap().prev = hb_bnd;
+
+        // 12. Update vertex outgoing half-edges
+        self.vertex_mut(v_a0).unwrap().half_edge = Some(h0_new);
+        self.vertex_mut(v_b0).unwrap().half_edge = Some(t0_bev);
+        self.vertex_mut(v_b1).unwrap().half_edge = Some(h1_new);
+        self.vertex_mut(v_a1).unwrap().half_edge = Some(t1_bev);
+
+        // 13. Free original edge, half-edges, and endpoints
+        if let Err(e) = self.free_half_edge(h0) {
+            *self = backup;
+            return Err(e);
+        }
+        if let Err(e) = self.free_half_edge(h1) {
+            *self = backup;
+            return Err(e);
+        }
+        if let Err(e) = self.free_edge(edge) {
+            *self = backup;
+            return Err(e);
+        }
+        if let Err(e) = self.free_vertex(v_a) {
+            *self = backup;
+            return Err(e);
+        }
+        if let Err(e) = self.free_vertex(v_b) {
+            *self = backup;
+            return Err(e);
+        }
+
+        // 14. Recalculate face normals for F0 and F1
+        let norm_f0 = self.face_normal(f0);
+        self.face_mut(f0).unwrap().normal = Some(norm_f0);
+
+        let norm_f1 = self.face_normal(f1);
+        self.face_mut(f1).unwrap().normal = Some(norm_f1);
+
+        // 15. Invariant verification
+        if let Err(e) = self.check_invariants() {
+            *self = backup;
+            return Err(e);
+        }
+
+        // 16. Construct result
+        Ok(BevelEdgeResult {
+            original_edge: edge,
+            bevel_face: f_bev,
+            new_vertices: vec![v_a0, v_b0, v_b1, v_a1],
+            new_edges: vec![e_0_new, e_1_new, e_a, e_b],
+            new_half_edges: vec![
+                h0_new, t0_bev, h1_new, t1_bev, ha_bev, ha_bnd, hb_bev, hb_bnd,
+            ],
+            affected_faces: (f0, f1),
         })
     }
 
@@ -5802,6 +6440,363 @@ mod tests {
         assert!(top_report.is_valid);
         assert!(top_report.is_manifold);
         assert_eq!(top_report.boundary_loop_count, 1); // open sheet keeps outer boundary
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // =========================================================================
+    // Bevel Edge Tests (Phase 6.14)
+    // =========================================================================
+
+    // Bevel Edge Test 1: Beveling an internal edge between two triangles
+    #[test]
+    fn test_bevel_1_two_triangles() {
+        let mut mesh = make_two_triangles();
+        let e_mid = find_edge_between(&mesh, 0, 2);
+
+        let res = mesh
+            .bevel_edge(e_mid, 0.2)
+            .expect("bevel edge between two triangles");
+        assert_eq!(res.original_edge(), e_mid);
+        assert!(mesh.is_valid_face(res.bevel_face()));
+        assert_eq!(res.face(), res.bevel_face());
+        assert_eq!(*res, res.bevel_face());
+        assert_eq!(FaceHandle::from(res.clone()), res.bevel_face());
+        assert_eq!(res.new_vertices().len(), 4);
+        assert_eq!(res.new_edges().len(), 4);
+        assert_eq!(res.new_half_edges().len(), 8);
+
+        let (f0, f1) = res.affected_faces();
+        assert!(mesh.is_valid_face(f0));
+        assert!(mesh.is_valid_face(f1));
+        assert_ne!(f0, f1);
+        assert_ne!(f0, res.bevel_face());
+        assert_ne!(f1, res.bevel_face());
+
+        assert_eq!(mesh.num_faces(), 3);
+        assert_eq!(mesh.num_vertices(), 6);
+        assert_eq!(mesh.num_edges(), 8);
+        assert_eq!(mesh.num_half_edges(), 16);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Bevel Edge Test 2: Beveling an edge between two convex polygon faces (quads)
+    #[test]
+    fn test_bevel_2_two_quads() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let res = mesh
+            .bevel_edge(e_mid, 0.2)
+            .expect("bevel edge between two quads");
+        assert_eq!(res.original_edge(), e_mid);
+        assert!(mesh.is_valid_face(res.bevel_face()));
+        assert_eq!(res.new_vertices().len(), 4);
+        assert_eq!(res.new_edges().len(), 4);
+        assert_eq!(res.new_half_edges().len(), 8);
+
+        assert_eq!(mesh.num_faces(), 3);
+        assert_eq!(mesh.num_vertices(), 8);
+        assert_eq!(mesh.num_edges(), 10);
+        assert_eq!(mesh.num_half_edges(), 20);
+
+        // All 3 faces must have 4 vertices
+        assert_eq!(mesh.face_vertices(res.bevel_face()).len(), 4);
+        assert_eq!(mesh.face_vertices(res.affected_faces().0).len(), 4);
+        assert_eq!(mesh.face_vertices(res.affected_faces().1).len(), 4);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Bevel Edge Test 3: Correct bevel face geometry
+    #[test]
+    fn test_bevel_3_correct_geometry() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        let res = mesh.bevel_edge(e_mid, 0.2).unwrap();
+        let bev_f = res.bevel_face();
+
+        // Check bevel face area: edge length = 1.0, width = 0.2 => area = 0.2
+        let area = mesh.face_area(bev_f);
+        assert!((area - 0.2).abs() < 1e-4, "Expected area ~0.2, got {area}");
+
+        // Normal of flat sheet bevel face must point in +Z
+        let norm = mesh.face_normal(bev_f);
+        assert!((norm.z - 1.0).abs() < 1e-4);
+
+        // Check vertex coordinates: x coordinates should be around 0.9 and 1.1
+        let verts = res.new_vertices();
+        for &vh in verts {
+            let p = mesh.vertex(vh).unwrap().position;
+            assert!(
+                (p.x - 0.9).abs() < 1e-4 || (p.x - 1.1).abs() < 1e-4,
+                "Unexpected X coordinate: {}",
+                p.x
+            );
+            assert!(
+                (p.y - 0.0).abs() < 1e-4 || (p.y - 1.0).abs() < 1e-4,
+                "Unexpected Y coordinate: {}",
+                p.y
+            );
+            assert!(p.z.abs() < 1e-4, "Z coordinate must be 0: {}", p.z);
+        }
+    }
+
+    // Bevel Edge Test 4: Correct vertex, edge, face and half-edge counts and Euler invariance
+    #[test]
+    fn test_bevel_4_counts() {
+        let mut mesh = make_two_triangles();
+        let orig_v = mesh.num_vertices();
+        let orig_e = mesh.num_edges();
+        let orig_f = mesh.num_faces();
+        let orig_he = mesh.num_half_edges();
+        let orig_chi = (orig_v as i32) - (orig_e as i32) + (orig_f as i32);
+
+        let e_mid = find_edge_between(&mesh, 0, 2);
+        mesh.bevel_edge(e_mid, 0.2).unwrap();
+
+        assert_eq!(mesh.num_vertices(), orig_v + 2);
+        assert_eq!(mesh.num_edges(), orig_e + 3);
+        assert_eq!(mesh.num_faces(), orig_f + 1);
+        assert_eq!(mesh.num_half_edges(), orig_he + 6);
+
+        let new_chi =
+            (mesh.num_vertices() as i32) - (mesh.num_edges() as i32) + (mesh.num_faces() as i32);
+        assert_eq!(new_chi, orig_chi, "Euler characteristic must be invariant");
+    }
+
+    // Bevel Edge Test 5: Correct face loops and references
+    #[test]
+    fn test_bevel_5_face_loops_and_references() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+        let res = mesh.bevel_edge(e_mid, 0.2).unwrap();
+
+        for &f in &[
+            res.bevel_face(),
+            res.affected_faces().0,
+            res.affected_faces().1,
+        ] {
+            let loop_hes = mesh.face_loop_safe(f).unwrap();
+            let rep_he = mesh.face(f).unwrap().half_edge;
+            assert!(loop_hes.contains(&rep_he));
+            for &he in &loop_hes {
+                assert_eq!(mesh.half_edge(he).unwrap().face, Some(f));
+            }
+        }
+    }
+
+    // Bevel Edge Test 6: Reciprocal twin relationships
+    #[test]
+    fn test_bevel_6_twin_reciprocity() {
+        let mut mesh = make_two_triangles();
+        let e_mid = find_edge_between(&mesh, 0, 2);
+        let res = mesh.bevel_edge(e_mid, 0.2).unwrap();
+
+        for &eh in res.new_edges() {
+            let (h1, h2) = mesh.edge_half_edges(eh).unwrap();
+            assert_eq!(mesh.half_edge(h1).unwrap().twin, h2);
+            assert_eq!(mesh.half_edge(h2).unwrap().twin, h1);
+            assert_eq!(mesh.half_edge(h1).unwrap().edge, eh);
+            assert_eq!(mesh.half_edge(h2).unwrap().edge, eh);
+        }
+    }
+
+    // Bevel Edge Test 7: Consistent next/prev links
+    #[test]
+    fn test_bevel_7_next_prev_consistency() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+        mesh.bevel_edge(e_mid, 0.2).unwrap();
+
+        for he_h in mesh.half_edges() {
+            let he = mesh.half_edge(he_h).unwrap();
+            let next_he = mesh.half_edge(he.next).unwrap();
+            let prev_he = mesh.half_edge(he.prev).unwrap();
+            assert_eq!(next_he.prev, he_h);
+            assert_eq!(prev_he.next, he_h);
+        }
+    }
+
+    // Bevel Edge Test 8: Preservation of unaffected geometry
+    #[test]
+    fn test_bevel_8_preservation_of_unaffected_geometry() {
+        let mut mesh = make_two_quads();
+        let p0 = mesh.vertex(VertexHandle::new(0, 0)).unwrap().position;
+        let p2 = mesh.vertex(VertexHandle::new(2, 0)).unwrap().position;
+        let p3 = mesh.vertex(VertexHandle::new(3, 0)).unwrap().position;
+        let p5 = mesh.vertex(VertexHandle::new(5, 0)).unwrap().position;
+
+        let e_mid = find_edge_between(&mesh, 1, 4);
+        mesh.bevel_edge(e_mid, 0.2).unwrap();
+
+        assert_eq!(mesh.vertex(VertexHandle::new(0, 0)).unwrap().position, p0);
+        assert_eq!(mesh.vertex(VertexHandle::new(2, 0)).unwrap().position, p2);
+        assert_eq!(mesh.vertex(VertexHandle::new(3, 0)).unwrap().position, p3);
+        assert_eq!(mesh.vertex(VertexHandle::new(5, 0)).unwrap().position, p5);
+    }
+
+    // Bevel Edge Test 9: Attribute and UV seam preservation
+    #[test]
+    fn test_bevel_9_uv_seams_and_attributes() {
+        let mut mesh = make_two_triangles();
+        let e_mid = find_edge_between(&mesh, 0, 2);
+
+        // Inject UV seam across e_mid
+        let (h0, h1) = mesh.edge_half_edges(e_mid).unwrap();
+        mesh.half_edge_mut(h0).unwrap().uv = Some(Vec2::new(0.5, 0.0));
+        mesh.half_edge_mut(h1).unwrap().uv = Some(Vec2::new(0.5, 1.0));
+
+        let res = mesh.bevel_edge(e_mid, 0.2).unwrap();
+        let f0 = res.affected_faces().0;
+        let f1 = res.affected_faces().1;
+
+        // Check that adjacent faces retain their respective UVs
+        let f0_hes = mesh.face_loop_safe(f0).unwrap();
+        let f1_hes = mesh.face_loop_safe(f1).unwrap();
+        assert!(
+            f0_hes
+                .iter()
+                .any(|&h| mesh.half_edge(h).unwrap().uv == Some(Vec2::new(0.5, 0.0)))
+        );
+        assert!(
+            f1_hes
+                .iter()
+                .any(|&h| mesh.half_edge(h).unwrap().uv == Some(Vec2::new(0.5, 1.0)))
+        );
+
+        // Bevel face corners inherit matching UVs
+        let bev_hes = mesh.face_loop_safe(res.bevel_face()).unwrap();
+        let bev_uvs: Vec<Option<Vec2>> = bev_hes
+            .iter()
+            .map(|&h| mesh.half_edge(h).unwrap().uv)
+            .collect();
+        assert!(bev_uvs.contains(&Some(Vec2::new(0.5, 0.0))));
+        assert!(bev_uvs.contains(&Some(Vec2::new(0.5, 1.0))));
+    }
+
+    // Bevel Edge Test 10: Material inheritance policy
+    #[test]
+    fn test_bevel_10_material_inheritance() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+        let (f0, f1) = mesh.edge_faces(e_mid).unwrap();
+        mesh.face_mut(f0.unwrap()).unwrap().material_id = Some(42);
+        mesh.face_mut(f1.unwrap()).unwrap().material_id = Some(99);
+
+        let res = mesh.bevel_edge(e_mid, 0.2).unwrap();
+        let bev_mat = mesh.face(res.bevel_face()).unwrap().material_id;
+        assert_eq!(
+            bev_mat,
+            Some(42),
+            "Bevel face must deterministically inherit material from f0"
+        );
+    }
+
+    // Bevel Edge Test 11: Rejection of boundary edges
+    #[test]
+    fn test_bevel_11_rejection_boundary_edge() {
+        let mut mesh = make_two_triangles();
+        let bnd_e = find_edge_between(&mesh, 0, 1);
+        assert!(mesh.is_edge_boundary(bnd_e));
+
+        let res = mesh.bevel_edge(bnd_e, 0.2);
+        assert!(matches!(res, Err(TopologyError::InvalidOperation(_))));
+    }
+
+    // Bevel Edge Test 12: Rejection of invalid handles
+    #[test]
+    fn test_bevel_12_rejection_invalid_handles() {
+        let mut mesh = make_two_triangles();
+        let invalid_e = EdgeHandle::new(9999, 0);
+
+        let res = mesh.bevel_edge(invalid_e, 0.2);
+        assert!(matches!(res, Err(TopologyError::InvalidEdge(_))));
+    }
+
+    // Bevel Edge Test 13: Rejection of non-finite and zero widths
+    #[test]
+    fn test_bevel_13_rejection_non_finite_and_zero_width() {
+        let mut mesh = make_two_triangles();
+        let e_mid = find_edge_between(&mesh, 0, 2);
+
+        assert!(matches!(
+            mesh.bevel_edge(e_mid, 0.0),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.bevel_edge(e_mid, -0.5),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.bevel_edge(e_mid, f32::NAN),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.bevel_edge(e_mid, f32::INFINITY),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Bevel Edge Test 14: Rejection of excessive widths
+    #[test]
+    fn test_bevel_14_rejection_excessive_widths() {
+        let mut mesh = make_two_quads();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        // Quad width is 1.0; width of 5.0 will collapse/invert both quads
+        let res = mesh.bevel_edge(e_mid, 5.0);
+        assert!(matches!(res, Err(TopologyError::InvalidOperation(_))));
+    }
+
+    // Bevel Edge Test 15: Rejection of multi-edge endpoints
+    #[test]
+    fn test_bevel_15_rejection_multi_edge_endpoints() {
+        let mut mesh = make_tetrahedron();
+        let e = mesh.edges().next().unwrap();
+
+        // In a tetrahedron, every vertex has 3 incident faces
+        let res = mesh.bevel_edge(e, 0.1);
+        assert!(matches!(res, Err(TopologyError::InvalidOperation(_))));
+    }
+
+    // Bevel Edge Test 16: Atomic rollback on failure
+    #[test]
+    fn test_bevel_16_atomic_rollback() {
+        let mut mesh = make_two_quads();
+        let backup = mesh.clone();
+        let e_mid = find_edge_between(&mesh, 1, 4);
+
+        // 1. Excessive width failure
+        assert!(mesh.bevel_edge(e_mid, 10.0).is_err());
+        assert_eq!(mesh, backup);
+
+        // 2. Non-positive width failure
+        assert!(mesh.bevel_edge(e_mid, -1.0).is_err());
+        assert_eq!(mesh, backup);
+
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Bevel Edge Test 17: Successful TopologyValidator and invariant checks
+    #[test]
+    fn test_bevel_17_topology_validator_and_invariants() {
+        let mut mesh = make_two_triangles();
+        let e_mid = find_edge_between(&mesh, 0, 2);
+        let res = mesh.bevel_edge(e_mid, 0.2).unwrap();
+        assert!(mesh.is_valid_face(res.bevel_face()));
+
+        let val_report = TopologyValidator::validate(&mesh);
+        assert!(
+            val_report.is_valid,
+            "ValidationReport must be valid: {:?}",
+            val_report.issues
+        );
+        assert_eq!(val_report.error_count(), 0);
+
+        let top_report = mesh.validate_topology();
+        assert!(top_report.is_valid);
+        assert!(top_report.is_manifold);
+        assert_eq!(top_report.boundary_loop_count, 1);
         assert!(mesh.check_invariants().is_ok());
     }
 }

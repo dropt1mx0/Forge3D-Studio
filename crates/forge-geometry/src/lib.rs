@@ -18,8 +18,8 @@ pub use primitives::{
     generate_icosphere, generate_plane, generate_torus, generate_uv_sphere,
 };
 pub use topology::{
-    CollapseEdgeResult, EdgeHandle, EdgeSelectionPath, ExtrudeFaceResult, FaceHandle,
-    FlipEdgeResult, HalfEdge, HalfEdgeEdge, HalfEdgeFace, HalfEdgeHandle, HalfEdgeMesh,
+    BevelEdgeResult, CollapseEdgeResult, EdgeHandle, EdgeSelectionPath, ExtrudeFaceResult,
+    FaceHandle, FlipEdgeResult, HalfEdge, HalfEdgeEdge, HalfEdgeFace, HalfEdgeHandle, HalfEdgeMesh,
     HalfEdgeVertex, InsetFaceResult, IssueCategory, IssueSeverity, MergeFacesResult,
     PokeFaceResult, SplitEdgeResult, SplitFaceResult, TerminationReason, TopologyBuilder,
     TopologyError, TopologyReport, TopologyValidator, ValidationIssue, ValidationReport,
