@@ -1826,6 +1826,198 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             Color32::from_rgb(200, 225, 255),
         );
     }
+
+    if let Some(elapsed) = app.showcase_demo_elapsed {
+        render_showcase_demo_overlay(&painter, rect, elapsed);
+    }
+}
+
+fn render_showcase_demo_overlay(painter: &egui::Painter, viewport: Rect, elapsed: f32) {
+    let stage_duration = 1.35;
+    let stage = ((elapsed / stage_duration).floor() as usize).min(5);
+    let progress = (elapsed / stage_duration).fract();
+    let stage_names = [
+        "Yard and path",
+        "House foundation and walls",
+        "Roof and chimney",
+        "Porch and facade",
+        "Tree and foliage",
+        "Rock and garden details",
+    ];
+    let active_keys: &[&str] = match stage {
+        0 => &["LMB"],
+        1 => &["G", "X", "ENTER"],
+        2 => &["R", "Z", "ENTER"],
+        3 => &["S", "Y", "ENTER"],
+        4 => &["G", "Y", "ENTER"],
+        _ => &["LMB", "CTRL"],
+    };
+
+    let panel_width = 284.0_f32.min(viewport.width() - 24.0);
+    let panel_height = 184.0_f32.min(viewport.height() - 24.0);
+    if panel_width < 200.0 || panel_height < 150.0 {
+        return;
+    }
+    let panel = Rect::from_min_size(
+        Pos2::new(
+            viewport.right() - panel_width - 12.0,
+            viewport.bottom() - panel_height - 12.0,
+        ),
+        egui::vec2(panel_width, panel_height),
+    );
+    painter.rect_filled(panel, 8.0, Color32::from_rgba_unmultiplied(13, 16, 22, 235));
+    painter.rect_stroke(
+        panel,
+        8.0,
+        Stroke::new(1.0, Color32::from_rgb(67, 83, 107)),
+        egui::StrokeKind::Outside,
+    );
+
+    let text_left = panel.left() + 11.0;
+    painter.text(
+        Pos2::new(text_left, panel.top() + 8.0),
+        egui::Align2::LEFT_TOP,
+        "BUILD DEMO  /  SIMULATED INPUT",
+        egui::FontId::monospace(10.0),
+        Color32::from_rgb(118, 183, 255),
+    );
+    painter.text(
+        Pos2::new(text_left, panel.top() + 24.0),
+        egui::Align2::LEFT_TOP,
+        format!("Step {} of 6  ·  {}", stage + 1, stage_names[stage]),
+        egui::FontId::proportional(11.5),
+        Color32::from_rgb(232, 236, 245),
+    );
+
+    let key_height = 17.0;
+    let key_gap = 3.0;
+    let draw_key = |label: &str, x: f32, y: f32, width: f32| {
+        let active = active_keys.contains(&label);
+        let key_rect = Rect::from_min_size(Pos2::new(x, y), egui::vec2(width, key_height));
+        painter.rect_filled(
+            key_rect,
+            3.0,
+            if active {
+                Color32::from_rgb(33, 101, 190)
+            } else {
+                Color32::from_rgb(37, 42, 52)
+            },
+        );
+        painter.rect_stroke(
+            key_rect,
+            3.0,
+            Stroke::new(
+                0.8,
+                if active {
+                    Color32::from_rgb(127, 190, 255)
+                } else {
+                    Color32::from_rgb(73, 81, 96)
+                },
+            ),
+            egui::StrokeKind::Outside,
+        );
+        painter.text(
+            key_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::monospace(if label.len() > 3 { 7.5 } else { 9.0 }),
+            if active {
+                Color32::WHITE
+            } else {
+                Color32::from_rgb(188, 196, 210)
+            },
+        );
+    };
+
+    let row_y = panel.top() + 52.0;
+    let first_row = ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"];
+    let second_row = ["A", "S", "D", "F", "G", "H", "J", "K", "L"];
+    let third_row = ["Z", "X", "C", "V", "B", "N", "M"];
+    let key_width = ((panel.width() - 24.0 - key_gap * 9.0) / 10.0).min(23.0);
+    let draw_letter_row = |keys: &[&str], y: f32| {
+        let row_width = keys.len() as f32 * key_width + (keys.len() - 1) as f32 * key_gap;
+        let mut x = panel.center().x - row_width * 0.5;
+        for key in keys {
+            draw_key(key, x, y, key_width);
+            x += key_width + key_gap;
+        }
+    };
+    draw_letter_row(&first_row, row_y);
+    draw_letter_row(&second_row, row_y + 20.0);
+    draw_letter_row(&third_row, row_y + 40.0);
+
+    let control_keys = [
+        ("SHIFT", 34.0),
+        ("CTRL", 31.0),
+        ("SPACE", 50.0),
+        ("ENTER", 40.0),
+        ("LMB", 30.0),
+    ];
+    let control_width = control_keys.iter().map(|(_, width)| width).sum::<f32>()
+        + key_gap * (control_keys.len() - 1) as f32;
+    let mut control_x = panel.center().x - control_width * 0.5;
+    for (label, width) in control_keys {
+        draw_key(label, control_x, row_y + 60.0, width);
+        control_x += width + key_gap;
+    }
+
+    painter.text(
+        Pos2::new(text_left, panel.bottom() - 30.0),
+        egui::Align2::LEFT_TOP,
+        "Screen illustration only · sends no OS input",
+        egui::FontId::proportional(9.0),
+        Color32::from_rgb(166, 176, 192),
+    );
+    let progress_rect = Rect::from_min_size(
+        Pos2::new(text_left, panel.bottom() - 13.0),
+        egui::vec2(panel.width() - 22.0, 4.0),
+    );
+    painter.rect_filled(progress_rect, 2.0, Color32::from_rgb(43, 49, 61));
+    painter.rect_filled(
+        Rect::from_min_size(
+            progress_rect.min,
+            egui::vec2(progress_rect.width() * progress, progress_rect.height()),
+        ),
+        2.0,
+        Color32::from_rgb(64, 146, 245),
+    );
+
+    // This animated screen-space pointer illustrates the current focus of the walkthrough.
+    let cursor_targets = [
+        (0.48, 0.79),
+        (0.49, 0.55),
+        (0.51, 0.24),
+        (0.51, 0.64),
+        (0.73, 0.44),
+        (0.29, 0.72),
+    ];
+    let from = cursor_targets[stage];
+    let to = cursor_targets[(stage + 1).min(cursor_targets.len() - 1)];
+    let t = progress * progress * (3.0 - 2.0 * progress);
+    let cursor_pos = Pos2::new(
+        viewport.left() + viewport.width() * (from.0 + (to.0 - from.0) * t),
+        viewport.top() + viewport.height() * (from.1 + (to.1 - from.1) * t),
+    );
+    let pulse = 7.0 + (elapsed * 5.0).sin().abs() * 4.0;
+    painter.circle_stroke(
+        cursor_pos,
+        pulse,
+        Stroke::new(1.5, Color32::from_rgba_unmultiplied(106, 186, 255, 210)),
+    );
+    let cursor_points = vec![
+        cursor_pos,
+        cursor_pos + EguiVec2::new(2.0, 21.0),
+        cursor_pos + EguiVec2::new(7.0, 15.0),
+        cursor_pos + EguiVec2::new(13.0, 24.0),
+        cursor_pos + EguiVec2::new(17.0, 22.0),
+        cursor_pos + EguiVec2::new(12.0, 13.0),
+        cursor_pos + EguiVec2::new(21.0, 12.0),
+    ];
+    painter.add(egui::Shape::convex_polygon(
+        cursor_points,
+        Color32::WHITE,
+        Stroke::new(1.5, Color32::from_rgb(20, 26, 35)),
+    ));
 }
 
 /// Pre-allocated cache for Edit Mode viewport overlay rendering.

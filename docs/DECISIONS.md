@@ -359,3 +359,28 @@
   3. Start the visible studio application in the showcase view and add `Examples -> House, Tree & Rock` to restore it from the UI. Loading resets selection/edit state, invalidates renderer caches, and frames a composition-specific camera view.
 - **Consequences:**
   A user can launch Forge3D and see a complete example composition immediately, then reload it from the menu without external assets. The scene uses simple solid colors and primitive meshes; editable material and lighting systems remain future work.
+
+## ADR-0020: Detailed Showcase and On-Screen Build Walkthrough
+- **Status:** Accepted
+- **Date:** 2026-11-04
+- **Context:**
+  The user requested a more detailed version of the existing house, tree, and rock composition and a visible keyboard/cursor demonstration suitable for screen recording.
+- **Decision:**
+  1. Extend the procedural scene with facade, roof, porch, foliage, path, fence, shrub, and flower details while continuing to use the existing primitive mesh generators and solid-color renderer.
+  2. On graphical startup and when replayed from `Examples -> Replay House Build Demo`, reveal the scene in six timed stages over about 8.5 seconds.
+  3. Draw a virtual keyboard with stage-specific highlighted keys and an animated screen-space pointer in the viewport. Label both as simulated visual playback; do not synthesize OS keyboard events or move the real system pointer.
+  4. Keep `new_headless()` and `File -> New Scene` behavior on the default modeling scene.
+- **Consequences:**
+  Screen recordings can show a clear, repeatable construction walkthrough without external assets or native input automation. The walkthrough is illustrative only; visible key highlights do not represent input sent to the editor or operating system.
+
+## ADR-0021: Procedural Showcase Surface Patterns
+- **Status:** Accepted
+- **Date:** 2026-11-04
+- **Context:**
+  The user requested visible wood and stone texture on the showcase tree, fence, and rocks. Forge3D's current mesh shader already multiplies per-vertex colors by the object color, but it has no image texture loader or texture sampling bindings.
+- **Decision:**
+  1. Bake deterministic procedural color patterns into mesh vertices for streaked tree bark, wood fibers and knots on fence boards, and mottled mineral/vein color on rock meshes.
+  2. Subdivide target meshes where needed so the vertex colors resolve as visible surface variation. Preserve UVs, normals, and object transforms, and use the existing renderer path.
+  3. Keep this showcase pass self-contained; full image texture assets, material slots, and GPU texture sampling remain separate renderer/asset-pipeline work.
+- **Consequences:**
+  The current renderer can show distinct surface character without external files or GPU pipeline changes. These are procedural vertex-color patterns rather than sampled bitmap textures, so higher-resolution image detail and editable texture parameters still require a future material system.

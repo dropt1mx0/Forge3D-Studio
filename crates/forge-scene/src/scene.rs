@@ -4,6 +4,7 @@ use forge_core::id::ObjectId;
 use forge_geometry::primitives::{
     generate_cube, generate_cylinder, generate_icosphere, generate_plane, generate_uv_sphere,
 };
+use forge_geometry::{Mesh, Vertex};
 use forge_math::{Aabb, Quat, Ray, Transform, Vec3};
 use serde::{Deserialize, Serialize};
 
@@ -657,6 +658,46 @@ impl Scene {
             ),
             [0.50, 0.28, 0.22, 1.0],
         );
+        add_showcase_object(
+            &mut scene,
+            "Chimney Cap",
+            PrimitiveType::Cube,
+            generate_cube(1.0),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(0.58, 2.88, -0.34),
+                Quat::IDENTITY,
+                Vec3::new(0.48, 0.12, 0.52),
+            ),
+            [0.38, 0.19, 0.16, 1.0],
+        );
+
+        // Dark ridge and front/back fascia make the roof silhouette read at a distance.
+        add_showcase_object(
+            &mut scene,
+            "Roof Ridge Cap",
+            PrimitiveType::Cube,
+            generate_cube(1.0),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(0.0, 2.54, 0.0),
+                Quat::IDENTITY,
+                Vec3::new(0.16, 0.13, 2.28),
+            ),
+            [0.31, 0.10, 0.09, 1.0],
+        );
+        for (name, z) in [("Roof Front Fascia", 1.02), ("Roof Rear Fascia", -1.02)] {
+            add_showcase_object(
+                &mut scene,
+                name,
+                PrimitiveType::Cube,
+                generate_cube(1.0),
+                Transform::from_translation_rotation_scale(
+                    Vec3::new(0.0, 1.61, z),
+                    Quat::IDENTITY,
+                    Vec3::new(2.30, 0.12, 0.10),
+                ),
+                [0.34, 0.12, 0.10, 1.0],
+            );
+        }
 
         add_showcase_object(
             &mut scene,
@@ -712,6 +753,88 @@ impl Scene {
                     [0.88, 0.76, 0.55, 1.0],
                 );
             }
+
+            // A cross-shaped muntin and projecting sill give each window more depth.
+            for (detail, position, scale) in [
+                (
+                    "Vertical Muntin",
+                    Vec3::new(x, 1.12, 1.045),
+                    Vec3::new(0.045, 0.40, 0.035),
+                ),
+                (
+                    "Horizontal Muntin",
+                    Vec3::new(x, 1.12, 1.048),
+                    Vec3::new(0.48, 0.045, 0.04),
+                ),
+                (
+                    "Window Sill",
+                    Vec3::new(x, 0.81, 1.025),
+                    Vec3::new(0.68, 0.10, 0.20),
+                ),
+                (
+                    "Window Box",
+                    Vec3::new(x, 0.68, 1.08),
+                    Vec3::new(0.48, 0.16, 0.22),
+                ),
+            ] {
+                add_showcase_object(
+                    &mut scene,
+                    format!("{side} {detail}"),
+                    PrimitiveType::Cube,
+                    generate_cube(1.0),
+                    Transform::from_translation_rotation_scale(position, Quat::IDENTITY, scale),
+                    if detail == "Window Box" {
+                        [0.35, 0.19, 0.12, 1.0]
+                    } else {
+                        [0.88, 0.76, 0.55, 1.0]
+                    },
+                );
+            }
+        }
+
+        // A small covered porch frames the entrance and visually anchors the door.
+        for (name, position, scale, color) in [
+            (
+                "Porch Deck",
+                Vec3::new(0.0, 0.14, 1.27),
+                Vec3::new(1.42, 0.14, 0.78),
+                [0.48, 0.29, 0.17, 1.0],
+            ),
+            (
+                "Porch Awning",
+                Vec3::new(0.0, 1.52, 1.34),
+                Vec3::new(1.34, 0.13, 0.78),
+                [0.42, 0.15, 0.12, 1.0],
+            ),
+            (
+                "Porch Front Beam",
+                Vec3::new(0.0, 1.40, 1.70),
+                Vec3::new(1.38, 0.12, 0.12),
+                [0.34, 0.18, 0.12, 1.0],
+            ),
+        ] {
+            add_showcase_object(
+                &mut scene,
+                name,
+                PrimitiveType::Cube,
+                generate_cube(1.0),
+                Transform::from_translation_rotation_scale(position, Quat::IDENTITY, scale),
+                color,
+            );
+        }
+        for (side, x) in [("Left", -0.55), ("Right", 0.55)] {
+            add_showcase_object(
+                &mut scene,
+                format!("Porch {side} Post"),
+                PrimitiveType::Cube,
+                generate_cube(1.0),
+                Transform::from_translation_rotation_scale(
+                    Vec3::new(x, 0.82, 1.63),
+                    Quat::IDENTITY,
+                    Vec3::new(0.13, 1.36, 0.13),
+                ),
+                [0.88, 0.76, 0.55, 1.0],
+            );
         }
 
         // A broadleaf tree with a visible trunk and overlapping low-poly foliage.
@@ -719,9 +842,9 @@ impl Scene {
             &mut scene,
             "Tree Trunk",
             PrimitiveType::Cylinder,
-            generate_cylinder(0.23, 1.85, 16),
+            generate_bark_cylinder(0.23, 1.85, 48, 32, 2.0),
             Transform::from_translation(Vec3::new(3.18, 0.925, -0.18)),
-            [0.34, 0.20, 0.11, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
         );
         for (name, position, radius, color) in [
             (
@@ -753,34 +876,448 @@ impl Scene {
             );
         }
 
+        // Fine foliage highlights and two branching limbs break up the round canopy.
+        for (name, position, radius, color) in [
+            (
+                "Tree Canopy Highlight Left",
+                Vec3::new(2.78, 2.75, 0.08),
+                0.31,
+                [0.34, 0.61, 0.28, 1.0],
+            ),
+            (
+                "Tree Canopy Highlight Right",
+                Vec3::new(3.59, 2.82, -0.33),
+                0.28,
+                [0.37, 0.64, 0.30, 1.0],
+            ),
+        ] {
+            add_showcase_object(
+                &mut scene,
+                name,
+                PrimitiveType::Icosphere,
+                generate_icosphere(radius, 1),
+                Transform::from_translation(position),
+                color,
+            );
+        }
+        for (name, position, rotation) in [
+            (
+                "Tree Branch Left",
+                Vec3::new(2.93, 1.62, -0.18),
+                Quat::from_rotation_z(-0.78),
+            ),
+            (
+                "Tree Branch Right",
+                Vec3::new(3.42, 1.66, -0.18),
+                Quat::from_rotation_z(0.76),
+            ),
+        ] {
+            add_showcase_object(
+                &mut scene,
+                name,
+                PrimitiveType::Cylinder,
+                generate_bark_cylinder(0.09, 0.83, 24, 12, position.x),
+                Transform::from_translation_rotation_scale(
+                    position,
+                    rotation,
+                    Vec3::new(1.0, 1.0, 1.0),
+                ),
+                [1.0, 1.0, 1.0, 1.0],
+            );
+        }
+
         // Faceted stone and a smaller pebble complete the yard composition.
+        let mut rock_mesh = generate_icosphere(0.82, 3);
+        apply_stone_mottling(&mut rock_mesh, 11.0);
         add_showcase_object(
             &mut scene,
             "Rock",
             PrimitiveType::Icosphere,
-            generate_icosphere(0.82, 1),
+            rock_mesh,
             Transform::from_translation_rotation_scale(
                 Vec3::new(-3.15, 0.42, 0.18),
                 Quat::from_rotation_y(0.24),
                 Vec3::new(1.0, 0.56, 0.82),
             ),
-            [0.43, 0.45, 0.47, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
         );
+        let mut pebble_mesh = generate_icosphere(0.36, 2);
+        apply_stone_mottling(&mut pebble_mesh, 23.0);
         add_showcase_object(
             &mut scene,
             "Pebble",
             PrimitiveType::Icosphere,
-            generate_icosphere(0.36, 1),
+            pebble_mesh,
             Transform::from_translation_rotation_scale(
                 Vec3::new(-2.47, 0.18, 0.92),
                 Quat::from_rotation_y(-0.31),
                 Vec3::new(1.0, 0.55, 0.76),
             ),
-            [0.51, 0.52, 0.50, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
         );
+
+        // Individual stepping stones extend the path into the front yard.
+        for (index, (x, z)) in [(-0.18, 2.63), (0.14, 3.12), (-0.12, 3.61), (0.20, 4.08)]
+            .into_iter()
+            .enumerate()
+        {
+            add_showcase_object(
+                &mut scene,
+                format!("Stepping Stone {}", index + 1),
+                PrimitiveType::Icosphere,
+                {
+                    let mut mesh = generate_icosphere(0.34, 2);
+                    apply_stone_mottling(&mut mesh, index as f32 * 4.0 + 31.0);
+                    mesh
+                },
+                Transform::from_translation_rotation_scale(
+                    Vec3::new(x, 0.055, z),
+                    Quat::from_rotation_y(index as f32 * 0.28),
+                    Vec3::new(1.0, 0.20, 0.72),
+                ),
+                [1.0, 1.0, 1.0, 1.0],
+            );
+        }
+
+        // A low garden fence sits behind the tree, with evenly spaced pickets.
+        for (index, (name, y)) in [
+            ("Garden Fence Lower Rail", 0.39),
+            ("Garden Fence Upper Rail", 0.79),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            add_showcase_object(
+                &mut scene,
+                name,
+                PrimitiveType::Cube,
+                generate_wood_grain_cube(0, index as u32),
+                Transform::from_translation_rotation_scale(
+                    Vec3::new(3.25, y, -1.28),
+                    Quat::IDENTITY,
+                    Vec3::new(2.75, 0.11, 0.12),
+                ),
+                [1.0, 1.0, 1.0, 1.0],
+            );
+        }
+        for index in 0..8 {
+            let x = 1.98 + index as f32 * 0.36;
+            add_showcase_object(
+                &mut scene,
+                format!("Garden Fence Picket {}", index + 1),
+                PrimitiveType::Cube,
+                generate_wood_grain_cube(1, index),
+                Transform::from_translation_rotation_scale(
+                    Vec3::new(x, 0.59, -1.28),
+                    Quat::IDENTITY,
+                    Vec3::new(0.11, 0.85, 0.14),
+                ),
+                [1.0, 1.0, 1.0, 1.0],
+            );
+        }
+
+        // Shrubs and small flower clusters add scale cues without external assets.
+        for (name, position, radius, color) in [
+            (
+                "Garden Shrub Left",
+                Vec3::new(-1.63, 0.27, 0.34),
+                0.45,
+                [0.16, 0.36, 0.18, 1.0],
+            ),
+            (
+                "Garden Shrub Center",
+                Vec3::new(-1.30, 0.24, 0.51),
+                0.36,
+                [0.20, 0.43, 0.20, 1.0],
+            ),
+            (
+                "Garden Shrub Right",
+                Vec3::new(1.53, 0.25, 0.26),
+                0.39,
+                [0.17, 0.39, 0.18, 1.0],
+            ),
+        ] {
+            add_showcase_object(
+                &mut scene,
+                name,
+                PrimitiveType::Icosphere,
+                generate_icosphere(radius, 1),
+                Transform::from_translation(position),
+                color,
+            );
+        }
+        for (index, (x, z, color)) in [
+            (-1.92, 0.94, [0.93, 0.69, 0.25, 1.0]),
+            (-1.68, 1.12, [0.78, 0.30, 0.28, 1.0]),
+            (-1.43, 0.98, [0.93, 0.69, 0.25, 1.0]),
+            (1.52, 0.95, [0.78, 0.30, 0.28, 1.0]),
+            (1.78, 0.80, [0.93, 0.69, 0.25, 1.0]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            add_showcase_object(
+                &mut scene,
+                format!("Flower Stem {}", index + 1),
+                PrimitiveType::Cylinder,
+                generate_cylinder(0.025, 0.38, 8),
+                Transform::from_translation(Vec3::new(x, 0.23, z)),
+                [0.18, 0.34, 0.15, 1.0],
+            );
+            add_showcase_object(
+                &mut scene,
+                format!("Flower Head {}", index + 1),
+                PrimitiveType::Icosphere,
+                generate_icosphere(0.13, 1),
+                Transform::from_translation(Vec3::new(x, 0.48, z)),
+                color,
+            );
+        }
 
         scene
     }
+}
+
+/// Builds a segmented cylinder whose vertex colors carry longitudinal bark grain.
+fn generate_bark_cylinder(
+    radius: f32,
+    height: f32,
+    sectors: u32,
+    height_segments: u32,
+    seed: f32,
+) -> Mesh {
+    let sectors = sectors.max(8);
+    let height_segments = height_segments.max(2);
+    let half_height = height * 0.5;
+    let stride = sectors as usize + 1;
+    let mut vertices = Vec::with_capacity((height_segments as usize + 1) * stride);
+    let mut indices = Vec::with_capacity((height_segments * sectors * 6) as usize);
+
+    for row in 0..=height_segments {
+        let v = row as f32 / height_segments as f32;
+        let y = -half_height + v * height;
+        for sector in 0..=sectors {
+            let u = sector as f32 / sectors as f32;
+            let angle = u * std::f32::consts::TAU;
+            let (sin, cos) = angle.sin_cos();
+            vertices.push(Vertex::new(
+                [radius * cos, y, radius * sin],
+                [cos, 0.0, sin],
+                [u, v],
+                bark_color(angle, v, seed),
+            ));
+        }
+    }
+
+    for row in 0..height_segments {
+        for sector in 0..sectors {
+            let lower = (row as usize * stride + sector as usize) as u32;
+            let upper = lower + stride as u32;
+            indices.extend_from_slice(&[upper, lower, upper + 1, upper + 1, lower, lower + 1]);
+        }
+    }
+
+    // Separate cap vertices keep the end grain and top/bottom normals clean.
+    let top_center = vertices.len() as u32;
+    vertices.push(Vertex::new(
+        [0.0, half_height, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.5, 0.5],
+        [0.36, 0.20, 0.11, 1.0],
+    ));
+    let top_rim = vertices.len() as u32;
+    for sector in 0..sectors {
+        let angle = sector as f32 / sectors as f32 * std::f32::consts::TAU;
+        let (sin, cos) = angle.sin_cos();
+        vertices.push(Vertex::new(
+            [radius * cos, half_height, radius * sin],
+            [0.0, 1.0, 0.0],
+            [0.5 + cos * 0.5, 0.5 + sin * 0.5],
+            [0.39, 0.22, 0.12, 1.0],
+        ));
+    }
+    for sector in 0..sectors {
+        indices.extend_from_slice(&[
+            top_center,
+            top_rim + sector,
+            top_rim + (sector + 1) % sectors,
+        ]);
+    }
+
+    let bottom_center = vertices.len() as u32;
+    vertices.push(Vertex::new(
+        [0.0, -half_height, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.5, 0.5],
+        [0.31, 0.17, 0.09, 1.0],
+    ));
+    let bottom_rim = vertices.len() as u32;
+    for sector in 0..sectors {
+        let angle = sector as f32 / sectors as f32 * std::f32::consts::TAU;
+        let (sin, cos) = angle.sin_cos();
+        vertices.push(Vertex::new(
+            [radius * cos, -half_height, radius * sin],
+            [0.0, -1.0, 0.0],
+            [0.5 + cos * 0.5, 0.5 + sin * 0.5],
+            [0.31, 0.17, 0.09, 1.0],
+        ));
+    }
+    for sector in 0..sectors {
+        indices.extend_from_slice(&[
+            bottom_center,
+            bottom_rim + (sector + 1) % sectors,
+            bottom_rim + sector,
+        ]);
+    }
+
+    Mesh::new(vertices, indices)
+}
+
+fn bark_color(angle: f32, height_ratio: f32, seed: f32) -> [f32; 4] {
+    let broad_ridge = (angle * 7.0 + (height_ratio * 5.5 + seed).sin() * 0.65).sin();
+    let fine_ridge = (angle * 19.0 + height_ratio * 8.0 + seed * 1.7).sin();
+    let broken_furrow = (angle * 11.0 + height_ratio * 15.0 + seed * 0.4).sin();
+    let furrow = if broken_furrow > 0.965 { 0.62 } else { 1.0 };
+    let brightness = (0.84 + 0.14 * broad_ridge + 0.07 * fine_ridge) * furrow;
+    [
+        (0.36 * brightness).clamp(0.0, 1.0),
+        (0.19 * brightness).clamp(0.0, 1.0),
+        (0.095 * brightness).clamp(0.0, 1.0),
+        1.0,
+    ]
+}
+
+/// Builds a subdivided box with wood fibers running along the selected local axis.
+/// `grain_axis` uses 0=X, 1=Y, and 2=Z.
+fn generate_wood_grain_cube(grain_axis: usize, seed: u32) -> Mesh {
+    let faces = [
+        (Vec3::X, Vec3::Y, Vec3::Z),
+        (-Vec3::X, Vec3::Z, Vec3::Y),
+        (Vec3::Y, Vec3::Z, Vec3::X),
+        (-Vec3::Y, Vec3::X, Vec3::Z),
+        (Vec3::Z, Vec3::X, Vec3::Y),
+        (-Vec3::Z, Vec3::Y, Vec3::X),
+    ];
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    for (normal, u_axis, v_axis) in faces {
+        let u_steps = if axis_component(u_axis, grain_axis) != 0.0 {
+            28
+        } else {
+            5
+        };
+        let v_steps = if axis_component(v_axis, grain_axis) != 0.0 {
+            28
+        } else {
+            5
+        };
+        let base = vertices.len() as u32;
+        for v in 0..=v_steps {
+            let fv = v as f32 / v_steps as f32;
+            for u in 0..=u_steps {
+                let fu = u as f32 / u_steps as f32;
+                let local = normal * 0.5 + u_axis * (fu - 0.5) + v_axis * (fv - 0.5);
+                vertices.push(Vertex::new(
+                    local.to_array(),
+                    normal.to_array(),
+                    [fu, fv],
+                    wood_grain_color(local, grain_axis, seed),
+                ));
+            }
+        }
+        let row = u_steps + 1;
+        for v in 0..v_steps {
+            for u in 0..u_steps {
+                let lower_left = base + v * row + u;
+                let lower_right = lower_left + 1;
+                let upper_left = lower_left + row;
+                let upper_right = upper_left + 1;
+                indices.extend_from_slice(&[
+                    lower_left,
+                    lower_right,
+                    upper_right,
+                    lower_left,
+                    upper_right,
+                    upper_left,
+                ]);
+            }
+        }
+    }
+
+    Mesh::new(vertices, indices)
+}
+
+fn axis_component(vector: Vec3, axis: usize) -> f32 {
+    match axis {
+        0 => vector.x,
+        1 => vector.y,
+        _ => vector.z,
+    }
+}
+
+fn wood_grain_color(position: Vec3, grain_axis: usize, seed: u32) -> [f32; 4] {
+    let (along, across, depth) = match grain_axis {
+        0 => (position.x, position.y, position.z),
+        1 => (position.y, position.x, position.z),
+        _ => (position.z, position.x, position.y),
+    };
+    let phase = seed as f32 * 1.31;
+    let broad_fiber = (along * 39.0 + (across * 5.7 + phase).sin() * 0.72).sin();
+    let fine_fiber = (along * 93.0 + across * 11.0 + phase * 0.37).sin();
+    let knot_center = ((seed as f32 * 0.173).sin()) * 0.22;
+    let knot_radius = ((along - knot_center) * 4.2).powi(2) + (across * 3.2).powi(2);
+    let knot = (-knot_radius * 1.8).exp();
+    let ring = (knot_radius.sqrt() * 31.0 + depth * 2.0).sin();
+    let brightness = (0.83 + 0.13 * broad_fiber + 0.045 * fine_fiber - knot * (0.12 + 0.08 * ring))
+        .clamp(0.55, 1.08);
+    [
+        0.43 * brightness,
+        0.255 * brightness,
+        0.145 * brightness,
+        1.0,
+    ]
+}
+
+/// Bakes a mottled, subtly veined stone pattern into per-triangle vertex colors.
+fn apply_stone_mottling(mesh: &mut Mesh, seed: f32) {
+    let source_vertices = &mesh.vertices;
+    let mut vertices = Vec::with_capacity(mesh.indices.len());
+    let mut indices = Vec::with_capacity(mesh.indices.len());
+
+    for (face_index, triangle) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+        let p0 = Vec3::from_array(source_vertices[triangle[0] as usize].position);
+        let p1 = Vec3::from_array(source_vertices[triangle[1] as usize].position);
+        let p2 = Vec3::from_array(source_vertices[triangle[2] as usize].position);
+        let color = stone_surface_color((p0 + p1 + p2) / 3.0, seed, face_index as f32);
+        for &source_index in triangle {
+            let mut vertex = source_vertices[source_index as usize];
+            vertex.color = color;
+            indices.push(vertices.len() as u32);
+            vertices.push(vertex);
+        }
+    }
+
+    mesh.vertices = vertices;
+    mesh.indices = indices;
+    mesh.recalculate_aabb();
+}
+
+fn stone_surface_color(position: Vec3, seed: f32, face_index: f32) -> [f32; 4] {
+    let broad_mottle = (position.x * 17.0 + position.y * 11.0 + position.z * 13.0 + seed).sin();
+    let fine_grain = (position.x * 41.0 - position.y * 29.0 + position.z * 37.0 + seed * 0.7).sin();
+    let fleck = (face_index * 2.399 + seed * 1.73).sin();
+    let vein = (position.x * 23.0 + position.y * 19.0 - position.z * 21.0 + seed * 0.3).sin();
+    let crack = if vein.abs() < 0.075 { 0.70 } else { 1.0 };
+    let brightness = (0.86 + 0.10 * broad_mottle + 0.055 * fine_grain + 0.035 * fleck) * crack;
+    let warm_mineral =
+        (0.5 + 0.5 * (position.x * 8.0 + position.z * 12.0 + seed).sin()).powi(8) * 0.045;
+    [
+        (0.39 * brightness + warm_mineral).clamp(0.0, 1.0),
+        (0.41 * brightness + warm_mineral * 0.68).clamp(0.0, 1.0),
+        (0.43 * brightness + warm_mineral * 0.30).clamp(0.0, 1.0),
+        1.0,
+    ]
 }
 
 fn add_showcase_object(
@@ -809,6 +1346,49 @@ mod tests {
         assert_eq!(scene.root_objects.len(), 4);
         assert!(scene.active_camera_id.is_some());
         assert_eq!(scene.camera_ids().len(), 1);
+    }
+
+    #[test]
+    fn test_showcase_scene_contains_facade_and_garden_detail() {
+        let scene = Scene::create_showcase_scene();
+        let names: std::collections::HashSet<&str> = scene
+            .objects
+            .values()
+            .map(|object| object.name.as_str())
+            .collect();
+
+        for expected in [
+            "Porch Deck",
+            "Roof Ridge Cap",
+            "Left Vertical Muntin",
+            "Tree Branch Left",
+            "Garden Fence Upper Rail",
+            "Flower Head 1",
+            "Stepping Stone 4",
+        ] {
+            assert!(
+                names.contains(expected),
+                "missing showcase detail: {expected}"
+            );
+        }
+        assert!(scene.objects.len() >= 60);
+
+        for textured_name in ["Tree Trunk", "Garden Fence Picket 1", "Rock"] {
+            let mesh = &scene
+                .objects
+                .values()
+                .find(|object| object.name == textured_name)
+                .expect("textured showcase object exists")
+                .mesh;
+            assert!(mesh.validate().is_ok(), "invalid mesh for {textured_name}");
+            let initial_color = mesh.vertices[0].color;
+            assert!(
+                mesh.vertices
+                    .iter()
+                    .any(|vertex| vertex.color != initial_color),
+                "texture colors should vary across {textured_name}"
+            );
+        }
     }
 
     #[test]

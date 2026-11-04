@@ -77,6 +77,10 @@ pub struct Forge3dStudioApp {
     pub fps: f32,
     pub frame_time_ms: f32,
 
+    /// Elapsed time for the in-viewport showcase construction visualization.
+    /// `None` means the playback is complete or not running.
+    pub showcase_demo_elapsed: Option<f32>,
+
     // Multi-object transformation initial transforms cache
     pub gizmo_initial_transforms: std::collections::HashMap<ObjectId, Transform>,
 
@@ -103,6 +107,41 @@ fn set_showcase_camera_view(camera: &mut Camera) {
     camera.eye = Vec3::new(7.2, 5.25, 8.2);
     camera.up = Vec3::Y;
     camera.sync_zoom_targets();
+}
+
+fn showcase_object_stage(name: &str) -> usize {
+    if name == "Grassy Ground" || name == "Front Path" {
+        0
+    } else if name == "House Foundation" || name == "House Walls" {
+        1
+    } else if name.starts_with("Roof ") || name.starts_with("Chimney") {
+        2
+    } else if name.starts_with("Porch ")
+        || name == "Front Door"
+        || name == "Door Handle"
+        || name.contains("Window")
+    {
+        3
+    } else if name.starts_with("Tree ") {
+        4
+    } else {
+        5
+    }
+}
+
+fn reveal_showcase_through_stage(scene: &mut Scene, stage: usize) -> bool {
+    let mut changed = false;
+    for object in scene.objects.values_mut() {
+        let should_be_visible = showcase_object_stage(&object.name) <= stage;
+        if object.visible != should_be_visible {
+            object.visible = should_be_visible;
+            changed = true;
+        }
+    }
+    if changed {
+        scene.dirty = true;
+    }
+    changed
 }
 
 impl Forge3dStudioApp {
@@ -162,7 +201,7 @@ impl Forge3dStudioApp {
         camera.settings.smooth_zoom = editor_state.panel_settings.smooth_zoom;
         set_showcase_camera_view(&mut camera);
 
-        Self {
+        let mut app = Self {
             scene: Scene::create_showcase_scene(),
             selection: SelectionState::new(),
             editor_state,
@@ -186,10 +225,13 @@ impl Forge3dStudioApp {
             last_frame_instant: Instant::now(),
             fps: 60.0,
             frame_time_ms: 16.6,
+            showcase_demo_elapsed: None,
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
             pending_hover_pick: None,
-        }
+        };
+        app.start_showcase_demo();
+        app
     }
 
     /// Creates a headless instance of the app (no GPU/eframe required) for automated integration testing.
@@ -223,6 +265,7 @@ impl Forge3dStudioApp {
             last_frame_instant: Instant::now(),
             fps: 60.0,
             frame_time_ms: 16.6,
+            showcase_demo_elapsed: None,
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
             pending_hover_pick: None,
@@ -1038,7 +1081,41 @@ impl Forge3dStudioApp {
             renderer.invalidate_all_meshes();
         }
 
-        self.status_message = "Loaded showcase: House, Tree & Rock".to_string();
+        self.start_showcase_demo();
+    }
+
+    /// Starts the timed, clearly labeled visual walkthrough of the showcase scene.
+    pub fn start_showcase_demo(&mut self) {
+        self.showcase_demo_elapsed = Some(0.0);
+        reveal_showcase_through_stage(&mut self.scene, 0);
+        self.pending_hover_pick = None;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.invalidate_picking();
+        }
+        self.status_message = "Showcase demo: visually previewing the build steps".to_string();
+    }
+
+    fn update_showcase_demo(&mut self, dt: f32) {
+        let Some(elapsed) = self.showcase_demo_elapsed else {
+            return;
+        };
+
+        let elapsed = elapsed + dt.max(0.0);
+        let stage_duration = 1.35;
+        let stage = ((elapsed / stage_duration).floor() as usize).min(5);
+        if reveal_showcase_through_stage(&mut self.scene, stage) {
+            self.pending_hover_pick = None;
+            if let Some(renderer) = &mut self.renderer {
+                renderer.invalidate_picking();
+            }
+        }
+
+        if elapsed >= stage_duration * 6.0 + 0.35 {
+            self.showcase_demo_elapsed = None;
+            self.status_message = "Showcase build demo complete".to_string();
+        } else {
+            self.showcase_demo_elapsed = Some(elapsed);
+        }
     }
 
     pub fn render_app_ui(&mut self, ui: &mut egui::Ui) {
@@ -1052,6 +1129,10 @@ impl Forge3dStudioApp {
             let current_fps = 1.0 / dt;
             self.fps = self.fps * 0.9 + current_fps * 0.1;
             self.frame_time_ms = dt * 1000.0;
+        }
+        if self.showcase_demo_elapsed.is_some() {
+            self.update_showcase_demo(dt);
+            ctx.request_repaint();
         }
 
         // Safety: Window focus loss cancels modal operations safely
@@ -1826,4 +1907,51 @@ pub fn calculate_drag_delta(
             None
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn showcase_demo_reveals_stages_and_finishes_with_everything_visible() {
+        let mut app = Forge3dStudioApp::new_headless();
+        app.load_showcase_scene();
+
+        let object_named = |app: &Forge3dStudioApp, name: &str| {
+            app.scene
+                .objects
+                .values()
+                .find(|object| object.name == name)
+                .unwrap_or_else(|| panic!("missing showcase object: {name}"))
+                .visible
+        };
+
+        assert_eq!(app.showcase_demo_elapsed, Some(0.0));
+        assert!(object_named(&app, "Grassy Ground"));
+        assert!(!object_named(&app, "House Foundation"));
+        assert!(!object_named(&app, "Tree Trunk"));
+
+        app.update_showcase_demo(1.4);
+        assert!(object_named(&app, "House Foundation"));
+        assert!(!object_named(&app, "Roof Left"));
+
+        app.update_showcase_demo(1.4);
+        assert!(object_named(&app, "Roof Left"));
+        assert!(!object_named(&app, "Porch Deck"));
+
+        app.update_showcase_demo(1.4);
+        assert!(object_named(&app, "Porch Deck"));
+        assert!(!object_named(&app, "Tree Trunk"));
+
+        app.update_showcase_demo(1.4);
+        assert!(object_named(&app, "Tree Trunk"));
+        assert!(!object_named(&app, "Rock"));
+
+        app.update_showcase_demo(1.4);
+        assert!(object_named(&app, "Rock"));
+        app.update_showcase_demo(1.5);
+        assert_eq!(app.showcase_demo_elapsed, None);
+        assert!(app.scene.objects.values().all(|object| object.visible));
+    }
 }

@@ -438,7 +438,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         ui.menu_button("Examples", |ui| {
             ui.label(egui::RichText::new("Ready-made scenes").weak().size(11.0));
-            if ui.button("House, Tree & Rock").clicked() {
+            if ui.button("Replay House Build Demo").clicked() {
                 app.load_showcase_scene();
                 ui.close();
             }

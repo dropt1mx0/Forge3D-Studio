@@ -219,7 +219,9 @@ cargo run --release -p forge3d-studio
   3. Expand `crates/forge-geometry` with B-Rep modeling operations (Loop Cut, Bevel, Dissolve).
 
 ## 8. Built-in Showcase Scene (2026-11-04)
-- Added `Scene::create_showcase_scene()` with a grassy yard, detailed house facade and roof, broadleaf tree, and faceted rock/pebble, all built from existing procedural meshes.
-- The graphical app now opens with the showcase scene and a camera view composed for the house/tree/rock arrangement. `File -> New Scene` and headless app initialization retain the existing default scene.
-- Added `Examples -> House, Tree & Rock` to reload the sample; it clears transient selection/edit state and invalidates the viewport mesh cache.
+- Expanded `Scene::create_showcase_scene()` with a porch, roof trim, window muntins and sills, tree branches and foliage highlights, garden fence, shrubs, flowers, and individual stepping stones.
+- The graphical app opens with a timed build walkthrough: terrain, house shell, roof, facade, tree, then rock and garden details appear over roughly 8.5 seconds. The finished scene remains fully visible.
+- Added an in-viewport virtual keyboard and animated pointer, explicitly labeled as simulated visual playback that sends no operating-system input. `Examples -> Replay House Build Demo` replays the sequence for screen capture.
+- Baked procedural vertex-color textures into tree bark and branches, fence rails and pickets, the main rock, pebble, and stepping stones. The current renderer displays these without image assets; image texture loading and GPU sampling are not implemented yet.
+- `File -> New Scene` and headless app initialization retain the existing default scene; reloading the showcase still clears transient selection/edit state and invalidates renderer caches.
 - Validation: `cargo fmt --all -- --check`, `cargo check --workspace`, and the final `cargo test --workspace --quiet` run passed. `cargo clippy -p forge-scene --all-targets -- -D warnings` passed. A strict workspace Clippy run remains blocked by existing lints in `forge-render` (nested `if`, long picking APIs, manual `div_ceil`, and test camera field reassignment). One earlier GPU latency assertion failed under the initial full-build load; the isolated rerun and final full suite passed.
