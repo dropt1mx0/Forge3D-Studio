@@ -1287,6 +1287,7 @@ dependencies = [
  "forge-geometry",
  "forge-gpu",
  "forge-math",
+ "forge-modifiers",
  "forge-scene",
  "glam",
  "serde",

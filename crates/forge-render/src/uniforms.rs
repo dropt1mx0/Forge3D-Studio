@@ -3,7 +3,7 @@ use forge_math::{Mat4, Vec3};
 
 /// Camera uniform buffer data matching WGSL bind group 0 layout.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
     pub camera_pos: [f32; 4], // xyz = position, w = 1.0 (16-byte alignment)
@@ -20,7 +20,7 @@ impl CameraUniform {
 
 /// Object uniform buffer data matching WGSL bind group 1 layout.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct ObjectUniform {
     pub model: [[f32; 4]; 4],
     pub color: [f32; 4],
