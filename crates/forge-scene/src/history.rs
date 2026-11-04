@@ -224,10 +224,10 @@ impl HistoryStack {
                 new_mesh: prev_new,
                 ..
             }) = self.undo_stack.last()
+                && prev_id == id
+                && (Arc::ptr_eq(old_mesh, prev_new) || *old_mesh == *prev_new)
             {
-                if prev_id == id && (Arc::ptr_eq(old_mesh, prev_new) || *old_mesh == *prev_new) {
-                    *old_mesh = Arc::clone(prev_new);
-                }
+                *old_mesh = Arc::clone(prev_new);
             }
         }
 
@@ -680,11 +680,11 @@ mod tests {
         assert_eq!(history.redo_stack.len(), 5);
 
         // Step-by-step Redo
-        for i in 1..=5 {
+        for (i, mesh) in meshes.iter().enumerate().skip(1) {
             history.redo(&mut scene);
             assert_eq!(
                 scene.get_object(id).unwrap().mesh.vertices[0].position,
-                meshes[i].vertices[0].position,
+                mesh.vertices[0].position,
                 "Redo step must precisely restore mesh state {i}"
             );
         }

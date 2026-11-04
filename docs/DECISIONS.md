@@ -348,3 +348,14 @@
 - **Consequences:**
   Forge3D can now import and export standard 3D assets with full roundtrip fidelity, multi-object hierarchy preservation, zero panic on malformed inputs, and complete undo/redo integration. All 149 automated workspace tests pass cleanly with zero warnings under clippy and fmt.
 
+## ADR-0019: Built-in House, Tree & Rock Showcase Scene
+- **Status:** Accepted
+- **Date:** 2026-11-04
+- **Context:**
+  Forge3D's startup scene demonstrates individual primitives, but users need a more recognizable composition that can be viewed immediately and reloaded while learning the application. Creating the scene through editor interactions is not always available in automated or constrained desktop sessions.
+- **Decision:**
+  1. Add `Scene::create_showcase_scene()` in `forge-scene`, using the existing procedural mesh generators and per-object colors to build a small house, broadleaf tree, faceted rock, and yard.
+  2. Keep `create_default_scene()` unchanged for the standard modeling workspace and headless interaction fixtures.
+  3. Start the visible studio application in the showcase view and add `Examples -> House, Tree & Rock` to restore it from the UI. Loading resets selection/edit state, invalidates renderer caches, and frames a composition-specific camera view.
+- **Consequences:**
+  A user can launch Forge3D and see a complete example composition immediately, then reload it from the menu without external assets. The scene uses simple solid colors and primitive meshes; editable material and lighting systems remain future work.

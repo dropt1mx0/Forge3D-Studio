@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
 use forge_core::id::ObjectId;
-use forge_geometry::primitives::{generate_cube, generate_plane, generate_uv_sphere};
-use forge_math::{Aabb, Ray, Transform, Vec3};
+use forge_geometry::primitives::{
+    generate_cube, generate_cylinder, generate_icosphere, generate_plane, generate_uv_sphere,
+};
+use forge_math::{Aabb, Quat, Ray, Transform, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::object::{PrimitiveType, SceneObject};
@@ -569,6 +571,231 @@ impl Scene {
 
         scene
     }
+
+    /// Creates a colorful, camera-ready sample scene with a house, tree, rock, and yard.
+    ///
+    /// This remains separate from `create_default_scene()` so the standard primitive
+    /// workspace and its editing workflows keep their existing behavior.
+    pub fn create_showcase_scene() -> Self {
+        let mut scene = Self::new("House, Tree & Rock Showcase");
+
+        add_showcase_object(
+            &mut scene,
+            "Grassy Ground",
+            PrimitiveType::Plane,
+            generate_plane(10.0, 1),
+            Transform::IDENTITY,
+            [0.25, 0.36, 0.23, 1.0],
+        );
+
+        // A short stone path makes the front entrance read clearly in the viewport.
+        add_showcase_object(
+            &mut scene,
+            "Front Path",
+            PrimitiveType::Cube,
+            generate_cube(1.0),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(0.0, 0.035, 1.72),
+                Quat::IDENTITY,
+                Vec3::new(0.72, 0.07, 1.35),
+            ),
+            [0.48, 0.46, 0.42, 1.0],
+        );
+
+        // House body, plinth, and pitched two-piece roof.
+        add_showcase_object(
+            &mut scene,
+            "House Foundation",
+            PrimitiveType::Cube,
+            generate_cube(1.0),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(0.0, 0.09, 0.0),
+                Quat::IDENTITY,
+                Vec3::new(2.42, 0.18, 2.02),
+            ),
+            [0.34, 0.35, 0.36, 1.0],
+        );
+        add_showcase_object(
+            &mut scene,
+            "House Walls",
+            PrimitiveType::Cube,
+            generate_cube(1.0),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(0.0, 0.86, 0.0),
+                Quat::IDENTITY,
+                Vec3::new(2.2, 1.62, 1.8),
+            ),
+            [0.76, 0.53, 0.33, 1.0],
+        );
+        let roof_angle = 35.0_f32.to_radians();
+        for (name, x, angle) in [
+            ("Roof Left", -0.63, roof_angle),
+            ("Roof Right", 0.63, -roof_angle),
+        ] {
+            add_showcase_object(
+                &mut scene,
+                name,
+                PrimitiveType::Cube,
+                generate_cube(1.0),
+                Transform::from_translation_rotation_scale(
+                    Vec3::new(x, 2.08, 0.0),
+                    Quat::from_rotation_z(angle),
+                    Vec3::new(1.55, 0.18, 2.12),
+                ),
+                [0.43, 0.16, 0.13, 1.0],
+            );
+        }
+        add_showcase_object(
+            &mut scene,
+            "Chimney",
+            PrimitiveType::Cube,
+            generate_cube(1.0),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(0.58, 2.49, -0.34),
+                Quat::IDENTITY,
+                Vec3::new(0.38, 0.72, 0.42),
+            ),
+            [0.50, 0.28, 0.22, 1.0],
+        );
+
+        add_showcase_object(
+            &mut scene,
+            "Front Door",
+            PrimitiveType::Cube,
+            generate_cube(1.0),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(0.0, 0.69, 0.95),
+                Quat::IDENTITY,
+                Vec3::new(0.58, 1.14, 0.10),
+            ),
+            [0.27, 0.15, 0.09, 1.0],
+        );
+        add_showcase_object(
+            &mut scene,
+            "Door Handle",
+            PrimitiveType::Sphere,
+            generate_uv_sphere(0.065, 16, 8),
+            Transform::from_translation(Vec3::new(0.18, 0.72, 1.015)),
+            [0.88, 0.67, 0.25, 1.0],
+        );
+
+        // Two blue window panes with simple cream-colored frames on the front wall.
+        for (side, x) in [("Left", -0.69), ("Right", 0.69)] {
+            add_showcase_object(
+                &mut scene,
+                format!("{side} Window Glass"),
+                PrimitiveType::Cube,
+                generate_cube(1.0),
+                Transform::from_translation_rotation_scale(
+                    Vec3::new(x, 1.12, 0.95),
+                    Quat::IDENTITY,
+                    Vec3::new(0.48, 0.40, 0.06),
+                ),
+                [0.30, 0.69, 0.79, 1.0],
+            );
+            for (frame, frame_x, frame_y, frame_scale) in [
+                ("Top", x, 1.37, Vec3::new(0.58, 0.07, 0.10)),
+                ("Bottom", x, 0.87, Vec3::new(0.58, 0.07, 0.10)),
+                ("Left", x - 0.275, 1.12, Vec3::new(0.07, 0.50, 0.10)),
+                ("Right", x + 0.275, 1.12, Vec3::new(0.07, 0.50, 0.10)),
+            ] {
+                add_showcase_object(
+                    &mut scene,
+                    format!("{side} Window {frame} Frame"),
+                    PrimitiveType::Cube,
+                    generate_cube(1.0),
+                    Transform::from_translation_rotation_scale(
+                        Vec3::new(frame_x, frame_y, 0.99),
+                        Quat::IDENTITY,
+                        frame_scale,
+                    ),
+                    [0.88, 0.76, 0.55, 1.0],
+                );
+            }
+        }
+
+        // A broadleaf tree with a visible trunk and overlapping low-poly foliage.
+        add_showcase_object(
+            &mut scene,
+            "Tree Trunk",
+            PrimitiveType::Cylinder,
+            generate_cylinder(0.23, 1.85, 16),
+            Transform::from_translation(Vec3::new(3.18, 0.925, -0.18)),
+            [0.34, 0.20, 0.11, 1.0],
+        );
+        for (name, position, radius, color) in [
+            (
+                "Tree Canopy Center",
+                Vec3::new(3.18, 2.13, -0.18),
+                0.87,
+                [0.19, 0.43, 0.22, 1.0],
+            ),
+            (
+                "Tree Canopy Left",
+                Vec3::new(2.62, 2.42, -0.18),
+                0.65,
+                [0.24, 0.51, 0.25, 1.0],
+            ),
+            (
+                "Tree Canopy Right",
+                Vec3::new(3.73, 2.43, -0.18),
+                0.66,
+                [0.27, 0.55, 0.27, 1.0],
+            ),
+        ] {
+            add_showcase_object(
+                &mut scene,
+                name,
+                PrimitiveType::Icosphere,
+                generate_icosphere(radius, 2),
+                Transform::from_translation(position),
+                color,
+            );
+        }
+
+        // Faceted stone and a smaller pebble complete the yard composition.
+        add_showcase_object(
+            &mut scene,
+            "Rock",
+            PrimitiveType::Icosphere,
+            generate_icosphere(0.82, 1),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(-3.15, 0.42, 0.18),
+                Quat::from_rotation_y(0.24),
+                Vec3::new(1.0, 0.56, 0.82),
+            ),
+            [0.43, 0.45, 0.47, 1.0],
+        );
+        add_showcase_object(
+            &mut scene,
+            "Pebble",
+            PrimitiveType::Icosphere,
+            generate_icosphere(0.36, 1),
+            Transform::from_translation_rotation_scale(
+                Vec3::new(-2.47, 0.18, 0.92),
+                Quat::from_rotation_y(-0.31),
+                Vec3::new(1.0, 0.55, 0.76),
+            ),
+            [0.51, 0.52, 0.50, 1.0],
+        );
+
+        scene
+    }
+}
+
+fn add_showcase_object(
+    scene: &mut Scene,
+    name: impl Into<String>,
+    primitive_type: PrimitiveType,
+    mesh: forge_geometry::Mesh,
+    transform: Transform,
+    color: [f32; 4],
+) {
+    scene.add_object(
+        SceneObject::new(name, primitive_type, mesh)
+            .with_transform(transform)
+            .with_color(color),
+    );
 }
 
 #[cfg(test)]

@@ -98,6 +98,13 @@ pub struct PendingHoverPick {
     pub invalidation_epoch: u64,
 }
 
+fn set_showcase_camera_view(camera: &mut Camera) {
+    camera.target = Vec3::new(0.0, 1.15, 0.0);
+    camera.eye = Vec3::new(7.2, 5.25, 8.2);
+    camera.up = Vec3::Y;
+    camera.sync_zoom_targets();
+}
+
 impl Forge3dStudioApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         // Set Cinema 4D / Octane dark studio aesthetic (#121316 base, #2563eb selection)
@@ -153,15 +160,17 @@ impl Forge3dStudioApp {
         camera.settings.zoom_sensitivity = editor_state.panel_settings.zoom_sensitivity;
         camera.settings.zoom_to_cursor = editor_state.panel_settings.zoom_to_cursor;
         camera.settings.smooth_zoom = editor_state.panel_settings.smooth_zoom;
+        set_showcase_camera_view(&mut camera);
 
         Self {
-            scene: Scene::create_default_scene(),
+            scene: Scene::create_showcase_scene(),
             selection: SelectionState::new(),
             editor_state,
             camera,
             renderer,
             gpu_info,
-            status_message: "Ready. Welcome to Forge3D Rust Edition.".to_string(),
+            status_message: "Showcase ready: house, tree, and rock. Open Examples to reload it."
+                .to_string(),
             show_about_dialog: false,
             show_gpu_dialog: false,
             show_material_editor: false,
@@ -1002,6 +1011,36 @@ impl Forge3dStudioApp {
         }
         self.status_message = "Framed All".to_string();
     }
+
+    /// Replaces the current scene with the built-in house, tree, and rock showcase.
+    pub fn load_showcase_scene(&mut self) {
+        if self.editor_state.modal_transform.active {
+            self.cancel_modal_transform();
+        }
+        if self.object_drag_state.is_some() {
+            self.cancel_object_drag();
+        }
+
+        self.scene = Scene::create_showcase_scene();
+        self.selection.deselect();
+        self.history.clear();
+        self.active_edit_mesh = None;
+        self.edit_overlay_cache.clear();
+        self.editor_state.edit_mode = EditMode::Object;
+        self.editor_state.fly_nav_active = false;
+        self.editor_state.pointer_state = forge_scene::PointerInteractionState::Idle;
+        self.gizmo_state.drag_state = None;
+        self.gizmo_initial_transforms.clear();
+        self.pending_hover_pick = None;
+        set_showcase_camera_view(&mut self.camera);
+
+        if let Some(renderer) = &mut self.renderer {
+            renderer.invalidate_all_meshes();
+        }
+
+        self.status_message = "Loaded showcase: House, Tree & Rock".to_string();
+    }
+
     pub fn render_app_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 

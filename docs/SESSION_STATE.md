@@ -1,7 +1,7 @@
 # Forge3D Rust Edition — Session State
 
 **Document Status:** Current  
-**Last Updated:** 2026-11-03  
+**Last Updated:** 2026-11-04
 **Current Milestone:** Forge3D Phase 5 — Asset Pipeline MVP: Wavefront OBJ Import / Export (Complete, 149/149 tests passing)
 
 ---
@@ -217,3 +217,9 @@ cargo run --release -p forge3d-studio
   1. Phase 4: PBR materials & direct/environment lighting pipeline in `crates/forge-render`.
   2. Implement glTF 2.0 / GLB import and export in `crates/forge-io`.
   3. Expand `crates/forge-geometry` with B-Rep modeling operations (Loop Cut, Bevel, Dissolve).
+
+## 8. Built-in Showcase Scene (2026-11-04)
+- Added `Scene::create_showcase_scene()` with a grassy yard, detailed house facade and roof, broadleaf tree, and faceted rock/pebble, all built from existing procedural meshes.
+- The graphical app now opens with the showcase scene and a camera view composed for the house/tree/rock arrangement. `File -> New Scene` and headless app initialization retain the existing default scene.
+- Added `Examples -> House, Tree & Rock` to reload the sample; it clears transient selection/edit state and invalidates the viewport mesh cache.
+- Validation: `cargo fmt --all -- --check`, `cargo check --workspace`, and the final `cargo test --workspace --quiet` run passed. `cargo clippy -p forge-scene --all-targets -- -D warnings` passed. A strict workspace Clippy run remains blocked by existing lints in `forge-render` (nested `if`, long picking APIs, manual `div_ceil`, and test camera field reassignment). One earlier GPU latency assertion failed under the initial full-build load; the isolated rerun and final full suite passed.
