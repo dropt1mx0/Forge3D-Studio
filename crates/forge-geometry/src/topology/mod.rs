@@ -35,8 +35,8 @@ pub use half_edge::HalfEdge;
 pub use handles::{EdgeHandle, FaceHandle, HalfEdgeHandle, VertexHandle};
 pub use mesh::HalfEdgeMesh;
 pub use operations::{
-    CollapseEdgeResult, ExtrudeFaceResult, FlipEdgeResult, MergeFacesResult, PokeFaceResult,
-    SplitEdgeResult, SplitFaceResult,
+    CollapseEdgeResult, ExtrudeFaceResult, FlipEdgeResult, InsetFaceResult, MergeFacesResult,
+    PokeFaceResult, SplitEdgeResult, SplitFaceResult,
 };
 pub use selection::{EdgeSelectionPath, TerminationReason};
 pub use validation::{

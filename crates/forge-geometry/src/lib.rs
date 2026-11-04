@@ -20,9 +20,10 @@ pub use primitives::{
 pub use topology::{
     CollapseEdgeResult, EdgeHandle, EdgeSelectionPath, ExtrudeFaceResult, FaceHandle,
     FlipEdgeResult, HalfEdge, HalfEdgeEdge, HalfEdgeFace, HalfEdgeHandle, HalfEdgeMesh,
-    HalfEdgeVertex, IssueCategory, IssueSeverity, MergeFacesResult, PokeFaceResult,
-    SplitEdgeResult, SplitFaceResult, TerminationReason, TopologyBuilder, TopologyError,
-    TopologyReport, TopologyValidator, ValidationIssue, ValidationReport, VertexHandle,
+    HalfEdgeVertex, InsetFaceResult, IssueCategory, IssueSeverity, MergeFacesResult,
+    PokeFaceResult, SplitEdgeResult, SplitFaceResult, TerminationReason, TopologyBuilder,
+    TopologyError, TopologyReport, TopologyValidator, ValidationIssue, ValidationReport,
+    VertexHandle,
 };
 pub use validation::validate_mesh_data;
 pub use vertex::{LineVertex, Vertex};

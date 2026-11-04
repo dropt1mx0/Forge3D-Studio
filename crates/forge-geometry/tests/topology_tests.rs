@@ -1024,3 +1024,36 @@ fn test_extrude_face() {
     assert_eq!(report.boundary_loop_count, 0);
     assert_eq!(report.euler_characteristic, 2);
 }
+
+#[test]
+fn test_inset_face() {
+    let positions = vec![
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(2.0, 0.0, 0.0),
+        Vec3::new(2.0, 2.0, 0.0),
+        Vec3::new(0.0, 2.0, 0.0),
+    ];
+    let faces = vec![vec![0, 1, 2, 3]];
+    let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
+    let f = mesh.faces().next().unwrap();
+
+    let res = mesh.inset_face(f, 0.5).expect("Inset face failed");
+    assert_eq!(res.original_face(), f);
+    assert!(mesh.is_valid_face(res.inner_face()));
+    assert_eq!(res.new_vertices().len(), 4);
+    assert_eq!(res.new_edges().len(), 8);
+    assert_eq!(res.new_side_faces().len(), 3);
+    assert_eq!(res.side_faces().len(), 4);
+    assert_eq!(res.new_half_edges().len(), 16);
+
+    assert_eq!(mesh.num_vertices(), 8);
+    assert_eq!(mesh.num_edges(), 12);
+    assert_eq!(mesh.num_faces(), 5);
+    assert_eq!(mesh.num_half_edges(), 24);
+
+    let report = mesh.validate_topology();
+    assert!(report.is_valid);
+    assert!(report.is_manifold);
+    assert_eq!(report.boundary_loop_count, 1);
+    assert_eq!(report.euler_characteristic, 1);
+}

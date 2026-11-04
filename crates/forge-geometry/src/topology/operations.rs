@@ -447,6 +447,88 @@ impl From<ExtrudeFaceResult> for FaceHandle {
     }
 }
 
+/// The typed result of a successful `inset_face` topological operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct InsetFaceResult {
+    /// The original face handle, preserved as the first side face (side face 0) in the surrounding region.
+    pub original_face: FaceHandle,
+    /// The newly created inner face handle.
+    pub inner_face: FaceHandle,
+    /// The newly created inner vertex handles (length = N).
+    pub new_vertices: Vec<VertexHandle>,
+    /// The newly created edge handles (inner edges + radial edges, length = 2 * N).
+    pub new_edges: Vec<EdgeHandle>,
+    /// The newly created side face handles (length = N - 1).
+    pub new_side_faces: Vec<FaceHandle>,
+    /// The newly created half-edge handles (inner half-edges + radial half-edges, length = 4 * N).
+    pub new_half_edges: Vec<HalfEdgeHandle>,
+}
+
+impl InsetFaceResult {
+    #[inline]
+    pub fn original_face(&self) -> FaceHandle {
+        self.original_face
+    }
+
+    #[inline]
+    pub fn inner_face(&self) -> FaceHandle {
+        self.inner_face
+    }
+
+    #[inline]
+    pub fn face(&self) -> FaceHandle {
+        self.inner_face
+    }
+
+    #[inline]
+    pub fn new_vertices(&self) -> &[VertexHandle] {
+        &self.new_vertices
+    }
+
+    #[inline]
+    pub fn new_edges(&self) -> &[EdgeHandle] {
+        &self.new_edges
+    }
+
+    #[inline]
+    pub fn new_side_faces(&self) -> &[FaceHandle] {
+        &self.new_side_faces
+    }
+
+    /// Returns all side faces forming the surrounding region (length = N).
+    ///
+    /// The first side face is `original_face`, followed by `new_side_faces`.
+    #[inline]
+    pub fn side_faces(&self) -> Vec<FaceHandle> {
+        let mut faces = Vec::with_capacity(1 + self.new_side_faces.len());
+        faces.push(self.original_face);
+        faces.extend_from_slice(&self.new_side_faces);
+        faces
+    }
+
+    #[inline]
+    pub fn new_half_edges(&self) -> &[HalfEdgeHandle] {
+        &self.new_half_edges
+    }
+}
+
+impl std::ops::Deref for InsetFaceResult {
+    type Target = FaceHandle;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.inner_face
+    }
+}
+
+impl From<InsetFaceResult> for FaceHandle {
+    #[inline]
+    fn from(res: InsetFaceResult) -> Self {
+        res.inner_face
+    }
+}
+
 impl HalfEdgeMesh {
     /// Inserts a new vertex along edge `e` at linear interpolation parameter `t` in (0, 1).
     ///
@@ -1780,6 +1862,376 @@ impl HalfEdgeMesh {
             new_vertices: top_v,
             new_edges,
             new_faces,
+            new_half_edges,
+        })
+    }
+
+    /// Creates an inset region inside a single convex planar face by `offset`.
+    ///
+    /// Generates a smaller inner face and side quad faces connecting its boundary to the original
+    /// face boundary, preserving `face` as the first side face (side face 0) in the surrounding region.
+    /// Transactionally rolls back if an invariant is violated.
+    pub fn inset_face(
+        &mut self,
+        face: FaceHandle,
+        offset: f32,
+    ) -> Result<InsetFaceResult, TopologyError> {
+        // 1. Pre-validation
+        if !self.is_valid_face(face) {
+            return Err(TopologyError::InvalidFace(face));
+        }
+
+        if !offset.is_finite() || offset <= 0.0 {
+            return Err(TopologyError::InvalidOperation(
+                "Inset offset must be finite and strictly positive".into(),
+            ));
+        }
+
+        let h_cycle = self.face_loop_safe(face)?;
+        let n = h_cycle.len();
+        if n < 3 {
+            return Err(TopologyError::Degenerate(format!(
+                "Face {face} has fewer than 3 vertices ({n})"
+            )));
+        }
+
+        let norm_face = self.face_normal(face);
+        if norm_face.length_squared() < 1e-12 {
+            return Err(TopologyError::Degenerate(
+                "Cannot inset degenerate face with zero area or undefined normal".into(),
+            ));
+        }
+
+        let orig_area = self.face_area(face);
+        if orig_area <= 1e-8 {
+            return Err(TopologyError::Degenerate(format!(
+                "Cannot inset degenerate face {face} with near-zero area ({orig_area})"
+            )));
+        }
+
+        // Collect boundary vertex handles, positions, and attributes
+        let mut orig_v = Vec::with_capacity(n);
+        let mut orig_pos = Vec::with_capacity(n);
+        let mut orig_uvs = Vec::with_capacity(n);
+        let mut orig_norms = Vec::with_capacity(n);
+
+        for &h in &h_cycle {
+            let he = self.half_edge(h).unwrap();
+            let v = he.origin;
+            orig_v.push(v);
+            let v_data = self.vertex(v).unwrap();
+            orig_pos.push(v_data.position);
+            orig_uvs.push(he.uv.or(v_data.uv));
+            orig_norms.push(he.normal.or(v_data.normal).unwrap_or(norm_face));
+        }
+
+        // Planarity check: all vertices must lie on the face plane
+        let p0 = orig_pos[0];
+        for &pos in &orig_pos[1..] {
+            let dist_to_plane = ((pos - p0).dot(norm_face)).abs();
+            if dist_to_plane > 1e-3 {
+                return Err(TopologyError::InvalidOperation(
+                    "Face is not sufficiently planar for inset".into(),
+                ));
+            }
+        }
+
+        // Edge vectors, lengths, tangents, and strict convexity check
+        let mut edge_tangents = Vec::with_capacity(n);
+        let mut edge_inward_normals = Vec::with_capacity(n);
+
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let edge_vec = orig_pos[next_i] - orig_pos[i];
+            let len = edge_vec.length();
+            if len < 1e-6 {
+                return Err(TopologyError::Degenerate(
+                    "Face contains degenerate zero-length edge".into(),
+                ));
+            }
+            let tangent = edge_vec / len;
+            let inward_norm = norm_face.cross(tangent).normalize_or_zero();
+            edge_tangents.push(tangent);
+            edge_inward_normals.push(inward_norm);
+        }
+
+        // Check strict convexity at every corner: (t_{prev} x t_{curr}) . norm_face > 1e-5
+        for i in 0..n {
+            let prev_i = (i + n - 1) % n;
+            let turn = edge_tangents[prev_i].cross(edge_tangents[i]).dot(norm_face);
+            if turn <= 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Face is not strictly convex: turn angle is non-positive or collinear".into(),
+                ));
+            }
+        }
+
+        // Compute 3D positions of inner vertices via exact parallel edge offset:
+        // delta_v = offset * (m_{prev} + m_{curr}) / (1 + m_{prev} . m_{curr})
+        let mut inner_pos = Vec::with_capacity(n);
+        for i in 0..n {
+            let prev_i = (i + n - 1) % n;
+            let m_prev = edge_inward_normals[prev_i];
+            let m_curr = edge_inward_normals[i];
+            let denom = 1.0 + m_prev.dot(m_curr);
+            if denom <= 1e-6 {
+                return Err(TopologyError::InvalidOperation(
+                    "Face corners degenerate or collinear".into(),
+                ));
+            }
+            let delta = (m_prev + m_curr) * (offset / denom);
+            let p_inner = orig_pos[i] + delta;
+            if !p_inner.x.is_finite() || !p_inner.y.is_finite() || !p_inner.z.is_finite() {
+                return Err(TopologyError::Degenerate(
+                    "Generated inner vertex positions contain non-finite coordinates".into(),
+                ));
+            }
+            inner_pos.push(p_inner);
+        }
+
+        // Validate inner polygon:
+        // 1. Strict convexity and CCW orientation of inner polygon
+        let mut inner_tangents = Vec::with_capacity(n);
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let edge_vec = inner_pos[next_i] - inner_pos[i];
+            let len = edge_vec.length();
+            if len < 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Offset too large: inner edge collapsed".into(),
+                ));
+            }
+            inner_tangents.push(edge_vec / len);
+        }
+
+        for i in 0..n {
+            let prev_i = (i + n - 1) % n;
+            let turn = inner_tangents[prev_i]
+                .cross(inner_tangents[i])
+                .dot(norm_face);
+            if turn <= 1e-5 {
+                return Err(TopologyError::InvalidOperation(
+                    "Offset too large: inner polygon inverted or self-intersecting".into(),
+                ));
+            }
+        }
+
+        // 2. Area of inner polygon
+        let mut inner_area_vec = Vec3::ZERO;
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            inner_area_vec += inner_pos[i].cross(inner_pos[next_i]);
+        }
+        let inner_area = 0.5 * inner_area_vec.dot(norm_face);
+        if inner_area <= 1e-6 {
+            return Err(TopologyError::InvalidOperation(
+                "Offset too large: inner polygon area collapsed".into(),
+            ));
+        }
+
+        // 3. Side face non-degeneracy
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            // Quad vertices: orig_pos[i], orig_pos[next_i], inner_pos[next_i], inner_pos[i]
+            let a1 = 0.5
+                * (orig_pos[next_i] - orig_pos[i])
+                    .cross(inner_pos[next_i] - orig_pos[i])
+                    .dot(norm_face);
+            let a2 = 0.5
+                * (inner_pos[next_i] - orig_pos[i])
+                    .cross(inner_pos[i] - orig_pos[i])
+                    .dot(norm_face);
+            let side_area = a1 + a2;
+            if a1 <= 1e-5 || a2 <= 1e-5 || side_area <= 1e-6 {
+                return Err(TopologyError::InvalidOperation(
+                    "Offset too large: side face collapsed, inverted, or self-intersecting".into(),
+                ));
+            }
+        }
+
+        // Snapshot state for atomic rollback
+        let backup = self.clone();
+
+        // 2. Allocate new inner vertices
+        let mut inner_v = Vec::with_capacity(n);
+        for i in 0..n {
+            let (uv, color, normal) = {
+                let ov = self.vertex(orig_v[i]).unwrap();
+                (ov.uv, ov.color, ov.normal)
+            };
+            let v_new = self.add_vertex(inner_pos[i]);
+            let v_mut = self.vertex_mut(v_new).unwrap();
+            v_mut.uv = uv;
+            v_mut.color = color;
+            v_mut.normal = normal.or(Some(norm_face));
+            inner_v.push(v_new);
+        }
+
+        // 3. Allocate faces:
+        // - inner_face
+        // - side faces: side face 0 is `face` (preserved original face handle)
+        //               side faces 1..N-1 are newly added
+        let dummy_he = HalfEdgeHandle::new(u32::MAX, 0);
+        let orig_mat_id = self.face(face).unwrap().material_id;
+
+        let inner_face = self.add_face(dummy_he);
+        self.face_mut(inner_face).unwrap().material_id = orig_mat_id;
+
+        let mut side_faces = Vec::with_capacity(n);
+        side_faces.push(face); // side face 0 is the original face
+        for _ in 1..n {
+            let sf = self.add_face(dummy_he);
+            self.face_mut(sf).unwrap().material_id = orig_mat_id;
+            side_faces.push(sf);
+        }
+
+        // 4. Allocate edges:
+        // - N inner edges (u_i -> u_{(i+1)%n})
+        // - N radial edges (v_i -> u_i)
+        let mut inner_edges = Vec::with_capacity(n);
+        for _ in 0..n {
+            inner_edges.push(self.add_edge(dummy_he));
+        }
+
+        let mut radial_edges = Vec::with_capacity(n);
+        for _ in 0..n {
+            radial_edges.push(self.add_edge(dummy_he));
+        }
+
+        // 5. Allocate half-edges:
+        // - Inner edges: h_in[i] (u_i -> u_{(i+1)%n} in inner_face)
+        //                t_in[i] (u_{(i+1)%n} -> u_i in side_faces[i])
+        let mut h_in = Vec::with_capacity(n);
+        let mut t_in = Vec::with_capacity(n);
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let hi = self.add_half_edge(inner_v[i], inner_edges[i], Some(inner_face));
+            let ti = self.add_half_edge(inner_v[next_i], inner_edges[i], Some(side_faces[i]));
+            h_in.push(hi);
+            t_in.push(ti);
+        }
+
+        // - Radial edges: r_up[i] (v_i -> u_i in side_faces[(i+n-1)%n])
+        //                 r_down[i] (u_i -> v_i in side_faces[i])
+        let mut r_up = Vec::with_capacity(n);
+        let mut r_down = Vec::with_capacity(n);
+        for i in 0..n {
+            let prev_side_i = (i + n - 1) % n;
+            let ru = self.add_half_edge(orig_v[i], radial_edges[i], Some(side_faces[prev_side_i]));
+            let rd = self.add_half_edge(inner_v[i], radial_edges[i], Some(side_faces[i]));
+            r_up.push(ru);
+            r_down.push(rd);
+        }
+
+        // 6. Connect twins
+        for i in 0..n {
+            // Inner edges
+            self.half_edge_mut(h_in[i]).unwrap().twin = t_in[i];
+            self.half_edge_mut(t_in[i]).unwrap().twin = h_in[i];
+            self.edge_mut(inner_edges[i]).unwrap().half_edge = h_in[i];
+
+            // Radial edges
+            self.half_edge_mut(r_up[i]).unwrap().twin = r_down[i];
+            self.half_edge_mut(r_down[i]).unwrap().twin = r_up[i];
+            self.edge_mut(radial_edges[i]).unwrap().half_edge = r_up[i];
+        }
+
+        // 7. Wire Inner Face cycle
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let prev_i = (i + n - 1) % n;
+            let hi = self.half_edge_mut(h_in[i]).unwrap();
+            hi.next = h_in[next_i];
+            hi.prev = h_in[prev_i];
+            hi.uv = orig_uvs[i];
+            hi.normal = Some(orig_norms[i]);
+        }
+        self.face_mut(inner_face).unwrap().half_edge = h_in[0];
+
+        // 8. Wire Side Face i cycles:
+        // Cycle: h_cycle[i] -> r_up[(i+1)%n] -> t_in[i] -> r_down[i] -> h_cycle[i]
+        for i in 0..n {
+            let next_i = (i + 1) % n;
+            let sf = side_faces[i];
+
+            let h_bot = h_cycle[i];
+            let r_right = r_up[next_i];
+            let h_top = t_in[i];
+            let r_left = r_down[i];
+
+            // Set face references
+            self.half_edge_mut(h_bot).unwrap().face = Some(sf);
+            self.half_edge_mut(r_right).unwrap().face = Some(sf);
+            self.half_edge_mut(h_top).unwrap().face = Some(sf);
+            self.half_edge_mut(r_left).unwrap().face = Some(sf);
+
+            // Set cycle links
+            self.half_edge_mut(h_bot).unwrap().next = r_right;
+            self.half_edge_mut(h_bot).unwrap().prev = r_left;
+
+            self.half_edge_mut(r_right).unwrap().next = h_top;
+            self.half_edge_mut(r_right).unwrap().prev = h_bot;
+
+            self.half_edge_mut(h_top).unwrap().next = r_left;
+            self.half_edge_mut(h_top).unwrap().prev = r_right;
+
+            self.half_edge_mut(r_left).unwrap().next = h_bot;
+            self.half_edge_mut(r_left).unwrap().prev = h_top;
+
+            self.face_mut(sf).unwrap().half_edge = h_bot;
+
+            // Corner attributes for side face
+            self.half_edge_mut(h_bot).unwrap().uv = orig_uvs[i];
+            self.half_edge_mut(h_bot).unwrap().normal = Some(orig_norms[i]);
+
+            self.half_edge_mut(r_right).unwrap().uv = orig_uvs[next_i];
+            self.half_edge_mut(r_right).unwrap().normal = Some(orig_norms[next_i]);
+
+            self.half_edge_mut(h_top).unwrap().uv = orig_uvs[next_i];
+            self.half_edge_mut(h_top).unwrap().normal = Some(orig_norms[next_i]);
+
+            self.half_edge_mut(r_left).unwrap().uv = orig_uvs[i];
+            self.half_edge_mut(r_left).unwrap().normal = Some(orig_norms[i]);
+        }
+
+        // 9. Update vertex outgoing half-edges
+        for i in 0..n {
+            self.vertex_mut(inner_v[i]).unwrap().half_edge = Some(h_in[i]);
+            self.vertex_mut(orig_v[i]).unwrap().half_edge = Some(h_cycle[i]);
+        }
+
+        // 10. Recalculate face normals
+        let norm_in = self.face_normal(inner_face);
+        self.face_mut(inner_face).unwrap().normal = Some(norm_in);
+
+        for &sf in &side_faces {
+            let sn = self.face_normal(sf);
+            self.face_mut(sf).unwrap().normal = Some(sn);
+        }
+
+        // 11. Invariant verification
+        if let Err(e) = self.check_invariants() {
+            *self = backup;
+            return Err(e);
+        }
+
+        // 12. Return result
+        let mut new_edges = Vec::with_capacity(2 * n);
+        new_edges.extend_from_slice(&inner_edges);
+        new_edges.extend_from_slice(&radial_edges);
+
+        let mut new_half_edges = Vec::with_capacity(4 * n);
+        new_half_edges.extend_from_slice(&h_in);
+        new_half_edges.extend_from_slice(&t_in);
+        new_half_edges.extend_from_slice(&r_up);
+        new_half_edges.extend_from_slice(&r_down);
+
+        Ok(InsetFaceResult {
+            original_face: face,
+            inner_face,
+            new_vertices: inner_v,
+            new_edges,
+            new_side_faces: side_faces[1..].to_vec(),
             new_half_edges,
         })
     }
@@ -4946,6 +5398,410 @@ mod tests {
         assert!(top_report.is_closed);
         assert_eq!(top_report.boundary_loop_count, 0);
         assert_eq!(top_report.euler_characteristic, 2);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // =========================================================================
+    // Phase 6.13: Basic Inset Face Unit Tests
+    // =========================================================================
+
+    // Inset Face Test 1: Inset of a square
+    #[test]
+    fn test_inset_1_square() {
+        let mut mesh = make_single_quad(); // 2x2 square: (0,0), (2,0), (2,2), (0,2)
+        let f = mesh.faces().next().unwrap();
+
+        let res = mesh.inset_face(f, 0.5).expect("inset square");
+        assert_eq!(res.original_face(), f);
+        assert!(mesh.is_valid_face(res.inner_face()));
+        assert_eq!(res.new_vertices().len(), 4);
+        assert_eq!(res.new_edges().len(), 8);
+        assert_eq!(res.new_side_faces().len(), 3); // 3 new + 1 original = 4 side faces
+        assert_eq!(res.side_faces().len(), 4);
+        assert_eq!(res.new_half_edges().len(), 16);
+
+        // Check total element counts
+        assert_eq!(mesh.num_vertices(), 8); // 4 outer + 4 inner
+        assert_eq!(mesh.num_edges(), 12); // 4 outer + 4 inner + 4 radial
+        assert_eq!(mesh.num_faces(), 5); // 1 inner + 4 side
+        assert_eq!(mesh.num_half_edges(), 24);
+
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Inset Face Test 2: Inset of a regular pentagon
+    #[test]
+    fn test_inset_2_regular_pentagon() {
+        let mut mesh = make_pentagon();
+        let f = mesh.faces().next().unwrap();
+
+        let res = mesh.inset_face(f, 0.2).expect("inset pentagon");
+        assert_eq!(res.new_vertices().len(), 5);
+        assert_eq!(res.new_edges().len(), 10);
+        assert_eq!(res.new_side_faces().len(), 4);
+        assert_eq!(res.side_faces().len(), 5);
+        assert_eq!(res.new_half_edges().len(), 20);
+
+        assert_eq!(mesh.num_vertices(), 10);
+        assert_eq!(mesh.num_edges(), 15);
+        assert_eq!(mesh.num_faces(), 6); // 1 inner + 5 side
+        assert_eq!(mesh.num_half_edges(), 30);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Inset Face Test 3: Correct inner vertex positions (parallel edge offset)
+    #[test]
+    fn test_inset_3_correct_inner_vertex_positions() {
+        let mut mesh = make_single_quad(); // [0,0], [2,0], [2,2], [0,2]
+        let f = mesh.faces().next().unwrap();
+
+        let offset = 0.4;
+        let res = mesh.inset_face(f, offset).unwrap();
+
+        // For a square, each corner moves inward by offset along x and y
+        let expected = [
+            Vec3::new(0.4, 0.4, 0.0),
+            Vec3::new(1.6, 0.4, 0.0),
+            Vec3::new(1.6, 1.6, 0.0),
+            Vec3::new(0.4, 1.6, 0.0),
+        ];
+
+        for (i, &v) in res.new_vertices().iter().enumerate() {
+            let actual = mesh.vertex(v).unwrap().position;
+            assert!(
+                (actual - expected[i]).length() < 1e-5,
+                "Vertex {i}: actual {actual:?} != expected {:?}",
+                expected[i]
+            );
+        }
+    }
+
+    // Inset Face Test 4: Correct element counts
+    #[test]
+    fn test_inset_4_correct_element_counts() {
+        let mut mesh = make_single_triangle();
+        let f = mesh.faces().next().unwrap();
+
+        let res = mesh.inset_face(f, 0.3).unwrap();
+        assert_eq!(res.new_vertices().len(), 3);
+        assert_eq!(res.new_edges().len(), 6);
+        assert_eq!(res.new_side_faces().len(), 2);
+        assert_eq!(res.side_faces().len(), 3);
+        assert_eq!(res.new_half_edges().len(), 12);
+
+        assert_eq!(mesh.num_vertices(), 6);
+        assert_eq!(mesh.num_edges(), 9);
+        assert_eq!(mesh.num_faces(), 4);
+        assert_eq!(mesh.num_half_edges(), 18);
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Inset Face Test 5: Valid inner and side face loops
+    #[test]
+    fn test_inset_5_valid_inner_and_side_face_loops() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.inset_face(f, 0.5).unwrap();
+
+        // Inner face has 4 vertices
+        let inner_verts = mesh.face_vertices(res.inner_face());
+        assert_eq!(inner_verts.len(), 4);
+        assert_eq!(inner_verts, res.new_vertices());
+
+        // Each side face has 4 vertices
+        for sf in res.side_faces() {
+            let sf_verts = mesh.face_vertices(sf);
+            assert_eq!(sf_verts.len(), 4);
+        }
+    }
+
+    // Inset Face Test 6: Reciprocal twin relationships
+    #[test]
+    fn test_inset_6_reciprocal_twin_relationships() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        mesh.inset_face(f, 0.3).unwrap();
+
+        for h in mesh.half_edges() {
+            let he = mesh.half_edge(h).unwrap();
+            let twin = mesh.half_edge(he.twin).unwrap();
+            assert_eq!(twin.twin, h);
+            assert_eq!(he.edge, twin.edge);
+            assert_ne!(he.origin, twin.origin);
+        }
+    }
+
+    // Inset Face Test 7: Correct next and prev links
+    #[test]
+    fn test_inset_7_correct_next_prev_links() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        mesh.inset_face(f, 0.3).unwrap();
+
+        for h in mesh.half_edges() {
+            let he = mesh.half_edge(h).unwrap();
+            let next = mesh.half_edge(he.next).unwrap();
+            let prev = mesh.half_edge(he.prev).unwrap();
+            assert_eq!(next.prev, h);
+            assert_eq!(prev.next, h);
+            let twin = mesh.half_edge(he.twin).unwrap();
+            assert_eq!(next.origin, twin.origin);
+        }
+    }
+
+    // Inset Face Test 8: Correct face references
+    #[test]
+    fn test_inset_8_correct_face_references() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.inset_face(f, 0.5).unwrap();
+
+        assert!(mesh.is_valid_face(res.inner_face()));
+        for sf in res.side_faces() {
+            assert!(mesh.is_valid_face(sf));
+            let hes = mesh.face_half_edges(sf);
+            for h in hes {
+                assert_eq!(mesh.half_edge(h).unwrap().face, Some(sf));
+            }
+        }
+        let in_hes = mesh.face_half_edges(res.inner_face());
+        for h in in_hes {
+            assert_eq!(mesh.half_edge(h).unwrap().face, Some(res.inner_face()));
+        }
+    }
+
+    // Inset Face Test 9: UV seam and corner normal preservation
+    #[test]
+    fn test_inset_9_uv_seam_and_corner_normal_preservation() {
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(2.0, 2.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+        ];
+        let faces = vec![vec![0, 1, 2, 3]];
+        let corner_uvs = vec![vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ]];
+        let corner_normals = vec![vec![
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        ]];
+
+        let mut mesh = TopologyBuilder::build_with_attributes(
+            &positions,
+            &faces,
+            None,
+            None,
+            Some(&corner_uvs),
+            Some(&corner_normals),
+        )
+        .unwrap();
+
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.inset_face(f, 0.5).unwrap();
+
+        // Inner face corners must have corner attributes
+        let inner_hes = mesh.face_half_edges(res.inner_face());
+        for (i, &h) in inner_hes.iter().enumerate() {
+            let he = mesh.half_edge(h).unwrap();
+            assert_eq!(he.uv, Some(corner_uvs[0][i]));
+            assert_eq!(he.normal, Some(corner_normals[0][i]));
+        }
+    }
+
+    // Inset Face Test 10: Vertex attribute interpolation
+    #[test]
+    fn test_inset_10_vertex_attribute_interpolation() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+
+        let test_uv = Vec2::new(0.25, 0.75);
+        let test_color = [0.1, 0.2, 0.3, 1.0];
+        let test_normal = Vec3::new(0.0, 0.0, 1.0);
+
+        let all_verts: Vec<_> = mesh.vertices().collect();
+        for v in all_verts {
+            let vert = mesh.vertex_mut(v).unwrap();
+            vert.uv = Some(test_uv);
+            vert.color = Some(test_color);
+            vert.normal = Some(test_normal);
+        }
+
+        let res = mesh.inset_face(f, 0.5).unwrap();
+
+        for &v in res.new_vertices() {
+            let vert = mesh.vertex(v).unwrap();
+            assert_eq!(vert.uv, Some(test_uv));
+            assert_eq!(vert.color, Some(test_color));
+            assert_eq!(vert.normal, Some(test_normal));
+        }
+    }
+
+    // Inset Face Test 11: Material inheritance
+    #[test]
+    fn test_inset_11_material_inheritance() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        mesh.face_mut(f).unwrap().material_id = Some(77);
+
+        let res = mesh.inset_face(f, 0.4).unwrap();
+        assert_eq!(mesh.face(res.inner_face()).unwrap().material_id, Some(77));
+        for sf in res.side_faces() {
+            assert_eq!(mesh.face(sf).unwrap().material_id, Some(77));
+        }
+    }
+
+    // Inset Face Test 12: Rejection of invalid handles
+    #[test]
+    fn test_inset_12_rejection_of_invalid_handles() {
+        let mut mesh = make_single_quad();
+        let res = mesh.inset_face(FaceHandle::new(9999, 0), 0.5);
+        assert!(matches!(res, Err(TopologyError::InvalidFace(_))));
+
+        let res_null = mesh.inset_face(FaceHandle::NULL, 0.5);
+        assert!(matches!(res_null, Err(TopologyError::InvalidFace(_))));
+    }
+
+    // Inset Face Test 13: Rejection of non-finite and zero offsets
+    #[test]
+    fn test_inset_13_rejection_of_non_finite_and_zero_offsets() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+
+        assert!(matches!(
+            mesh.inset_face(f, 0.0),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.inset_face(f, -0.5),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.inset_face(f, f32::NAN),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            mesh.inset_face(f, f32::INFINITY),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Inset Face Test 14: Rejection of concave and non-planar polygons
+    #[test]
+    fn test_inset_14_rejection_of_concave_and_non_planar_polygons() {
+        // Concave L-shape: (0,0), (2,0), (2,1), (1,1), (1,2), (0,2)
+        let concave_pos = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(2.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(1.0, 2.0, 0.0),
+            Vec3::new(0.0, 2.0, 0.0),
+        ];
+        let concave_faces = vec![vec![0, 1, 2, 3, 4, 5]];
+        let mut mesh_concave = TopologyBuilder::build(&concave_pos, &concave_faces).unwrap();
+        let f_concave = mesh_concave.faces().next().unwrap();
+        assert!(matches!(
+            mesh_concave.inset_face(f_concave, 0.2),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+
+        // Non-planar quad
+        let non_planar_pos = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(2.0, 2.0, 1.0), // z = 1.0 out of plane
+            Vec3::new(0.0, 2.0, 0.0),
+        ];
+        let non_planar_faces = vec![vec![0, 1, 2, 3]];
+        let mut mesh_np = TopologyBuilder::build(&non_planar_pos, &non_planar_faces).unwrap();
+        let f_np = mesh_np.faces().next().unwrap();
+        assert!(matches!(
+            mesh_np.inset_face(f_np, 0.2),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Inset Face Test 15: Rejection of excessive offsets
+    #[test]
+    fn test_inset_15_rejection_of_excessive_offsets() {
+        let mut mesh = make_single_quad(); // 2x2 square, half-width is 1.0
+        let f = mesh.faces().next().unwrap();
+
+        // Offset 1.0 exactly collapses the inner polygon
+        assert!(matches!(
+            mesh.inset_face(f, 1.0),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+
+        // Offset 2.0 inverts the inner polygon
+        assert!(matches!(
+            mesh.inset_face(f, 2.0),
+            Err(TopologyError::InvalidOperation(_))
+        ));
+    }
+
+    // Inset Face Test 16: Rejection of degenerate geometry
+    #[test]
+    fn test_inset_16_rejection_of_degenerate_geometry() {
+        // Collinear vertices
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+        ];
+        let faces = vec![vec![0, 1, 2]];
+        let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
+        let f = mesh.faces().next().unwrap();
+
+        let res = mesh.inset_face(f, 0.1);
+        assert!(res.is_err());
+    }
+
+    // Inset Face Test 17: Atomic rollback on failure
+    #[test]
+    fn test_inset_17_atomic_rollback() {
+        let mut mesh = make_single_quad();
+        let backup = mesh.clone();
+        let f = mesh.faces().next().unwrap();
+
+        // 1. Excessive offset
+        assert!(mesh.inset_face(f, 5.0).is_err());
+        assert_eq!(mesh, backup);
+
+        // 2. Invalid distance
+        assert!(mesh.inset_face(f, -1.0).is_err());
+        assert_eq!(mesh, backup);
+
+        assert!(mesh.check_invariants().is_ok());
+    }
+
+    // Inset Face Test 18: Successful TopologyValidator and invariant checks
+    #[test]
+    fn test_inset_18_topology_validator_and_invariants() {
+        let mut mesh = make_single_quad();
+        let f = mesh.faces().next().unwrap();
+        let res = mesh.inset_face(f, 0.5).unwrap();
+        assert!(mesh.is_valid_face(res.inner_face()));
+
+        let val_report = TopologyValidator::validate(&mesh);
+        assert!(
+            val_report.is_valid,
+            "ValidationReport must be valid: {:?}",
+            val_report.issues
+        );
+        assert_eq!(val_report.error_count(), 0);
+
+        let top_report = mesh.validate_topology();
+        assert!(top_report.is_valid);
+        assert!(top_report.is_manifold);
+        assert_eq!(top_report.boundary_loop_count, 1); // open sheet keeps outer boundary
         assert!(mesh.check_invariants().is_ok());
     }
 }
