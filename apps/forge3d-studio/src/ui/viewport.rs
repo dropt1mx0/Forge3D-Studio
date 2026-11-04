@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use egui::{Color32, Key, PointerButton, Pos2, Rect, Sense, Stroke, Ui, Vec2 as EguiVec2};
 use forge_geometry::EditSelectionMode;
 use forge_math::{Quat, Vec2, Vec3};
@@ -1059,39 +1061,16 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         } else if app.editor_state.edit_mode == EditMode::Edit
             && let Some((_obj_id, edit_mesh)) = &mut app.active_edit_mesh
         {
-            // Draw wireframe edges
-            for edge in &edit_mesh.edges {
-                let p0 = edit_mesh.vertices[edge.v0].position;
-                let p1 = edit_mesh.vertices[edge.v1].position;
-                if let (Some(s0), Some(s1)) = (
-                    world_to_screen_pos(p0, view_proj, rect),
-                    world_to_screen_pos(p1, view_proj, rect),
-                ) {
-                    let col = if edge.selected {
-                        Color32::from_rgb(255, 170, 40)
-                    } else {
-                        Color32::from_rgba_unmultiplied(160, 170, 190, 120)
-                    };
-                    painter.line_segment(
-                        [s0, s1],
-                        Stroke::new(if edge.selected { 2.5 } else { 1.2 }, col),
-                    );
-                }
-            }
-
-            // Draw vertex dots
-            for vertex in &edit_mesh.vertices {
-                if let Some(sp) = world_to_screen_pos(vertex.position, view_proj, rect) {
-                    let col = if vertex.selected {
-                        Color32::from_rgb(255, 180, 40)
-                    } else {
-                        Color32::from_rgb(40, 45, 55)
-                    };
-                    let radius = if vertex.selected { 5.0 } else { 3.5 };
-                    painter.circle_filled(sp, radius, col);
-                    painter.circle_stroke(sp, radius, Stroke::new(1.0, Color32::from_gray(220)));
-                }
-            }
+            // Draw batched wireframe edges and vertex handles
+            render_edit_mode_overlay(
+                &mut app.edit_overlay_cache,
+                &painter,
+                edit_mesh,
+                app.editor_state.selection_element,
+                view_proj,
+                rect,
+                app.scene.dirty,
+            );
 
             let edit_mode_sel = match app.editor_state.selection_element {
                 forge_scene::SelectionElement::Vertex => EditSelectionMode::Vertex,
@@ -1213,7 +1192,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     let mut min_dist_px = 15.0;
 
                     for (idx, v) in edit_mesh.vertices.iter().enumerate() {
-                        if let Some(sp) = world_to_screen_pos(v.position, view_proj, rect) {
+                        let sp_opt = app
+                            .edit_overlay_cache
+                            .projected_vertices
+                            .get(idx)
+                            .copied()
+                            .flatten()
+                            .or_else(|| world_to_screen_pos(v.position, view_proj, rect));
+
+                        if let Some(sp) = sp_opt {
                             let d = pos.distance(sp);
                             if d < min_dist_px {
                                 min_dist_px = d;
@@ -1596,5 +1583,552 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             egui::FontId::monospace(11.0),
             Color32::from_rgb(200, 225, 255),
         );
+    }
+}
+
+/// Pre-allocated cache for Edit Mode viewport overlay rendering.
+/// Reuses projection buffers, culls offscreen elements, and batches wireframe/vertices into pre-tessellated `egui::Mesh`.
+#[derive(Default, Clone)]
+pub struct EditOverlayCache {
+    pub projected_vertices: Vec<Option<Pos2>>,
+    pub mesh: egui::Mesh,
+    pub cached_shape: Option<Arc<egui::Mesh>>,
+    pub last_view_proj: forge_math::Mat4,
+    pub last_rect_min: Pos2,
+    pub last_rect_max: Pos2,
+    pub last_selection_element: forge_scene::SelectionElement,
+    pub last_selected_verts: usize,
+    pub last_selected_edges: usize,
+    pub last_vert_count: usize,
+    pub last_edge_count: usize,
+    pub build_count: usize,
+}
+
+impl EditOverlayCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Resets cached shape to force rebuild on next frame (e.g. after camera movement or geometry edits).
+    pub fn reset(&mut self) {
+        self.cached_shape = None;
+        self.last_view_proj = forge_math::Mat4::ZERO;
+        self.last_rect_min = Pos2::ZERO;
+        self.last_rect_max = Pos2::ZERO;
+    }
+
+    /// Clears and shrinks all internal buffers back to zero capacity to free RAM when exiting Edit Mode.
+    pub fn clear(&mut self) {
+        self.reset();
+        self.projected_vertices.clear();
+        self.projected_vertices.shrink_to_fit();
+        self.mesh.vertices.clear();
+        self.mesh.vertices.shrink_to_fit();
+        self.mesh.indices.clear();
+        self.mesh.indices.shrink_to_fit();
+    }
+}
+
+fn add_line_quad(mesh: &mut egui::Mesh, p0: Pos2, p1: Pos2, half_width: f32, color: Color32) {
+    let dx = p1.x - p0.x;
+    let dy = p1.y - p0.y;
+    let len_sq = dx * dx + dy * dy;
+    if len_sq < 1e-4 {
+        return;
+    }
+    let inv_len = half_width / len_sq.sqrt();
+    let nx = -dy * inv_len;
+    let ny = dx * inv_len;
+
+    let v0 = Pos2::new(p0.x + nx, p0.y + ny);
+    let v1 = Pos2::new(p1.x + nx, p1.y + ny);
+    let v2 = Pos2::new(p1.x - nx, p1.y - ny);
+    let v3 = Pos2::new(p0.x - nx, p0.y - ny);
+
+    let base_idx = mesh.vertices.len() as u32;
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: v0,
+        uv: egui::epaint::WHITE_UV,
+        color,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: v1,
+        uv: egui::epaint::WHITE_UV,
+        color,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: v2,
+        uv: egui::epaint::WHITE_UV,
+        color,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: v3,
+        uv: egui::epaint::WHITE_UV,
+        color,
+    });
+
+    mesh.indices.extend_from_slice(&[
+        base_idx,
+        base_idx + 1,
+        base_idx + 2,
+        base_idx,
+        base_idx + 2,
+        base_idx + 3,
+    ]);
+}
+
+fn add_box_quad(mesh: &mut egui::Mesh, center: Pos2, half_size: f32, color: Color32) {
+    let min_x = center.x - half_size;
+    let max_x = center.x + half_size;
+    let min_y = center.y - half_size;
+    let max_y = center.y + half_size;
+
+    let v0 = Pos2::new(min_x, min_y);
+    let v1 = Pos2::new(max_x, min_y);
+    let v2 = Pos2::new(max_x, max_y);
+    let v3 = Pos2::new(min_x, max_y);
+
+    let base_idx = mesh.vertices.len() as u32;
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: v0,
+        uv: egui::epaint::WHITE_UV,
+        color,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: v1,
+        uv: egui::epaint::WHITE_UV,
+        color,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: v2,
+        uv: egui::epaint::WHITE_UV,
+        color,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: v3,
+        uv: egui::epaint::WHITE_UV,
+        color,
+    });
+
+    mesh.indices.extend_from_slice(&[
+        base_idx,
+        base_idx + 1,
+        base_idx + 2,
+        base_idx,
+        base_idx + 2,
+        base_idx + 3,
+    ]);
+}
+
+pub fn render_edit_mode_overlay(
+    cache: &mut EditOverlayCache,
+    painter: &egui::Painter,
+    edit_mesh: &forge_geometry::EditableMesh,
+    selection_element: forge_scene::SelectionElement,
+    view_proj: forge_math::Mat4,
+    rect: Rect,
+    scene_dirty: bool,
+) {
+    let selected_verts = edit_mesh.vertices.iter().filter(|v| v.selected).count();
+    let selected_edges = edit_mesh.edges.iter().filter(|e| e.selected).count();
+
+    let cache_valid = cache.cached_shape.is_some()
+        && !scene_dirty
+        && cache.last_view_proj == view_proj
+        && cache.last_rect_min == rect.min
+        && cache.last_rect_max == rect.max
+        && cache.last_selection_element == selection_element
+        && cache.last_vert_count == edit_mesh.vertices.len()
+        && cache.last_edge_count == edit_mesh.edges.len()
+        && cache.last_selected_verts == selected_verts
+        && cache.last_selected_edges == selected_edges;
+
+    if cache_valid {
+        if let Some(shape) = &cache.cached_shape {
+            painter.add(egui::Shape::Mesh(Arc::clone(shape)));
+            return;
+        }
+    }
+
+    // 1. Precompute vertex screen projections once into scratch buffer
+    cache.projected_vertices.clear();
+    cache.projected_vertices.reserve(edit_mesh.vertices.len());
+    for v in &edit_mesh.vertices {
+        cache
+            .projected_vertices
+            .push(world_to_screen_pos(v.position, view_proj, rect));
+    }
+
+    // 2. Prepare pre-tessellated egui::Mesh buffer (reusing existing capacity)
+    cache.mesh.vertices.clear();
+    cache.mesh.indices.clear();
+
+    let cull_rect_edges = rect.expand(20.0);
+    let cull_rect_verts = rect.expand(10.0);
+
+    let est_edges = edit_mesh.edges.len();
+    cache
+        .mesh
+        .vertices
+        .reserve(est_edges * 4 + edit_mesh.vertices.len() * 4);
+    cache
+        .mesh
+        .indices
+        .reserve(est_edges * 6 + edit_mesh.vertices.len() * 6);
+
+    // 3. Batch wireframe edges
+    for edge in &edit_mesh.edges {
+        let (Some(s0), Some(s1)) = (
+            cache.projected_vertices[edge.v0],
+            cache.projected_vertices[edge.v1],
+        ) else {
+            continue;
+        };
+
+        // Frustum culling: skip if both endpoints are outside the viewport bounds
+        if !cull_rect_edges.contains(s0) && !cull_rect_edges.contains(s1) {
+            continue;
+        }
+
+        let col = if edge.selected {
+            Color32::from_rgb(255, 170, 40)
+        } else {
+            Color32::from_rgba_unmultiplied(160, 170, 190, 120)
+        };
+        let half_width = if edge.selected { 1.25 } else { 0.6 };
+        add_line_quad(&mut cache.mesh, s0, s1, half_width, col);
+    }
+
+    // 4. Batch vertex handles
+    let is_vertex_mode = selection_element == forge_scene::SelectionElement::Vertex;
+    for (idx, vertex) in edit_mesh.vertices.iter().enumerate() {
+        let Some(sp) = cache.projected_vertices[idx] else {
+            continue;
+        };
+        if !cull_rect_verts.contains(sp) {
+            continue;
+        }
+
+        if vertex.selected {
+            // Highlighted selected vertex handle
+            add_box_quad(&mut cache.mesh, sp, 4.0, Color32::from_rgb(255, 180, 40));
+            add_box_quad(&mut cache.mesh, sp, 2.0, Color32::from_rgb(255, 230, 100));
+        } else if is_vertex_mode {
+            // Unselected vertex handle (only in Vertex selection mode)
+            add_box_quad(&mut cache.mesh, sp, 2.0, Color32::from_rgb(45, 50, 60));
+        }
+    }
+
+    // 5. Store in Arc and commit single Shape::Mesh to painter
+    let arc_mesh = Arc::new(cache.mesh.clone());
+    cache.cached_shape = Some(Arc::clone(&arc_mesh));
+    cache.last_view_proj = view_proj;
+    cache.last_rect_min = rect.min;
+    cache.last_rect_max = rect.max;
+    cache.last_selection_element = selection_element;
+    cache.last_vert_count = edit_mesh.vertices.len();
+    cache.last_edge_count = edit_mesh.edges.len();
+    cache.last_selected_verts = selected_verts;
+    cache.last_selected_edges = selected_edges;
+    cache.build_count += 1;
+
+    painter.add(egui::Shape::Mesh(arc_mesh));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use forge_geometry::EditableMesh;
+    use forge_geometry::primitives::{generate_cube, generate_plane, generate_uv_sphere};
+    use forge_math::{Mat4, Vec3};
+
+    fn make_test_camera_matrix(eye: Vec3, target: Vec3) -> Mat4 {
+        let view = Mat4::look_at_rh(eye, target, Vec3::Y);
+        let proj = Mat4::perspective_rh(50.0_f32.to_radians(), 1.0, 0.1, 100.0);
+        proj * view
+    }
+
+    #[test]
+    fn test_edit_mode_small_mesh_overlay_cache() {
+        let cube = generate_cube(1.0);
+        let edit_mesh = EditableMesh::from_mesh(&cube);
+
+        let mut cache = EditOverlayCache::new();
+        let view_proj = make_test_camera_matrix(Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO);
+        let rect = Rect::from_min_size(Pos2::new(0.0, 0.0), EguiVec2::new(800.0, 600.0));
+
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), rect);
+
+        // Frame 1: Initial build
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        assert_eq!(cache.build_count, 1);
+        assert!(cache.cached_shape.is_some());
+        let initial_verts = cache.cached_shape.as_ref().unwrap().vertices.len();
+        assert!(initial_verts > 0);
+
+        // Frame 2: Static camera & mesh -> must reuse cached shape without rebuild
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        assert_eq!(
+            cache.build_count, 1,
+            "Static frame must reuse cache without incrementing build_count"
+        );
+    }
+
+    #[test]
+    fn test_edit_mode_10k_vertices_overlay_batching() {
+        // Plane with 100x100 resolution = 10,201 vertices, ~20,000 triangles, ~30,000 edges
+        let plane = generate_plane(10.0, 100);
+        let edit_mesh = EditableMesh::from_mesh(&plane);
+        assert!(edit_mesh.vertices.len() >= 10_000);
+
+        let mut cache = EditOverlayCache::new();
+        let view_proj = make_test_camera_matrix(Vec3::new(0.0, 15.0, 15.0), Vec3::ZERO);
+        let rect = Rect::from_min_size(Pos2::new(0.0, 0.0), EguiVec2::new(1024.0, 768.0));
+
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), rect);
+
+        let t0 = std::time::Instant::now();
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        let elapsed = t0.elapsed();
+
+        assert_eq!(cache.build_count, 1);
+        assert!(
+            elapsed.as_millis() < 50,
+            "10k vertices batched overlay build should take < 50ms (took {}ms)",
+            elapsed.as_millis()
+        );
+
+        // Second frame: zero work
+        let t1 = std::time::Instant::now();
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        let cached_elapsed = t1.elapsed();
+        assert_eq!(cache.build_count, 1);
+        assert!(
+            cached_elapsed.as_millis() < 5,
+            "Cached frame must take < 5ms (took {}µs)",
+            cached_elapsed.as_micros()
+        );
+    }
+
+    #[test]
+    fn test_edit_mode_50k_vertices_overlay_batching() {
+        // High density UV Sphere: 250 x 200 = ~50,000 vertices
+        let sphere = generate_uv_sphere(2.0, 250, 200);
+        let edit_mesh = EditableMesh::from_mesh(&sphere);
+        assert!(edit_mesh.vertices.len() > 40_000);
+
+        let mut cache = EditOverlayCache::new();
+        let view_proj = make_test_camera_matrix(Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO);
+        let rect = Rect::from_min_size(Pos2::new(0.0, 0.0), EguiVec2::new(1920.0, 1080.0));
+
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), rect);
+
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        assert_eq!(cache.build_count, 1);
+
+        // Reusing capacity during camera orbit (view_proj changed)
+        let new_view_proj = make_test_camera_matrix(Vec3::new(2.0, 1.0, 6.0), Vec3::ZERO);
+        let vert_cap_before = cache.mesh.vertices.capacity();
+        let ind_cap_before = cache.mesh.indices.capacity();
+
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            new_view_proj,
+            rect,
+            false,
+        );
+        assert_eq!(cache.build_count, 2);
+        // Buffers should reuse existing capacity without growing repeatedly
+        assert_eq!(cache.mesh.vertices.capacity(), vert_cap_before);
+        assert_eq!(cache.mesh.indices.capacity(), ind_cap_before);
+    }
+
+    #[test]
+    fn test_edit_mode_100k_vertices_overlay_batching() {
+        // High density UV Sphere: 360 x 280 = ~100,000 vertices
+        let sphere = generate_uv_sphere(2.0, 360, 280);
+        let edit_mesh = EditableMesh::from_mesh(&sphere);
+        assert!(edit_mesh.vertices.len() > 90_000);
+
+        let mut cache = EditOverlayCache::new();
+        let view_proj = make_test_camera_matrix(Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO);
+        let rect = Rect::from_min_size(Pos2::new(0.0, 0.0), EguiVec2::new(1920.0, 1080.0));
+
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), rect);
+
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        assert_eq!(cache.build_count, 1);
+        assert!(cache.cached_shape.is_some());
+    }
+
+    #[test]
+    fn test_edit_mode_geometry_modification_invalidation() {
+        let cube = generate_cube(1.0);
+        let mut edit_mesh = EditableMesh::from_mesh(&cube);
+
+        let mut cache = EditOverlayCache::new();
+        let view_proj = make_test_camera_matrix(Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO);
+        let rect = Rect::from_min_size(Pos2::new(0.0, 0.0), EguiVec2::new(800.0, 600.0));
+
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), rect);
+
+        // Frame 1
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        assert_eq!(cache.build_count, 1);
+
+        // Modify vertex position and flag scene dirty
+        edit_mesh.vertices[0].position.x += 10.0;
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            true, // scene_dirty = true
+        );
+        assert_eq!(
+            cache.build_count, 2,
+            "Geometry modification must invalidate cache and rebuild"
+        );
+    }
+
+    #[test]
+    fn test_edit_mode_selection_change_invalidation() {
+        let cube = generate_cube(1.0);
+        let mut edit_mesh = EditableMesh::from_mesh(&cube);
+
+        let mut cache = EditOverlayCache::new();
+        let view_proj = make_test_camera_matrix(Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO);
+        let rect = Rect::from_min_size(Pos2::new(0.0, 0.0), EguiVec2::new(800.0, 600.0));
+
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), rect);
+
+        // Frame 1
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        assert_eq!(cache.build_count, 1);
+
+        // Select a vertex
+        edit_mesh.vertices[0].selected = true;
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        assert_eq!(
+            cache.build_count, 2,
+            "Selection count change must invalidate cache and rebuild"
+        );
+    }
+
+    #[test]
+    fn test_edit_mode_switch_memory_cleared() {
+        let sphere = generate_uv_sphere(1.0, 64, 32);
+        let edit_mesh = EditableMesh::from_mesh(&sphere);
+
+        let mut cache = EditOverlayCache::new();
+        let view_proj = make_test_camera_matrix(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO);
+        let rect = Rect::from_min_size(Pos2::new(0.0, 0.0), EguiVec2::new(800.0, 600.0));
+
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx, egui::LayerId::background(), rect);
+
+        // Render in edit mode
+        render_edit_mode_overlay(
+            &mut cache,
+            &painter,
+            &edit_mesh,
+            forge_scene::SelectionElement::Vertex,
+            view_proj,
+            rect,
+            false,
+        );
+        assert!(cache.projected_vertices.capacity() > 0);
+        assert!(cache.mesh.vertices.capacity() > 0);
+        assert!(cache.cached_shape.is_some());
+
+        // Exit edit mode -> clear cache
+        cache.clear();
+        assert_eq!(cache.projected_vertices.capacity(), 0);
+        assert_eq!(cache.mesh.vertices.capacity(), 0);
+        assert_eq!(cache.mesh.indices.capacity(), 0);
+        assert!(cache.cached_shape.is_none());
     }
 }

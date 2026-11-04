@@ -59,6 +59,7 @@ pub struct Forge3dStudioApp {
 
     // Active mesh in Edit Mode: (ObjectId, EditableMesh)
     pub active_edit_mesh: Option<(ObjectId, EditableMesh)>,
+    pub edit_overlay_cache: crate::ui::viewport::EditOverlayCache,
 
     // Stored WGPU render state from CreationContext
     pub wgpu_render_state: Option<egui_wgpu::RenderState>,
@@ -151,6 +152,7 @@ impl Forge3dStudioApp {
             history: HistoryStack::new(),
             gizmo_state: GizmoState::new(),
             active_edit_mesh: None,
+            edit_overlay_cache: crate::ui::viewport::EditOverlayCache::default(),
             wgpu_render_state: cc.wgpu_render_state.clone(),
             viewport_texture: None,
             viewport_texture_view: None,
@@ -186,6 +188,7 @@ impl Forge3dStudioApp {
             history: HistoryStack::new(),
             gizmo_state: GizmoState::new(),
             active_edit_mesh: None,
+            edit_overlay_cache: crate::ui::viewport::EditOverlayCache::default(),
             wgpu_render_state: None,
             viewport_texture: None,
             viewport_texture_view: None,
@@ -207,6 +210,7 @@ impl Forge3dStudioApp {
                     if let Some(obj) = self.scene.get_object(active_id) {
                         let edit_mesh = EditableMesh::from_mesh(&obj.mesh);
                         self.active_edit_mesh = Some((active_id, edit_mesh));
+                        self.edit_overlay_cache.reset();
                         self.editor_state.edit_mode = EditMode::Edit;
                         self.status_message = format!("Edit Mode: {}", obj.name);
                     }
@@ -217,6 +221,7 @@ impl Forge3dStudioApp {
             EditMode::Edit => {
                 self.commit_edit_mesh_to_scene();
                 self.active_edit_mesh = None;
+                self.edit_overlay_cache.clear();
                 self.editor_state.edit_mode = EditMode::Object;
                 self.status_message = "Object Mode".to_string();
             }
@@ -243,6 +248,7 @@ impl Forge3dStudioApp {
                 new_mesh,
                 "Edit Mesh Geometry",
             ));
+            self.edit_overlay_cache.reset();
         }
     }
 
@@ -257,6 +263,7 @@ impl Forge3dStudioApp {
             if let Some(r) = &mut self.renderer {
                 r.invalidate_mesh(&obj_id);
             }
+            self.edit_overlay_cache.reset();
         }
     }
 
