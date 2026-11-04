@@ -3,7 +3,7 @@ use std::sync::Arc;
 use egui::{Color32, Key, PointerButton, Pos2, Rect, Sense, Stroke, Ui, Vec2 as EguiVec2};
 use forge_geometry::EditSelectionMode;
 use forge_math::{Quat, Vec2, Vec3};
-use forge_render::{CameraProjection, ViewPreset};
+use forge_render::{CameraProjection, PickResult, ViewPreset, screen_to_texture_coords};
 use forge_scene::{Action, AxisConstraint, EditMode, PointerInteractionState, TransformMode};
 
 use crate::app::Forge3dStudioApp;
@@ -1125,14 +1125,57 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         && !app.editor_state.modal_transform.active
         && let Some(pos) = mouse_pos
     {
-        let local_pos = pos - rect.min;
-        let screen_pos = Vec2::new(local_pos.x, local_pos.y);
-        let viewport_size = Vec2::new(rect.width(), rect.height());
-        let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
-        let hover_hit = app.scene.raycast(&ray).map(|(id, _)| id);
-        app.selection.set_hovered(hover_hit);
+        if app.editor_state.use_gpu_picking
+            && let (tex_w, tex_h) = app.viewport_pixel_size
+            && tex_w > 0
+            && tex_h > 0
+            && let Some((px, py)) = screen_to_texture_coords(
+                (pos.x, pos.y),
+                (rect.min.x, rect.min.y),
+                (rect.width(), rect.height()),
+                tex_w,
+                tex_h,
+            )
+            && let (Some(renderer), Some(wgpu_state)) =
+                (&mut app.renderer, app.wgpu_render_state.clone())
+        {
+            // 1. Poll previous hover pick request if available
+            if let Some(req_id) = app.pending_hover_pick_request.take()
+                && let Some(pick_result) = renderer.poll_pick_result(req_id)
+            {
+                match pick_result {
+                    PickResult::Object(id) => app.selection.set_hovered(Some(id)),
+                    _ => app.selection.set_hovered(None),
+                }
+            }
+
+            // 2. Schedule non-blocking async pick request for current cursor position
+            let active_mesh_ref = app.active_edit_mesh.as_ref().map(|(id, m)| (id, m));
+            app.pending_hover_pick_request = renderer.schedule_pick_request(
+                &wgpu_state.device,
+                &wgpu_state.queue,
+                tex_w,
+                tex_h,
+                &app.scene,
+                &app.camera,
+                app.editor_state.edit_mode,
+                app.editor_state.selection_element,
+                active_mesh_ref,
+                px,
+                py,
+            );
+        } else {
+            // CPU fallback raycast
+            let local_pos = pos - rect.min;
+            let screen_pos = Vec2::new(local_pos.x, local_pos.y);
+            let viewport_size = Vec2::new(rect.width(), rect.height());
+            let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
+            let hover_hit = app.scene.raycast(&ray).map(|(id, _)| id);
+            app.selection.set_hovered(hover_hit);
+        }
     } else if is_ui_interacting || is_dragging_active {
         app.selection.set_hovered(None);
+        app.pending_hover_pick_request = None;
     }
 
     // =========================================================================
@@ -1160,7 +1203,143 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 let viewport_size = Vec2::new(rect.width(), rect.height());
                 let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
 
-                if app.editor_state.edit_mode == EditMode::Object {
+                let gpu_pick_result = if app.editor_state.use_gpu_picking
+                    && let (tex_w, tex_h) = app.viewport_pixel_size
+                    && tex_w > 0
+                    && tex_h > 0
+                    && let Some((px, py)) = screen_to_texture_coords(
+                        (pos.x, pos.y),
+                        (rect.min.x, rect.min.y),
+                        (rect.width(), rect.height()),
+                        tex_w,
+                        tex_h,
+                    )
+                    && let (Some(renderer), Some(wgpu_state)) =
+                        (&mut app.renderer, app.wgpu_render_state.clone())
+                {
+                    let active_mesh_ref = app.active_edit_mesh.as_ref().map(|(id, m)| (id, m));
+                    Some(renderer.pick_sync(
+                        &wgpu_state.device,
+                        &wgpu_state.queue,
+                        tex_w,
+                        tex_h,
+                        &app.scene,
+                        &app.camera,
+                        app.editor_state.edit_mode,
+                        app.editor_state.selection_element,
+                        active_mesh_ref,
+                        px,
+                        py,
+                    ))
+                } else {
+                    None
+                };
+
+                if let Some(pick_res) = gpu_pick_result {
+                    match pick_res {
+                        PickResult::Object(hit_id) => {
+                            let was_already_selected = app.selection.is_selected(hit_id);
+
+                            if !was_already_selected {
+                                if input.modifiers.shift {
+                                    app.selection.toggle_selection(hit_id);
+                                } else {
+                                    app.selection.select(hit_id);
+                                }
+                            }
+
+                            let hit_point = if let Some(obj) = app.scene.get_object(hit_id) {
+                                obj.local_transform.translation
+                            } else {
+                                ray.point_at(5.0)
+                            };
+
+                            app.start_object_drag(
+                                hit_point,
+                                hit_id,
+                                Vec2::new(pos.x, pos.y),
+                                was_already_selected,
+                            );
+
+                            if let Some(obj) = app.scene.get_object(hit_id) {
+                                app.status_message = format!("Selected: {}", obj.name);
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                        PickResult::Vertex(v_idx) => {
+                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+                                if v_idx < edit_mesh.vertices.len() {
+                                    app.editor_state.pointer_state =
+                                        PointerInteractionState::ObjectPressed;
+                                    app.editor_state.pointer_press_pos =
+                                        Some(Vec2::new(pos.x, pos.y));
+                                    if input.modifiers.shift {
+                                        edit_mesh.vertices[v_idx].selected =
+                                            !edit_mesh.vertices[v_idx].selected;
+                                        if edit_mesh.vertices[v_idx].selected {
+                                            app.editor_state.active_vertex = Some(v_idx);
+                                        } else if app.editor_state.active_vertex == Some(v_idx) {
+                                            app.editor_state.active_vertex = None;
+                                        }
+                                    } else {
+                                        edit_mesh.deselect_all(EditSelectionMode::Vertex);
+                                        edit_mesh.vertices[v_idx].selected = true;
+                                        app.editor_state.active_vertex = Some(v_idx);
+                                    }
+                                    app.status_message = format!("Selected Vertex #{}", v_idx);
+                                    app.sync_edit_mesh_to_scene();
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                        }
+                        PickResult::Edge(e_idx) => {
+                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+                                if e_idx < edit_mesh.edges.len() {
+                                    app.editor_state.pointer_state =
+                                        PointerInteractionState::ObjectPressed;
+                                    app.editor_state.pointer_press_pos =
+                                        Some(Vec2::new(pos.x, pos.y));
+                                    if input.modifiers.shift {
+                                        edit_mesh.edges[e_idx].selected =
+                                            !edit_mesh.edges[e_idx].selected;
+                                    } else {
+                                        edit_mesh.deselect_all(EditSelectionMode::Edge);
+                                        edit_mesh.edges[e_idx].selected = true;
+                                    }
+                                    app.status_message = format!("Selected Edge #{}", e_idx);
+                                    app.sync_edit_mesh_to_scene();
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                        }
+                        PickResult::Face(f_idx) => {
+                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+                                if f_idx < edit_mesh.faces.len() {
+                                    app.editor_state.pointer_state =
+                                        PointerInteractionState::ObjectPressed;
+                                    app.editor_state.pointer_press_pos =
+                                        Some(Vec2::new(pos.x, pos.y));
+                                    if input.modifiers.shift {
+                                        edit_mesh.faces[f_idx].selected =
+                                            !edit_mesh.faces[f_idx].selected;
+                                    } else {
+                                        edit_mesh.deselect_all(EditSelectionMode::Face);
+                                        edit_mesh.faces[f_idx].selected = true;
+                                    }
+                                    app.status_message = format!("Selected Face #{}", f_idx);
+                                    app.sync_edit_mesh_to_scene();
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                        }
+                        PickResult::None => {
+                            app.editor_state.pointer_state =
+                                PointerInteractionState::ViewportOrbiting;
+                            app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
+                        }
+                    }
+                } else if app.editor_state.edit_mode == EditMode::Object {
+                    // CPU fallback Object Mode
                     if let Some((hit_id, dist)) = app.scene.raycast(&ray) {
                         let hit_point = ray.point_at(dist);
                         let was_already_selected = app.selection.is_selected(hit_id);
@@ -1192,6 +1371,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 } else if app.editor_state.edit_mode == EditMode::Edit
                     && let Some((_, edit_mesh)) = &mut app.active_edit_mesh
                 {
+                    // CPU fallback Edit Mode
                     let mut closest_vert = None;
                     let mut min_dist_px = 15.0;
 

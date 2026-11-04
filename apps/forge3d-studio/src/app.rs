@@ -80,6 +80,9 @@ pub struct Forge3dStudioApp {
 
     // Free cursor object dragging state
     pub object_drag_state: Option<ObjectDragState>,
+
+    // Pending asynchronous GPU picking request for hover
+    pub pending_hover_pick_request: Option<u64>,
 }
 
 impl Forge3dStudioApp {
@@ -163,6 +166,7 @@ impl Forge3dStudioApp {
             frame_time_ms: 16.6,
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
+            pending_hover_pick_request: None,
         }
     }
 
@@ -199,6 +203,7 @@ impl Forge3dStudioApp {
             frame_time_ms: 16.6,
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
+            pending_hover_pick_request: None,
         }
     }
 

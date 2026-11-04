@@ -5,10 +5,11 @@ use forge_geometry::primitives::generate_grid_lines;
 use forge_geometry::{EditableMesh, LineVertex, Vertex};
 use forge_gpu::GpuBuffer;
 use forge_math::Vec3;
-use forge_scene::{Scene, SelectionState};
+use forge_scene::{EditMode, Scene, SelectionElement, SelectionState};
 use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
+use crate::picking::{GpuPickingContext, PickResult};
 use crate::pipelines::{DEPTH_FORMAT, RenderPipelines};
 use crate::uniforms::{CameraUniform, EditModeUniform, ObjectUniform};
 
@@ -131,6 +132,7 @@ pub struct ViewportRenderer {
     depth_size: (u32, u32),
     mesh_cache: HashMap<ObjectId, GpuMeshEntry>,
     pub edit_mesh_buffers: Option<GpuEditMeshBuffers>,
+    pub picking_ctx: GpuPickingContext,
     pub last_frame_stats: RenderStats,
 }
 
@@ -184,6 +186,8 @@ impl ViewportRenderer {
             }],
         });
 
+        let picking_ctx = GpuPickingContext::new(device);
+
         Self {
             pipelines,
             camera_buffer,
@@ -199,6 +203,7 @@ impl ViewportRenderer {
             depth_size: (0, 0),
             mesh_cache: HashMap::new(),
             edit_mesh_buffers: None,
+            picking_ctx,
             last_frame_stats: RenderStats::default(),
         }
     }
@@ -206,12 +211,14 @@ impl ViewportRenderer {
     /// Invalidate GPU cache for a specific object mesh.
     pub fn invalidate_mesh(&mut self, id: &ObjectId) {
         self.mesh_cache.remove(id);
+        self.picking_ctx.invalidate();
     }
 
     /// Clear all cached GPU meshes.
     pub fn invalidate_all_meshes(&mut self) {
         self.mesh_cache.clear();
         self.edit_mesh_buffers = None;
+        self.picking_ctx.invalidate();
     }
 
     /// Re-allocates the depth texture if the viewport dimensions change.
@@ -220,6 +227,7 @@ impl ViewportRenderer {
         let height = height.max(1);
 
         if self.depth_size != (width, height) || self.depth_texture.is_none() {
+            self.picking_ctx.invalidate();
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Viewport Depth Texture"),
                 size: wgpu::Extent3d {
@@ -240,6 +248,78 @@ impl ViewportRenderer {
             self.depth_view = Some(view);
             self.depth_size = (width, height);
         }
+    }
+
+    /// Schedules an asynchronous picking request for a single pixel (screen coordinates transformed to texture).
+    #[allow(clippy::too_many_arguments)]
+    pub fn schedule_pick_request(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        scene: &Scene,
+        camera: &Camera,
+        edit_mode: EditMode,
+        selection_element: SelectionElement,
+        active_edit_mesh: Option<(&ObjectId, &EditableMesh)>,
+        pixel_x: u32,
+        pixel_y: u32,
+    ) -> Option<u64> {
+        self.picking_ctx.schedule_pick_request(
+            device,
+            queue,
+            width,
+            height,
+            scene,
+            camera,
+            edit_mode,
+            selection_element,
+            active_edit_mesh,
+            pixel_x,
+            pixel_y,
+        )
+    }
+
+    /// Polls a pending picking request. Returns None if still pending or invalidated.
+    pub fn poll_pick_result(&mut self, request_id: u64) -> Option<PickResult> {
+        self.picking_ctx.poll_pick_result(request_id)
+    }
+
+    /// Synchronous picking query (waits for GPU completion).
+    #[allow(clippy::too_many_arguments)]
+    pub fn pick_sync(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        scene: &Scene,
+        camera: &Camera,
+        edit_mode: EditMode,
+        selection_element: SelectionElement,
+        active_edit_mesh: Option<(&ObjectId, &EditableMesh)>,
+        pixel_x: u32,
+        pixel_y: u32,
+    ) -> PickResult {
+        self.picking_ctx.pick_sync(
+            device,
+            queue,
+            width,
+            height,
+            scene,
+            camera,
+            edit_mode,
+            selection_element,
+            active_edit_mesh,
+            pixel_x,
+            pixel_y,
+        )
+    }
+
+    /// Invalidate any pending picking queries (e.g. when camera moves or active object changes).
+    pub fn invalidate_picking(&mut self) {
+        self.picking_ctx.invalidate();
     }
 
     /// Renders the scene into the specified target texture view.

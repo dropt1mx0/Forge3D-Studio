@@ -57,3 +57,26 @@ impl EditModeUniform {
         }
     }
 }
+
+/// Picking configuration uniform buffer data matching WGSL picking bind group 1 layout.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub struct PickingUniform {
+    pub id_code: u32,
+    pub _pad0: u32,
+    pub viewport_size: [f32; 2],
+    pub point_size: f32,
+    pub _pad1: [u32; 3],
+}
+
+impl PickingUniform {
+    pub fn new(id_code: u32, viewport_size: [f32; 2], point_size: f32) -> Self {
+        Self {
+            id_code,
+            _pad0: 0,
+            viewport_size,
+            point_size,
+            _pad1: [0, 0, 0],
+        }
+    }
+}

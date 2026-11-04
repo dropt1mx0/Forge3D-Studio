@@ -298,3 +298,179 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 }
 "#;
+
+/// WGSL shader for GPU ID Buffer Picking.
+/// Writes integer element IDs (u32) into an R32Uint render target.
+pub const PICKING_SHADER: &str = r#"
+struct CameraUniform {
+    view_proj: mat4x4<f32>,
+    camera_pos: vec4<f32>,
+};
+
+struct PickingUniform {
+    id_code: u32,
+    _pad0: u32,
+    viewport_size: vec2<f32>,
+    point_size: f32,
+    _pad1: u32,
+    _pad2: u32,
+    _pad3: u32,
+};
+
+@group(0) @binding(0)
+var<uniform> camera: CameraUniform;
+
+@group(1) @binding(0)
+var<uniform> picking_cfg: PickingUniform;
+
+// 1. Mesh / Object picking
+struct MeshVertexInput {
+    @location(0) position: vec3<f32>,
+};
+
+struct MeshInstanceInput {
+    @location(1) object_id: u32,
+};
+
+struct MeshVertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) @interpolate(flat) object_id: u32,
+};
+
+@vertex
+fn vs_mesh(model: MeshVertexInput, instance: MeshInstanceInput) -> MeshVertexOutput {
+    var out: MeshVertexOutput;
+    out.clip_position = camera.view_proj * vec4<f32>(model.position, 1.0);
+    out.object_id = instance.object_id;
+    return out;
+}
+
+@fragment
+fn fs_mesh(in: MeshVertexOutput) -> @location(0) u32 {
+    return in.object_id;
+}
+
+// 2. Vertex Handle picking (instanced billboarding)
+struct QuadVertexInput {
+    @location(0) quad_pos: vec2<f32>,
+};
+
+struct InstancePosInput {
+    @location(1) center_pos: vec3<f32>,
+};
+
+struct InstanceIdInput {
+    @location(2) id: u32,
+};
+
+struct VertexPickingOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) id: u32,
+};
+
+@vertex
+fn vs_vertex(
+    quad: QuadVertexInput,
+    instance_pos: InstancePosInput,
+    instance_id: InstanceIdInput,
+) -> VertexPickingOutput {
+    var out: VertexPickingOutput;
+    let clip_center = camera.view_proj * vec4<f32>(instance_pos.center_pos, 1.0);
+    let pixel_scale = 2.0 / max(picking_cfg.viewport_size, vec2<f32>(1.0, 1.0));
+    let radius_px = picking_cfg.point_size * 0.65;
+    let offset_ndc = quad.quad_pos * radius_px * pixel_scale;
+
+    var final_clip = clip_center;
+    final_clip.x += offset_ndc.x * clip_center.w;
+    final_clip.y += offset_ndc.y * clip_center.w;
+    final_clip.z -= 0.00030 * clip_center.w;
+
+    out.clip_position = final_clip;
+    out.uv = quad.quad_pos;
+    out.id = instance_id.id;
+    return out;
+}
+
+@fragment
+fn fs_vertex(in: VertexPickingOutput) -> @location(0) u32 {
+    if (length(in.uv) > 1.0) {
+        discard;
+    }
+    return in.id;
+}
+
+// 3. Screen-Space Edge picking (with expanded screen-space hitbox)
+struct EdgeVertexInput {
+    @location(0) pos_a: vec3<f32>,
+    @location(1) pos_b: vec3<f32>,
+    @location(2) quad_corner: vec2<f32>,
+    @location(3) edge_id: u32,
+};
+
+struct EdgePickingOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) @interpolate(flat) edge_id: u32,
+};
+
+@vertex
+fn vs_edge(input: EdgeVertexInput) -> EdgePickingOutput {
+    var out: EdgePickingOutput;
+    let clip_a = camera.view_proj * vec4<f32>(input.pos_a, 1.0);
+    let clip_b = camera.view_proj * vec4<f32>(input.pos_b, 1.0);
+
+    let ndc_a = clip_a.xy / max(clip_a.w, 0.00001);
+    let ndc_b = clip_b.xy / max(clip_b.w, 0.00001);
+
+    var delta = ndc_b - ndc_a;
+    let len = length(delta);
+    var dir = vec2<f32>(1.0, 0.0);
+    if (len > 0.00001) {
+        dir = delta / len;
+    }
+    let normal = vec2<f32>(-dir.y, dir.x);
+
+    let pixel_scale = 2.0 / max(picking_cfg.viewport_size, vec2<f32>(1.0, 1.0));
+    let half_width_px = 3.5;
+    let offset_ndc = normal * (input.quad_corner.y * half_width_px) * pixel_scale;
+
+    let t = (input.quad_corner.x + 1.0) * 0.5;
+    var base_clip = mix(clip_a, clip_b, t);
+    base_clip.x += offset_ndc.x * base_clip.w;
+    base_clip.y += offset_ndc.y * base_clip.w;
+    base_clip.z -= 0.00015 * base_clip.w;
+
+    out.clip_position = base_clip;
+    out.edge_id = input.edge_id;
+    return out;
+}
+
+@fragment
+fn fs_edge(in: EdgePickingOutput) -> @location(0) u32 {
+    return in.edge_id;
+}
+
+// 4. Face picking with per-face ID
+struct FaceVertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) face_id: u32,
+};
+
+struct FacePickingOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) @interpolate(flat) face_id: u32,
+};
+
+@vertex
+fn vs_face(model: FaceVertexInput) -> FacePickingOutput {
+    var out: FacePickingOutput;
+    out.clip_position = camera.view_proj * vec4<f32>(model.position, 1.0);
+    out.face_id = model.face_id;
+    return out;
+}
+
+@fragment
+fn fs_face(in: FacePickingOutput) -> @location(0) u32 {
+    return in.face_id;
+}
+"#;
