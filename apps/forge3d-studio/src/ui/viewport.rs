@@ -689,6 +689,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         delta.y * app.camera.settings.orbit_sensitivity,
                     );
                 }
+                app.pending_hover_pick = None;
+                if let Some(r) = &mut app.renderer {
+                    r.invalidate_picking();
+                }
                 ui.ctx().request_repaint();
             }
         }
@@ -725,12 +729,20 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             };
 
             app.camera.zoom_adaptive(scroll_delta, cursor_world_hit);
+            app.pending_hover_pick = None;
+            if let Some(r) = &mut app.renderer {
+                r.invalidate_picking();
+            }
             ui.ctx().request_repaint();
         }
 
         // Smooth Zoom frame interpolation
         let dt = (app.frame_time_ms * 0.001).clamp(0.0005, 0.1);
         if app.camera.update_smooth_zoom(dt) {
+            app.pending_hover_pick = None;
+            if let Some(r) = &mut app.renderer {
+                r.invalidate_picking();
+            }
             ui.ctx().request_repaint();
         }
     }
@@ -1140,9 +1152,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 (&mut app.renderer, app.wgpu_render_state.clone())
         {
             // 1. Poll previous hover pick request if available
-            if let Some(req_id) = app.pending_hover_pick_request {
-                if let Some(pick_result) = renderer.poll_pick_result(req_id) {
-                    app.pending_hover_pick_request = None;
+            if let Some(pending) = app.pending_hover_pick {
+                if let Some(pick_result) = renderer.poll_pick_result(pending.request_id) {
+                    app.pending_hover_pick = None;
                     match pick_result {
                         PickResult::Object(id) => app.selection.set_hovered(Some(id)),
                         _ => app.selection.set_hovered(None),
@@ -1165,7 +1177,14 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 px,
                 py,
             ) {
-                app.pending_hover_pick_request = Some(new_req);
+                app.pending_hover_pick = Some(crate::app::PendingHoverPick {
+                    request_id: new_req,
+                    pixel_coords: (px, py),
+                    edit_mode: app.editor_state.edit_mode,
+                    selection_element: app.editor_state.selection_element,
+                    active_object_id: app.active_edit_mesh.as_ref().map(|(id, _)| *id),
+                    invalidation_epoch: renderer.picking_ctx.invalidation_epoch,
+                });
             }
         } else {
             // CPU fallback raycast
@@ -1178,7 +1197,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     } else if is_ui_interacting || is_dragging_active {
         app.selection.set_hovered(None);
-        app.pending_hover_pick_request = None;
+        app.pending_hover_pick = None;
     }
 
     // =========================================================================
@@ -1220,13 +1239,28 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     && let (Some(renderer), Some(wgpu_state)) =
                         (&mut app.renderer, app.wgpu_render_state.clone())
                 {
-                    // Check if an in-flight hover picking request at this position is already completed
-                    let cached_result = app
-                        .pending_hover_pick_request
-                        .take()
-                        .and_then(|req_id| renderer.poll_pick_result(req_id));
+                    // Audit Click Picking Pre-Poll:
+                    // Validate pixel coordinates, mode, element, active object, and epoch!
+                    let pre_polled_result = if let Some(pending) = app.pending_hover_pick.take() {
+                        let same_pixel = pending.pixel_coords == (px, py);
+                        let same_mode = pending.edit_mode == app.editor_state.edit_mode;
+                        let same_elem =
+                            pending.selection_element == app.editor_state.selection_element;
+                        let same_obj = pending.active_object_id
+                            == app.active_edit_mesh.as_ref().map(|(id, _)| *id);
+                        let same_epoch =
+                            pending.invalidation_epoch == renderer.picking_ctx.invalidation_epoch;
 
-                    if let Some(res) = cached_result {
+                        if same_pixel && same_mode && same_elem && same_obj && same_epoch {
+                            renderer.poll_pick_result(pending.request_id)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(res) = pre_polled_result {
                         Some(res)
                     } else {
                         let active_mesh_ref = app.active_edit_mesh.as_ref().map(|(id, m)| (id, m));
@@ -1476,6 +1510,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 delta.x * app.camera.settings.orbit_sensitivity,
                                 delta.y * app.camera.settings.orbit_sensitivity,
                             );
+                            app.pending_hover_pick = None;
+                            if let Some(r) = &mut app.renderer {
+                                r.invalidate_picking();
+                            }
                             ui.ctx().request_repaint();
                         }
                     }

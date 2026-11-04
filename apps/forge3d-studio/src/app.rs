@@ -6,7 +6,9 @@ use forge_geometry::{EditSelectionMode, EditableMesh};
 use forge_gpu::GpuAdapterInfo;
 use forge_math::{Ray, Transform, Vec2, Vec3};
 use forge_render::{Camera, ViewportRenderer};
-use forge_scene::{Action, EditMode, EditorState, HistoryStack, Scene, SelectionState};
+use forge_scene::{
+    Action, EditMode, EditorState, HistoryStack, Scene, SelectionElement, SelectionState,
+};
 
 use crate::ui::gizmo::GizmoState;
 use crate::ui::menu_bar::render_menu_bar;
@@ -81,8 +83,19 @@ pub struct Forge3dStudioApp {
     // Free cursor object dragging state
     pub object_drag_state: Option<ObjectDragState>,
 
-    // Pending asynchronous GPU picking request for hover
-    pub pending_hover_pick_request: Option<u64>,
+    // Pending asynchronous GPU picking request for hover with full context validation
+    pub pending_hover_pick: Option<PendingHoverPick>,
+}
+
+/// Tracks a pending asynchronous hover picking request with full context to validate click pre-polling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingHoverPick {
+    pub request_id: u64,
+    pub pixel_coords: (u32, u32),
+    pub edit_mode: EditMode,
+    pub selection_element: SelectionElement,
+    pub active_object_id: Option<ObjectId>,
+    pub invalidation_epoch: u64,
 }
 
 impl Forge3dStudioApp {
@@ -166,7 +179,7 @@ impl Forge3dStudioApp {
             frame_time_ms: 16.6,
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
-            pending_hover_pick_request: None,
+            pending_hover_pick: None,
         }
     }
 
@@ -203,12 +216,17 @@ impl Forge3dStudioApp {
             frame_time_ms: 16.6,
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
-            pending_hover_pick_request: None,
+            pending_hover_pick: None,
         }
     }
 
     /// Toggles between Object Mode and Edit Mode.
     pub fn toggle_edit_mode(&mut self) {
+        self.pending_hover_pick = None;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_picking();
+        }
+
         match self.editor_state.edit_mode {
             EditMode::Object => {
                 if let Some(active_id) = self.selection.active_id {
@@ -324,10 +342,17 @@ impl Forge3dStudioApp {
                     self.selection.selected_ids.iter().copied().collect();
                 for id in to_delete {
                     if let Some(removed) = self.scene.remove_object(id) {
+                        if let Some(r) = &mut self.renderer {
+                            r.invalidate_mesh(&id);
+                        }
                         self.history.push(Action::DeleteObject { object: removed });
                     }
                 }
                 self.selection.deselect();
+                self.pending_hover_pick = None;
+                if let Some(r) = &mut self.renderer {
+                    r.invalidate_picking();
+                }
                 self.status_message = "Deleted selected object(s)".to_string();
             }
             EditMode::Edit => {
@@ -339,6 +364,10 @@ impl Forge3dStudioApp {
                     };
                     edit_mesh.delete_selected(sel_mode);
                     self.sync_edit_mesh_to_scene();
+                    self.pending_hover_pick = None;
+                    if let Some(r) = &mut self.renderer {
+                        r.invalidate_picking();
+                    }
                     self.status_message = "Deleted selected elements".to_string();
                 }
             }
@@ -933,6 +962,7 @@ impl Forge3dStudioApp {
     pub fn undo(&mut self) {
         if let Some(desc) = self.history.undo(&mut self.scene) {
             self.status_message = format!("Undo: {desc}");
+            self.pending_hover_pick = None;
             if let Some(r) = &mut self.renderer {
                 r.invalidate_all_meshes();
             }
@@ -944,6 +974,7 @@ impl Forge3dStudioApp {
     pub fn redo(&mut self) {
         if let Some(desc) = self.history.redo(&mut self.scene) {
             self.status_message = format!("Redo: {desc}");
+            self.pending_hover_pick = None;
             if let Some(r) = &mut self.renderer {
                 r.invalidate_all_meshes();
             }
@@ -955,12 +986,20 @@ impl Forge3dStudioApp {
     pub fn frame_selected(&mut self) {
         let bbox = self.scene.selected_aabb(&self.selection);
         self.camera.frame_box(&bbox);
+        self.pending_hover_pick = None;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_picking();
+        }
         self.status_message = "Framed Selected".to_string();
     }
 
     pub fn frame_all(&mut self) {
         let bbox = self.scene.scene_aabb();
         self.camera.frame_box(&bbox);
+        self.pending_hover_pick = None;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_picking();
+        }
         self.status_message = "Framed All".to_string();
     }
     pub fn render_app_ui(&mut self, ui: &mut egui::Ui) {
