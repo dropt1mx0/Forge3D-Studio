@@ -8,6 +8,7 @@ pub mod picking;
 pub mod pipelines;
 pub mod renderer;
 pub mod shaders;
+mod textures;
 pub mod uniforms;
 
 pub use camera::{Camera, CameraProjection, ViewPreset};

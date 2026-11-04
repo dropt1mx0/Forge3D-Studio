@@ -1445,9 +1445,20 @@ impl Forge3dStudioApp {
                             .clicked()
                             && let Some(id) = self.selection.active_id
                         {
+                            self.scene
+                                .materials
+                                .entry("builtin/diffuse".into())
+                                .or_insert_with(|| forge_scene::PbrMaterial {
+                                    name: "Diffuse".into(),
+                                    base_color_factor: [0.8, 0.8, 0.85, 1.0],
+                                    metallic_factor: 0.0,
+                                    roughness_factor: 0.8,
+                                    ..Default::default()
+                                });
                             let mut updated = None;
                             if let Some(obj) = self.scene.get_object_mut(id) {
-                                obj.color = [0.8, 0.8, 0.85, 1.0];
+                                obj.color = [1.0; 4];
+                                obj.material_id = Some("builtin/diffuse".into());
                                 updated = Some(obj.name.clone());
                             }
                             if let Some(name) = updated {
@@ -1467,9 +1478,20 @@ impl Forge3dStudioApp {
                             .clicked()
                             && let Some(id) = self.selection.active_id
                         {
+                            self.scene
+                                .materials
+                                .entry("builtin/brushed_metal".into())
+                                .or_insert_with(|| forge_scene::PbrMaterial {
+                                    name: "Brushed Metal".into(),
+                                    base_color_factor: [0.65, 0.70, 0.75, 1.0],
+                                    metallic_factor: 1.0,
+                                    roughness_factor: 0.32,
+                                    ..Default::default()
+                                });
                             let mut updated = None;
                             if let Some(obj) = self.scene.get_object_mut(id) {
-                                obj.color = [0.65, 0.70, 0.75, 1.0];
+                                obj.color = [1.0; 4];
+                                obj.material_id = Some("builtin/brushed_metal".into());
                                 updated = Some(obj.name.clone());
                             }
                             if let Some(name) = updated {
@@ -1704,150 +1726,235 @@ impl Forge3dStudioApp {
                 });
         }
 
-        // 9. Floating Material Inspector Window (Octane / Cinema 4D Studio Style)
+        // 9. Scene-backed PBR material and lighting inspector.
         if self.show_material_editor {
             let mut open = self.show_material_editor;
-            egui::Window::new("Brushed Metal Material Inspector")
+            let selected_id = self.selection.active_id;
+            egui::Window::new("PBR Material & Lighting")
                 .open(&mut open)
-                .resizable(false)
-                .default_size(egui::vec2(360.0, 310.0))
+                .resizable(true)
+                .default_size(egui::vec2(420.0, 560.0))
                 .default_pos(egui::pos2(280.0, 140.0))
                 .show(&ctx, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
-                    ui.columns(2, |columns| {
-                        // Left column: preview & basic properties
-                        columns[0].vertical(|ui| {
-                            // Glossy sphere preview
-                            let (rect, _) = ui
-                                .allocate_exact_size(egui::vec2(64.0, 64.0), egui::Sense::hover());
-                            let center = rect.center();
-                            let radius = 28.0;
-                            // Base gradient
-                            ui.painter().circle_filled(
-                                center,
-                                radius,
-                                egui::Color32::from_rgb(175, 185, 200),
-                            );
-                            // Shaded border
-                            ui.painter().circle_stroke(
-                                center,
-                                radius,
-                                egui::Stroke::new(1.5, egui::Color32::from_rgb(50, 55, 70)),
-                            );
-                            // Specular highlight top-left
-                            let highlight_center = center + egui::vec2(-8.0, -8.0);
-                            ui.painter().circle_filled(
-                                highlight_center,
-                                8.0,
-                                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 220),
-                            );
-
-                            ui.add_space(4.0);
-                            let _ = ui.button(
-                                egui::RichText::new("Gold material")
-                                    .size(10.0)
-                                    .color(egui::Color32::from_rgb(255, 215, 80)),
-                            );
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("Type").size(11.0));
-                                egui::ComboBox::from_id_salt("mat_type_combo")
-                                    .selected_text("Glossy ▾")
+                    let mut scene_changed = false;
+                    if let Some(id) = selected_id {
+                        let is_light = self
+                            .scene
+                            .objects
+                            .get(&id)
+                            .is_some_and(|object| object.light_data.is_some());
+                        if is_light {
+                            ui.heading("Selected Light");
+                            if let Some(light) = self
+                                .scene
+                                .objects
+                                .get_mut(&id)
+                                .and_then(|object| object.light_data.as_mut())
+                            {
+                                egui::ComboBox::from_id_salt(("light-kind", id))
+                                    .selected_text(format!("{:?}", light.kind))
                                     .show_ui(ui, |ui| {
-                                        let _ = ui.selectable_label(true, "Glossy");
-                                        let _ = ui.selectable_label(false, "Diffuse");
-                                        let _ = ui.selectable_label(false, "Specular");
-                                        let _ = ui.selectable_label(false, "Metallic");
+                                        scene_changed |= ui
+                                            .selectable_value(
+                                                &mut light.kind,
+                                                forge_scene::LightKind::Directional,
+                                                "Directional",
+                                            )
+                                            .changed();
+                                        scene_changed |= ui
+                                            .selectable_value(
+                                                &mut light.kind,
+                                                forge_scene::LightKind::Point,
+                                                "Point",
+                                            )
+                                            .changed();
+                                        scene_changed |= ui
+                                            .selectable_value(
+                                                &mut light.kind,
+                                                forge_scene::LightKind::Spot,
+                                                "Spot",
+                                            )
+                                            .changed();
                                     });
-                            });
-                            ui.add_space(2.0);
-                            ui.label(
-                                egui::RichText::new("• Diffuse")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(200, 205, 220)),
-                            );
-                            ui.label(
-                                egui::RichText::new("• Specular")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(200, 205, 220)),
-                            );
-                            ui.label(
-                                egui::RichText::new("• Roughness")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(200, 205, 220)),
-                            );
-                            ui.label(
-                                egui::RichText::new("• Bump")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(200, 205, 220)),
-                            );
-                            ui.label(
-                                egui::RichText::new("• Normal")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(200, 205, 220)),
-                            );
-                            ui.label(
-                                egui::RichText::new("• Displacement")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(200, 205, 220)),
-                            );
-                        });
-
-                        // Right column: sliders and texture settings
-                        columns[1].vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("• Color").size(11.0));
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(80.0, 14.0),
-                                    egui::Sense::hover(),
-                                );
-                                for i in 0..8 {
-                                    let sub_w = rect.width() / 8.0;
-                                    let sub_rect = egui::Rect::from_min_size(
-                                        egui::pos2(rect.left() + i as f32 * sub_w, rect.top()),
-                                        egui::vec2(sub_w, rect.height()),
-                                    );
-                                    let hue = i as f32 / 8.0;
-                                    let c = egui::epaint::Hsva::new(hue, 0.8, 0.9, 1.0);
-                                    ui.painter().rect_filled(sub_rect, 0.0, c);
+                                scene_changed |= ui.checkbox(&mut light.enabled, "Enabled").changed();
+                                ui.horizontal(|ui| {
+                                    ui.label("Color");
+                                    scene_changed |= ui.color_edit_button_rgb(&mut light.color).changed();
+                                });
+                                scene_changed |= ui
+                                    .add(egui::Slider::new(&mut light.intensity, 0.0..=100.0).text("Intensity"))
+                                    .changed();
+                                if light.kind != forge_scene::LightKind::Directional {
+                                    scene_changed |= ui
+                                        .add(egui::Slider::new(&mut light.range, 0.1..=100.0).text("Range"))
+                                        .changed();
                                 }
-                            });
-                            let mut dummy_deg = 88.0f32;
-                            ui.add(egui::Slider::new(&mut dummy_deg, 0.0..=360.0).suffix("°"));
-                            let mut dummy_p1 = 34.0f32;
-                            ui.add(egui::Slider::new(&mut dummy_p1, 0.0..=100.0).suffix("%"));
-                            let mut dummy_p2 = 69.0f32;
-                            ui.add(egui::Slider::new(&mut dummy_p2, 0.0..=100.0).suffix("%"));
+                                if light.kind == forge_scene::LightKind::Spot {
+                                    scene_changed |= ui
+                                        .add(egui::Slider::new(&mut light.inner_cone_angle_deg, 0.0..=88.0).text("Inner cone"))
+                                        .changed();
+                                    scene_changed |= ui
+                                        .add(egui::Slider::new(&mut light.outer_cone_angle_deg, 1.0..=89.0).text("Outer cone"))
+                                        .changed();
+                                }
+                                ui.label("Point and spot falloff use inverse-square distance attenuation.");
+                            }
+                        } else {
+                            ui.heading("Material Assignment");
+                            let current_material_id = self
+                                .scene
+                                .objects
+                                .get(&id)
+                                .and_then(|object| object.material_id.clone());
+                            let options: Vec<(String, String)> = self
+                                .scene
+                                .materials
+                                .iter()
+                                .map(|(material_id, material)| (material_id.clone(), material.name.clone()))
+                                .collect();
+                            let selected_name = current_material_id
+                                .as_ref()
+                                .and_then(|material_id| self.scene.materials.get(material_id))
+                                .map(|material| material.name.clone())
+                                .unwrap_or_else(|| "Object color only".into());
+                            let mut chosen_material: Option<Option<String>> = None;
+                            egui::ComboBox::from_id_salt(("object-material", id))
+                                .selected_text(selected_name)
+                                .show_ui(ui, |ui| {
+                                    if ui
+                                        .selectable_label(current_material_id.is_none(), "Object color only")
+                                        .clicked()
+                                    {
+                                        chosen_material = Some(None);
+                                    }
+                                    for (material_id, name) in &options {
+                                        if ui
+                                            .selectable_label(
+                                                current_material_id.as_ref() == Some(material_id),
+                                                name,
+                                            )
+                                            .on_hover_text(material_id)
+                                            .clicked()
+                                        {
+                                            chosen_material = Some(Some(material_id.clone()));
+                                        }
+                                    }
+                                });
+                            if let Some(material_id) = chosen_material
+                                && let Some(object) = self.scene.objects.get_mut(&id)
+                            {
+                                object.material_id = material_id;
+                                scene_changed = true;
+                            }
+                            if ui.button("Create PBR material for selected object").clicked() {
+                                let material_id = format!("user/material-{}", forge_core::id::ObjectId::new().raw());
+                                let material = forge_scene::PbrMaterial {
+                                    name: "New PBR Material".into(),
+                                    ..Default::default()
+                                };
+                                self.scene.materials.insert(material_id.clone(), material);
+                                if let Some(object) = self.scene.objects.get_mut(&id) {
+                                    object.material_id = Some(material_id);
+                                }
+                                scene_changed = true;
+                            }
 
-                            ui.add_space(4.0);
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("• Float").size(11.0));
-                                egui::ComboBox::from_id_salt("mat_texture_combo")
-                                    .selected_text("Texture ▾")
-                                    .show_ui(ui, |ui| {
-                                        let _ = ui.selectable_label(true, "None");
-                                        let _ = ui.selectable_label(false, "Image...");
-                                    });
-                            });
-                            let mut dummy_f = 0.23f32;
-                            ui.add(egui::Slider::new(&mut dummy_f, 0.0..=1.0));
-
-                            ui.add_space(4.0);
-                            ui.label(egui::RichText::new("• Mix").size(11.0));
-                            let mut dummy_mix = 0.03f32;
-                            ui.add(egui::Slider::new(&mut dummy_mix, 0.0..=1.0));
-                        });
-                    });
+                            let active_material_id = self
+                                .scene
+                                .objects
+                                .get(&id)
+                                .and_then(|object| object.material_id.clone());
+                            if let Some(material_id) = active_material_id
+                                && let Some(material) = self.scene.materials.get_mut(&material_id)
+                            {
+                                ui.separator();
+                                ui.heading(&material.name);
+                                scene_changed |= ui.text_edit_singleline(&mut material.name).changed();
+                                ui.horizontal(|ui| {
+                                    ui.label("Base color");
+                                    scene_changed |= ui
+                                        .color_edit_button_rgba_unmultiplied(&mut material.base_color_factor)
+                                        .changed();
+                                });
+                                scene_changed |= ui
+                                    .add(egui::Slider::new(&mut material.metallic_factor, 0.0..=1.0).text("Metallic"))
+                                    .changed();
+                                scene_changed |= ui
+                                    .add(egui::Slider::new(&mut material.roughness_factor, 0.045..=1.0).text("Roughness"))
+                                    .changed();
+                                scene_changed |= ui
+                                    .add(egui::Slider::new(&mut material.normal_scale, 0.0..=2.0).text("Normal strength"))
+                                    .changed();
+                                scene_changed |= ui
+                                    .add(egui::Slider::new(&mut material.occlusion_strength, 0.0..=1.0).text("AO strength"))
+                                    .changed();
+                                ui.horizontal(|ui| {
+                                    ui.label("Emissive");
+                                    scene_changed |= ui
+                                        .color_edit_button_rgb(&mut material.emissive_factor)
+                                        .changed();
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("UV scale");
+                                    scene_changed |= ui
+                                        .add(egui::DragValue::new(&mut material.uv_scale[0]).speed(0.05).range(0.01..=100.0))
+                                        .changed();
+                                    scene_changed |= ui
+                                        .add(egui::DragValue::new(&mut material.uv_scale[1]).speed(0.05).range(0.01..=100.0))
+                                        .changed();
+                                });
+                                ui.collapsing("Texture maps", |ui| {
+                                    for (label, slot) in [
+                                        ("Base color", &mut material.textures.base_color),
+                                        ("Normal", &mut material.textures.normal),
+                                        ("Metallic", &mut material.textures.metallic),
+                                        ("Roughness", &mut material.textures.roughness),
+                                        ("Occlusion", &mut material.textures.ambient_occlusion),
+                                        ("Emissive", &mut material.textures.emissive),
+                                    ] {
+                                        ui.horizontal(|ui| {
+                                            ui.label(label);
+                                            let mut path_value = slot.clone().unwrap_or_default();
+                                            if ui.text_edit_singleline(&mut path_value).changed() {
+                                                *slot = (!path_value.trim().is_empty()).then_some(path_value.clone());
+                                                scene_changed = true;
+                                            }
+                                            if ui.button("Browse…").clicked()
+                                                && let Some(path) = rfd::FileDialog::new()
+                                                    .add_filter("Image", &["png", "jpg", "jpeg", "tga", "bmp"])
+                                                    .pick_file()
+                                            {
+                                                *slot = Some(path.to_string_lossy().into_owned());
+                                                scene_changed = true;
+                                            }
+                                        });
+                                    }
+                                });
+                                ui.label("Color maps are read as sRGB. Normal, metallic, roughness, and AO maps are linear data.");
+                            }
+                        }
+                    } else {
+                        ui.label("Select an object to edit its material or light.");
+                    }
 
                     ui.separator();
-                    ui.horizontal(|ui| {
-                        let _ = ui.button(
-                            egui::RichText::new("Node Editor")
-                                .size(11.0)
-                                .color(egui::Color32::WHITE),
-                        );
-                        let _ = ui.button(egui::RichText::new("Assignment").size(11.0));
-                        let _ = ui.button(egui::RichText::new("Help").size(11.0));
+                    ui.collapsing("World lighting", |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Sky");
+                            scene_changed |= ui.color_edit_button_rgb(&mut self.scene.world_lighting.sky_color).changed();
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Ground");
+                            scene_changed |= ui.color_edit_button_rgb(&mut self.scene.world_lighting.ground_color).changed();
+                        });
+                        scene_changed |= ui
+                            .add(egui::Slider::new(&mut self.scene.world_lighting.intensity, 0.0..=3.0).text("Environment strength"))
+                            .changed();
+                        ui.label("Hemispheric ambient fill; direct lights are controlled by selecting a light object.");
                     });
+                    if scene_changed {
+                        self.scene.dirty = true;
+                    }
                 });
             self.show_material_editor = open;
         }

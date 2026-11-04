@@ -5,7 +5,9 @@ use forge_geometry::primitives::{
 };
 use forge_math::{Transform, Vec3};
 use forge_render::{CameraProjection, ViewPreset};
-use forge_scene::{Action, EditMode, ForgeProject, PrimitiveType, Scene, SceneObject};
+use forge_scene::{
+    Action, EditMode, ForgeProject, LightData, LightKind, PrimitiveType, Scene, SceneObject,
+};
 
 use crate::app::Forge3dStudioApp;
 
@@ -861,7 +863,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
             ui.checkbox(
                 &mut app.show_material_editor,
-                "Show Material Inspector (Octane Style)",
+                "Show PBR Material & Lighting Inspector",
             );
             if ui.button("Reset Workspace Layout").clicked() {
                 app.editor_state.panel_settings = forge_scene::PanelSettings::default();
@@ -1097,13 +1099,22 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             .clicked()
         {
             let mesh = generate_uv_sphere(0.25, 12, 8);
-            let id = app.scene.add_object(
-                SceneObject::new("Light", PrimitiveType::Sphere, mesh)
-                    .with_color([1.0, 0.95, 0.70, 1.0])
-                    .with_transform(Transform::from_translation(
-                        cursor + Vec3::new(2.0, 4.0, 2.0),
-                    )),
-            );
+            let mut light = SceneObject::new_light(
+                "Point Light",
+                LightData {
+                    kind: LightKind::Point,
+                    color: [1.0, 0.92, 0.72],
+                    intensity: 30.0,
+                    range: 10.0,
+                    ..LightData::default()
+                },
+                mesh,
+            )
+            .with_transform(Transform::from_translation(
+                cursor + Vec3::new(2.0, 4.0, 2.0),
+            ));
+            light.visible = false;
+            let id = app.scene.add_object(light);
             if let Some(obj) = app.scene.get_object(id) {
                 app.history.push(Action::AddObject {
                     object: obj.clone(),

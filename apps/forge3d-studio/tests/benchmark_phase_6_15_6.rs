@@ -487,7 +487,7 @@ fn benchmark_3_system_memory_scenarios() {
     let cube_mesh = generate_cube(1.0);
     for i in 0..200 {
         let mut obj = SceneObject::new(
-            &format!("Cube_{:03}", i),
+            format!("Cube_{:03}", i),
             PrimitiveType::Cube,
             cube_mesh.clone(),
         );

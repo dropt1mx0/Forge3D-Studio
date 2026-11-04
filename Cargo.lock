@@ -1290,6 +1290,7 @@ dependencies = [
  "forge-modifiers",
  "forge-scene",
  "glam",
+ "image",
  "serde",
  "thiserror 2.0.21",
  "tracing",
@@ -1764,6 +1765,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]

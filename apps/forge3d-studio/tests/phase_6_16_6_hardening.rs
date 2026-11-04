@@ -451,7 +451,7 @@ fn test_synchronous_picking_latency_breakdown() {
         let vert_count = raw_mesh.vertices.len();
         let edit_mesh = EditableMesh::from_mesh(&raw_mesh);
 
-        let mut scene = Scene::new(&format!("{label} Sync Pick Scene"));
+        let mut scene = Scene::new(format!("{label} Sync Pick Scene"));
         let obj = SceneObject::new("DenseMesh", PrimitiveType::Plane, raw_mesh);
         let obj_id = obj.id;
         scene.add_object(obj);
@@ -578,7 +578,7 @@ fn benchmark_full_frame_cpu_vs_gpu_10k_50k_100k() {
         let vert_count = raw_mesh.vertices.len();
         let edit_mesh = EditableMesh::from_mesh(&raw_mesh);
 
-        let mut scene = Scene::new(&format!("{label} Full Frame Scene"));
+        let mut scene = Scene::new(format!("{label} Full Frame Scene"));
         let obj = SceneObject::new("DenseMesh", PrimitiveType::Plane, raw_mesh);
         let obj_id = obj.id;
         scene.add_object(obj);

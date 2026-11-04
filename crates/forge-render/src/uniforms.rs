@@ -23,6 +23,7 @@ impl CameraUniform {
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub struct ObjectUniform {
     pub model: [[f32; 4]; 4],
+    pub normal_model: [[f32; 4]; 4],
     pub color: [f32; 4],
     pub is_selected: u32,
     pub _padding: [u32; 3], // Padding to maintain 16-byte struct size
@@ -32,6 +33,7 @@ impl ObjectUniform {
     pub fn new(model: Mat4, color: [f32; 4], is_selected: bool) -> Self {
         Self {
             model: model.to_cols_array_2d(),
+            normal_model: model.inverse().transpose().to_cols_array_2d(),
             color,
             is_selected: if is_selected { 1 } else { 0 },
             _padding: [0, 0, 0],

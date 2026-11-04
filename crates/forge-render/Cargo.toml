@@ -17,7 +17,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 glam = { workspace = true }
 serde = { workspace = true }
+image = { workspace = true }
 
 [dev-dependencies]
 forge-modifiers = { workspace = true }
-

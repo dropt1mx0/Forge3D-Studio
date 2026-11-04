@@ -1152,13 +1152,13 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 (&mut app.renderer, app.wgpu_render_state.clone())
         {
             // 1. Poll previous hover pick request if available
-            if let Some(pending) = app.pending_hover_pick {
-                if let Some(pick_result) = renderer.poll_pick_result(pending.request_id) {
-                    app.pending_hover_pick = None;
-                    match pick_result {
-                        PickResult::Object(id) => app.selection.set_hovered(Some(id)),
-                        _ => app.selection.set_hovered(None),
-                    }
+            if let Some(pending) = app.pending_hover_pick
+                && let Some(pick_result) = renderer.poll_pick_result(pending.request_id)
+            {
+                app.pending_hover_pick = None;
+                match pick_result {
+                    PickResult::Object(id) => app.selection.set_hovered(Some(id)),
+                    _ => app.selection.set_hovered(None),
                 }
             }
 
@@ -1314,69 +1314,66 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             ui.ctx().request_repaint();
                         }
                         PickResult::Vertex(v_idx) => {
-                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
-                                if v_idx < edit_mesh.vertices.len() {
-                                    app.editor_state.pointer_state =
-                                        PointerInteractionState::ObjectPressed;
-                                    app.editor_state.pointer_press_pos =
-                                        Some(Vec2::new(pos.x, pos.y));
-                                    if input.modifiers.shift {
-                                        edit_mesh.vertices[v_idx].selected =
-                                            !edit_mesh.vertices[v_idx].selected;
-                                        if edit_mesh.vertices[v_idx].selected {
-                                            app.editor_state.active_vertex = Some(v_idx);
-                                        } else if app.editor_state.active_vertex == Some(v_idx) {
-                                            app.editor_state.active_vertex = None;
-                                        }
-                                    } else {
-                                        edit_mesh.deselect_all(EditSelectionMode::Vertex);
-                                        edit_mesh.vertices[v_idx].selected = true;
+                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh
+                                && v_idx < edit_mesh.vertices.len()
+                            {
+                                app.editor_state.pointer_state =
+                                    PointerInteractionState::ObjectPressed;
+                                app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
+                                if input.modifiers.shift {
+                                    edit_mesh.vertices[v_idx].selected =
+                                        !edit_mesh.vertices[v_idx].selected;
+                                    if edit_mesh.vertices[v_idx].selected {
                                         app.editor_state.active_vertex = Some(v_idx);
+                                    } else if app.editor_state.active_vertex == Some(v_idx) {
+                                        app.editor_state.active_vertex = None;
                                     }
-                                    app.status_message = format!("Selected Vertex #{}", v_idx);
-                                    app.sync_edit_mesh_to_scene();
-                                    ui.ctx().request_repaint();
+                                } else {
+                                    edit_mesh.deselect_all(EditSelectionMode::Vertex);
+                                    edit_mesh.vertices[v_idx].selected = true;
+                                    app.editor_state.active_vertex = Some(v_idx);
                                 }
+                                app.status_message = format!("Selected Vertex #{}", v_idx);
+                                app.sync_edit_mesh_to_scene();
+                                ui.ctx().request_repaint();
                             }
                         }
                         PickResult::Edge(e_idx) => {
-                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
-                                if e_idx < edit_mesh.edges.len() {
-                                    app.editor_state.pointer_state =
-                                        PointerInteractionState::ObjectPressed;
-                                    app.editor_state.pointer_press_pos =
-                                        Some(Vec2::new(pos.x, pos.y));
-                                    if input.modifiers.shift {
-                                        edit_mesh.edges[e_idx].selected =
-                                            !edit_mesh.edges[e_idx].selected;
-                                    } else {
-                                        edit_mesh.deselect_all(EditSelectionMode::Edge);
-                                        edit_mesh.edges[e_idx].selected = true;
-                                    }
-                                    app.status_message = format!("Selected Edge #{}", e_idx);
-                                    app.sync_edit_mesh_to_scene();
-                                    ui.ctx().request_repaint();
+                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh
+                                && e_idx < edit_mesh.edges.len()
+                            {
+                                app.editor_state.pointer_state =
+                                    PointerInteractionState::ObjectPressed;
+                                app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
+                                if input.modifiers.shift {
+                                    edit_mesh.edges[e_idx].selected =
+                                        !edit_mesh.edges[e_idx].selected;
+                                } else {
+                                    edit_mesh.deselect_all(EditSelectionMode::Edge);
+                                    edit_mesh.edges[e_idx].selected = true;
                                 }
+                                app.status_message = format!("Selected Edge #{}", e_idx);
+                                app.sync_edit_mesh_to_scene();
+                                ui.ctx().request_repaint();
                             }
                         }
                         PickResult::Face(f_idx) => {
-                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
-                                if f_idx < edit_mesh.faces.len() {
-                                    app.editor_state.pointer_state =
-                                        PointerInteractionState::ObjectPressed;
-                                    app.editor_state.pointer_press_pos =
-                                        Some(Vec2::new(pos.x, pos.y));
-                                    if input.modifiers.shift {
-                                        edit_mesh.faces[f_idx].selected =
-                                            !edit_mesh.faces[f_idx].selected;
-                                    } else {
-                                        edit_mesh.deselect_all(EditSelectionMode::Face);
-                                        edit_mesh.faces[f_idx].selected = true;
-                                    }
-                                    app.status_message = format!("Selected Face #{}", f_idx);
-                                    app.sync_edit_mesh_to_scene();
-                                    ui.ctx().request_repaint();
+                            if let Some((_, edit_mesh)) = &mut app.active_edit_mesh
+                                && f_idx < edit_mesh.faces.len()
+                            {
+                                app.editor_state.pointer_state =
+                                    PointerInteractionState::ObjectPressed;
+                                app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
+                                if input.modifiers.shift {
+                                    edit_mesh.faces[f_idx].selected =
+                                        !edit_mesh.faces[f_idx].selected;
+                                } else {
+                                    edit_mesh.deselect_all(EditSelectionMode::Face);
+                                    edit_mesh.faces[f_idx].selected = true;
                                 }
+                                app.status_message = format!("Selected Face #{}", f_idx);
+                                app.sync_edit_mesh_to_scene();
+                                ui.ctx().request_repaint();
                             }
                         }
                         PickResult::None => {
@@ -2156,6 +2153,7 @@ fn add_box_quad(mesh: &mut egui::Mesh, center: Pos2, half_size: f32, color: Colo
     ]);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_edit_mode_overlay(
     cache: &mut EditOverlayCache,
     painter: &egui::Painter,
@@ -2183,11 +2181,9 @@ pub fn render_edit_mode_overlay(
         && cache.last_draw_edges == draw_edges
         && cache.last_draw_vertices == draw_vertices;
 
-    if cache_valid {
-        if let Some(shape) = &cache.cached_shape {
-            painter.add(egui::Shape::Mesh(Arc::clone(shape)));
-            return;
-        }
+    if cache_valid && let Some(shape) = &cache.cached_shape {
+        painter.add(egui::Shape::Mesh(Arc::clone(shape)));
+        return;
     }
 
     // 1. Precompute vertex screen projections once into scratch buffer

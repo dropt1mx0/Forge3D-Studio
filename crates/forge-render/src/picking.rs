@@ -716,10 +716,10 @@ impl GpuPickingContext {
     /// Invalidates cached picking buffers for a specific object and drops stale readbacks.
     pub fn invalidate_mesh(&mut self, id: &ObjectId) {
         self.mesh_cache.remove(id);
-        if let Some(c) = &self.edit_cache {
-            if c.object_id == *id {
-                self.edit_cache = None;
-            }
+        if let Some(c) = &self.edit_cache
+            && c.object_id == *id
+        {
+            self.edit_cache = None;
         }
         self.invalidate();
     }
@@ -790,6 +790,7 @@ impl GpuPickingContext {
     /// Renders the picking pass into the ID texture and schedules a non-blocking 1-pixel copy.
     ///
     /// Returns the assigned `request_id` if successfully scheduled, or `None` if pool is full.
+    #[allow(clippy::too_many_arguments)]
     pub fn schedule_pick_request(
         &mut self,
         device: &wgpu::Device,
@@ -1328,6 +1329,7 @@ impl GpuPickingContext {
     }
 
     /// Synchronous picking query (for tests and pixel readback verification).
+    #[allow(clippy::too_many_arguments)]
     pub fn pick_sync(
         &mut self,
         device: &wgpu::Device,

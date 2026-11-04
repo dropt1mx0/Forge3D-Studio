@@ -599,10 +599,12 @@ fn test_gpu_vertex_handles_offscreen_pixel_readback() {
     scene.add_object(obj);
 
     let selection = SelectionState::new();
-    let mut camera = Camera::default();
-    camera.eye = Vec3::new(2.0, 2.0, 2.5);
-    camera.target = Vec3::ZERO;
-    camera.up = Vec3::new(0.0, 1.0, 0.0);
+    let camera = Camera {
+        eye: Vec3::new(2.0, 2.0, 2.5),
+        target: Vec3::ZERO,
+        up: Vec3::new(0.0, 1.0, 0.0),
+        ..Default::default()
+    };
 
     let mut edit_mesh = EditableMesh::from_mesh(&cube);
 
@@ -610,7 +612,7 @@ fn test_gpu_vertex_handles_offscreen_pixel_readback() {
     let read_pixels = || -> Vec<u8> {
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
         let unpadded_bytes = width * 4;
-        let padded_bytes = ((unpadded_bytes + align - 1) / align) * align;
+        let padded_bytes = unpadded_bytes.div_ceil(align) * align;
         let buffer_size = (padded_bytes * height) as wgpu::BufferAddress;
 
         let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {

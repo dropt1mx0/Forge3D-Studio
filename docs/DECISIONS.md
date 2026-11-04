@@ -384,3 +384,30 @@
   3. Keep this showcase pass self-contained; full image texture assets, material slots, and GPU texture sampling remain separate renderer/asset-pipeline work.
 - **Consequences:**
   The current renderer can show distinct surface character without external files or GPU pipeline changes. These are procedural vertex-color patterns rather than sampled bitmap textures, so higher-resolution image detail and editable texture parameters still require a future material system.
+
+## ADR-0022: Poly Haven PBR Material for the Showcase Path and Porch
+- **Status:** Superseded by ADR-0023
+- **Date:** 2026-11-04
+- **Context:**
+  The user requested connecting Poly Haven's Brown Floor Tiles asset to the live render with lighting and 4K textures. The renderer previously used only vertex/object colors and a Blinn-Phong light model.
+- **Decision:**
+  1. Vendor the asset's CC0 4K diffuse, OpenGL normal, roughness, and AO maps under `assets/textures/brown_floor_tiles/`, with their source and license recorded beside the files.
+  2. Add an optional, serde-defaulted `SceneObject.material_id` string so existing `.forge` files remain readable. Mark only the showcase Front Path and Porch Deck with the built-in `polyhaven/brown_floor_tiles` ID.
+  3. Add a material bind group to the mesh pipeline and replace the viewport mesh lighting with a Cook-Torrance GGX direct-light model, an ambient fill term, derivative-built tangent frames for normal mapping, and AO modulation.
+  4. Decode maps only when a scene with that material is first rendered, upload once per renderer, generate CPU mipmaps, use sRGB for albedo and linear formats for data maps, and clamp source dimensions to the adapter's supported 2D texture size. Other objects use a shared one-pixel material fallback and skip normal-map tangent-frame work in the shader.
+- **Consequences:**
+  The path and porch now display the source bitmap maps under directional and ambient viewport lighting. The release app loaded the 4096×4096 set on the Intel HD 4000/OpenGL adapter and reported about 170.7 MiB of GPU texture storage including mipmaps; loading and mip generation occur once, not each frame. This is a built-in renderer material rather than a user-editable material browser, and the viewport still has no shadow map or environment lighting.
+
+## ADR-0023: Scene-Driven Metallic-Roughness Materials and Lighting
+- **Status:** Accepted
+- **Date:** 2026-11-04
+- **Context:**
+  The initial Poly Haven integration only recognized one hard-coded material ID and the viewport shader fixed metallic at zero and used one synthetic light. The user asked for a complete material pipeline and editable lighting rather than a bitmap-only treatment.
+- **Decision:**
+  1. Add a renderer-independent `PbrMaterial` record to `Scene`, with linear base-color/emissive factors, metallic and roughness factors, normal/AO strengths, UV scaling, and optional base-color, normal, metallic, roughness, AO, and emissive image paths. Keep GPU resources derived and cached in `forge-render`.
+  2. Use the same material bind layout for all scene materials. Sample base color and emissive in sRGB; sample normal and scalar data maps in linear formats; generate mip chains with color-space-aware filtering; use one-pixel defaults for absent maps. Refresh scalar uniforms without rebuilding unchanged image maps.
+  3. Replace the hard-coded shader light with a scene uniform carrying up to 16 editable directional, point, and spot lights. Point and spot lights have inverse-square attenuation and finite range. World lighting supplies hemispheric sky/ground fill.
+  4. Add a 1024×1024 directional shadow map for the first directional light and ACES tone mapping. The viewport uses a forward renderer; material, light, and world settings remain ordinary scene data and serialize in `.forge` projects.
+  5. Replace the fake material inspector with controls that assign/create materials, edit PBR values and map paths, edit selected lights, and tune world fill. Bump the project schema to version 2 and restore the bundled tile material when loading older version-1 showcases.
+- **Consequences:**
+  Any object can now use the same metallic-roughness path, including the packaged 4K tile material. The live viewport performs direct PBR lighting and directional shadows on the available GPU backend. The renderer still uses hemispheric ambient fill rather than HDR image-based lighting; spot and point lights do not cast shadow maps, and transparent-cutout materials are not supported in the shadow pass.

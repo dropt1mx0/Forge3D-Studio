@@ -1,17 +1,157 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use forge_core::id::ObjectId;
 use forge_geometry::primitives::generate_grid_lines;
 use forge_geometry::{EditableMesh, LineVertex, Vertex};
 use forge_gpu::GpuBuffer;
-use forge_math::Vec3;
-use forge_scene::{EditMode, Scene, SelectionElement, SelectionState};
+use forge_math::{Aabb, Mat4, Vec3};
+use forge_scene::{
+    EditMode, LightData, LightKind, PbrMaterial, Scene, SelectionElement, SelectionState,
+};
 use wgpu::util::DeviceExt;
 
 use crate::camera::Camera;
 use crate::picking::{GpuPickingContext, PickResult};
 use crate::pipelines::{DEPTH_FORMAT, RenderPipelines};
+use crate::textures::{GpuMaterial, create_default_material, create_material};
 use crate::uniforms::{CameraUniform, EditModeUniform, ObjectUniform};
+
+const MAX_SCENE_LIGHTS: usize = 16;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuLight {
+    position_type: [f32; 4],
+    direction_intensity: [f32; 4],
+    color_range: [f32; 4],
+    spot_cones: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct LightingUniform {
+    sky_color_intensity: [f32; 4],
+    ground_color: [f32; 4],
+    light_count: u32,
+    shadow_light_index: u32,
+    padding: [u32; 2],
+    shadow_view_proj: [[f32; 4]; 4],
+    lights: [GpuLight; MAX_SCENE_LIGHTS],
+}
+
+impl LightingUniform {
+    fn from_scene(scene: &Scene) -> Self {
+        let mut uniform = Self {
+            sky_color_intensity: [
+                scene.world_lighting.sky_color[0],
+                scene.world_lighting.sky_color[1],
+                scene.world_lighting.sky_color[2],
+                scene.world_lighting.intensity.max(0.0),
+            ],
+            ground_color: [
+                scene.world_lighting.ground_color[0],
+                scene.world_lighting.ground_color[1],
+                scene.world_lighting.ground_color[2],
+                0.0,
+            ],
+            light_count: 0,
+            shadow_light_index: u32::MAX,
+            padding: [0; 2],
+            shadow_view_proj: Mat4::IDENTITY.to_cols_array_2d(),
+            lights: [GpuLight::default(); MAX_SCENE_LIGHTS],
+        };
+
+        let mut light_objects: Vec<_> = scene
+            .objects
+            .iter()
+            .filter(|(_, object)| object.primitive_type == forge_scene::PrimitiveType::Light)
+            .filter_map(|(&id, object)| {
+                object
+                    .light_data
+                    .filter(|light| light.enabled)
+                    .map(|light| (id, light))
+            })
+            .collect();
+        light_objects.sort_by_key(|(id, _)| *id);
+        let mut shadow_direction = None;
+        for (id, light) in light_objects {
+            let index = uniform.light_count as usize;
+            if index >= MAX_SCENE_LIGHTS {
+                break;
+            }
+            let transform = scene.world_transform(id);
+            let forward = (transform.rotation * Vec3::NEG_Z).normalize_or_zero();
+            uniform.lights[index] = gpu_light(light, transform.translation, forward);
+            if shadow_direction.is_none() && light.kind == LightKind::Directional {
+                uniform.shadow_light_index = index as u32;
+                shadow_direction = Some(forward);
+            }
+            uniform.light_count += 1;
+        }
+        if let Some(direction) = shadow_direction {
+            let mut bounds = Aabb::EMPTY;
+            for (&id, object) in &scene.objects {
+                if object.visible
+                    && object.primitive_type != forge_scene::PrimitiveType::Light
+                    && let Some(object_bounds) = scene.world_aabb(id)
+                {
+                    bounds = bounds.union(&object_bounds);
+                }
+            }
+            if bounds.is_empty() {
+                bounds = Aabb::from_center_extents(Vec3::ZERO, Vec3::splat(2.0));
+            }
+            let center = bounds.center();
+            let radius = bounds.extents().length().max(1.0) + 0.5;
+            let eye = center - direction * radius * 2.0;
+            let up = if direction.dot(Vec3::Y).abs() > 0.95 {
+                Vec3::X
+            } else {
+                Vec3::Y
+            };
+            let view = Mat4::look_at_rh(eye, center, up);
+            let projection =
+                Mat4::orthographic_rh(-radius, radius, -radius, radius, 0.1, radius * 4.0);
+            uniform.shadow_view_proj = (projection * view).to_cols_array_2d();
+        }
+        uniform
+    }
+}
+
+impl Default for GpuLight {
+    fn default() -> Self {
+        Self {
+            position_type: [0.0; 4],
+            direction_intensity: [0.0; 4],
+            color_range: [0.0; 4],
+            spot_cones: [0.0; 4],
+        }
+    }
+}
+
+fn gpu_light(light: LightData, position: Vec3, forward: Vec3) -> GpuLight {
+    let kind = match light.kind {
+        LightKind::Directional => 0.0,
+        LightKind::Point => 1.0,
+        LightKind::Spot => 2.0,
+    };
+    GpuLight {
+        position_type: [position.x, position.y, position.z, kind],
+        direction_intensity: [forward.x, forward.y, forward.z, light.intensity.max(0.0)],
+        color_range: [
+            light.color[0].max(0.0),
+            light.color[1].max(0.0),
+            light.color[2].max(0.0),
+            light.range.max(0.001),
+        ],
+        spot_cones: [
+            light.inner_cone_angle_deg.to_radians().cos(),
+            light.outer_cone_angle_deg.to_radians().cos(),
+            0.0,
+            0.0,
+        ],
+    }
+}
 
 struct GpuMeshEntry {
     vertex_buffer: GpuBuffer<Vertex>,
@@ -121,6 +261,13 @@ pub struct ViewportRenderer {
     pub pipelines: RenderPipelines,
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group: wgpu::BindGroup,
+    lighting_buffer: wgpu::Buffer,
+    lighting_bind_group: wgpu::BindGroup,
+    shadow_camera_buffer: wgpu::Buffer,
+    shadow_camera_bind_group: wgpu::BindGroup,
+    _shadow_texture: wgpu::Texture,
+    shadow_view: wgpu::TextureView,
+    _shadow_sampler: wgpu::Sampler,
     pub grid_buffer: GpuBuffer<LineVertex>,
     pub unit_quad_vertex_buffer: GpuBuffer<[f32; 2]>,
     pub unit_quad_index_buffer: GpuBuffer<u32>,
@@ -131,6 +278,9 @@ pub struct ViewportRenderer {
     depth_view: Option<wgpu::TextureView>,
     depth_size: (u32, u32),
     mesh_cache: HashMap<ObjectId, GpuMeshEntry>,
+    default_material: Option<GpuMaterial>,
+    scene_materials: HashMap<String, (PbrMaterial, GpuMaterial)>,
+    failed_materials: HashMap<String, PbrMaterial>,
     pub edit_mesh_buffers: Option<GpuEditMeshBuffers>,
     pub picking_ctx: GpuPickingContext,
     pub last_frame_stats: RenderStats,
@@ -155,6 +305,70 @@ impl ViewportRenderer {
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
+        let initial_lighting = LightingUniform::from_scene(&Scene::default());
+        let lighting_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Scene Lighting Uniform Buffer"),
+            contents: bytemuck::bytes_of(&initial_lighting),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Directional Shadow Map"),
+            size: wgpu::Extent3d {
+                width: 1024,
+                height: 1024,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let shadow_view = shadow_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Directional Shadow Comparison Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        let lighting_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Scene Lighting Bind Group"),
+            layout: &pipelines.lighting_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: lighting_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+            ],
+        });
+        let shadow_camera_uniform = CameraUniform::new(Mat4::IDENTITY, Vec3::ZERO);
+        let shadow_camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Shadow Camera Uniform Buffer"),
+            contents: bytemuck::bytes_of(&shadow_camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let shadow_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Shadow Camera Bind Group"),
+            layout: &pipelines.camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: shadow_camera_buffer.as_entire_binding(),
             }],
         });
 
@@ -192,6 +406,13 @@ impl ViewportRenderer {
             pipelines,
             camera_buffer,
             camera_bind_group,
+            lighting_buffer,
+            lighting_bind_group,
+            shadow_camera_buffer,
+            shadow_camera_bind_group,
+            _shadow_texture: shadow_texture,
+            shadow_view,
+            _shadow_sampler: shadow_sampler,
             grid_buffer,
             unit_quad_vertex_buffer,
             unit_quad_index_buffer,
@@ -202,6 +423,9 @@ impl ViewportRenderer {
             depth_view: None,
             depth_size: (0, 0),
             mesh_cache: HashMap::new(),
+            default_material: None,
+            scene_materials: HashMap::new(),
+            failed_materials: HashMap::new(),
             edit_mesh_buffers: None,
             picking_ctx,
             last_frame_stats: RenderStats::default(),
@@ -376,6 +600,71 @@ impl ViewportRenderer {
             return;
         }
 
+        if self.default_material.is_none() {
+            self.default_material = Some(create_default_material(
+                device,
+                queue,
+                &self.pipelines.material_bind_group_layout,
+            ));
+        }
+        let needed_materials: HashSet<&str> = scene
+            .objects
+            .values()
+            .filter(|object| object.visible)
+            .filter_map(|object| object.material_id.as_deref())
+            .collect();
+        self.scene_materials
+            .retain(|id, _| scene.materials.contains_key(id));
+        self.failed_materials
+            .retain(|id, definition| scene.materials.get(id) == Some(definition));
+        for id in needed_materials {
+            let Some(definition) = scene.materials.get(id) else {
+                continue;
+            };
+            let recreate_textures = self
+                .scene_materials
+                .get(id)
+                .is_none_or(|(cached, _)| cached.textures != definition.textures);
+            if recreate_textures {
+                if self.failed_materials.get(id) == Some(definition) {
+                    continue;
+                }
+                match create_material(
+                    device,
+                    queue,
+                    &self.pipelines.material_bind_group_layout,
+                    definition,
+                ) {
+                    Ok((gpu_material, resolution, gpu_bytes)) => {
+                        tracing::info!(
+                            material = %definition.name,
+                            resolution = ?resolution,
+                            gpu_mib = gpu_bytes as f64 / (1024.0 * 1024.0),
+                            "Loaded PBR material maps"
+                        );
+                        self.scene_materials
+                            .insert(id.to_string(), (definition.clone(), gpu_material));
+                        self.failed_materials.remove(id);
+                    }
+                    Err(error) => {
+                        tracing::warn!(material = %definition.name, "PBR material maps failed to load: {error}");
+                        self.failed_materials
+                            .insert(id.to_string(), definition.clone());
+                    }
+                }
+            } else if let Some((cached, gpu_material)) = self.scene_materials.get_mut(id)
+                && cached != definition
+            {
+                let uniform = crate::textures::material_uniform(definition);
+                queue.write_buffer(
+                    &gpu_material.uniform_buffer,
+                    0,
+                    bytemuck::bytes_of(&uniform),
+                );
+                *cached = definition.clone();
+            }
+        }
+
         let mut stats = RenderStats::default();
 
         // 1. Ensure depth texture matches viewport size
@@ -384,13 +673,24 @@ impl ViewportRenderer {
         // 2. Update Camera Uniform
         let cam_uniform = CameraUniform::new(camera.view_proj_matrix(), camera.eye);
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&cam_uniform));
+        let lighting = LightingUniform::from_scene(scene);
+        queue.write_buffer(&self.lighting_buffer, 0, bytemuck::bytes_of(&lighting));
+        let shadow_camera_uniform = CameraUniform {
+            view_proj: lighting.shadow_view_proj,
+            camera_pos: [0.0; 4],
+        };
+        queue.write_buffer(
+            &self.shadow_camera_buffer,
+            0,
+            bytemuck::bytes_of(&shadow_camera_uniform),
+        );
 
         // 3. Sync GPU mesh cache with scene objects
         self.mesh_cache
             .retain(|id, _| scene.objects.contains_key(id));
 
         for (&id, obj) in &scene.objects {
-            if !obj.visible {
+            if !obj.visible || obj.primitive_type == forge_scene::PrimitiveType::Light {
                 continue;
             }
 
@@ -656,6 +956,40 @@ impl ViewportRenderer {
             label: Some("Viewport Render Encoder"),
         });
 
+        if lighting.shadow_light_index != u32::MAX {
+            let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Directional Shadow Map Pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            shadow_pass.set_pipeline(&self.pipelines.shadow_pipeline);
+            shadow_pass.set_bind_group(0, &self.shadow_camera_bind_group, &[]);
+            for (&id, object) in &scene.objects {
+                if !object.visible || object.primitive_type == forge_scene::PrimitiveType::Light {
+                    continue;
+                }
+                if let Some(entry) = self.mesh_cache.get(&id) {
+                    shadow_pass.set_bind_group(1, &entry.object_bind_group, &[]);
+                    shadow_pass.set_vertex_buffer(0, entry.vertex_buffer.buffer.slice(..));
+                    shadow_pass.set_index_buffer(
+                        entry.index_buffer.buffer.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    shadow_pass.draw_indexed(0..entry.index_buffer.count as u32, 0, 0..1);
+                }
+            }
+        }
+
         {
             let depth_view = self
                 .depth_view
@@ -703,14 +1037,22 @@ impl ViewportRenderer {
             // Pass B: Render 3D objects with depth test & lighting
             pass.set_pipeline(&self.pipelines.mesh_pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            pass.set_bind_group(3, &self.lighting_bind_group, &[]);
 
             for (&id, obj) in &scene.objects {
-                if !obj.visible {
+                if !obj.visible || obj.primitive_type == forge_scene::PrimitiveType::Light {
                     continue;
                 }
 
                 if let Some(entry) = self.mesh_cache.get(&id) {
                     pass.set_bind_group(1, &entry.object_bind_group, &[]);
+                    let material = obj
+                        .material_id
+                        .as_ref()
+                        .and_then(|id| self.scene_materials.get(id).map(|(_, mat)| mat))
+                        .or(self.default_material.as_ref())
+                        .expect("default viewport material must be initialized");
+                    pass.set_bind_group(2, &material.bind_group, &[]);
                     pass.set_vertex_buffer(0, entry.vertex_buffer.buffer.slice(..));
                     pass.set_index_buffer(
                         entry.index_buffer.buffer.slice(..),
@@ -777,7 +1119,10 @@ mod tests {
     use forge_geometry::{EditEdge, EditableMesh};
     use forge_gpu::GpuContext;
     use forge_modifiers::{ModifierType, SubdivisionModifier};
-    use forge_scene::{Action, HistoryStack, PrimitiveType, Scene, SceneObject, SelectionState};
+    use forge_scene::{
+        Action, HistoryStack, LightData, LightKind, PrimitiveType, Scene, SceneObject,
+        SelectionState,
+    };
 
     fn setup_test_env() -> Option<(GpuContext, ViewportRenderer, wgpu::TextureView)> {
         let ctx = GpuContext::init_headless().ok()?;
@@ -799,6 +1144,51 @@ mod tests {
         let target_tex = ctx.device.create_texture(&target_desc);
         let target_view = target_tex.create_view(&wgpu::TextureViewDescriptor::default());
         Some((ctx, renderer, target_view))
+    }
+
+    #[test]
+    fn scene_lights_pack_all_supported_kinds_and_respect_visibility() {
+        let mut scene = Scene::new("Lighting test");
+        for (name, kind) in [
+            ("Sun", LightKind::Directional),
+            ("Bulb", LightKind::Point),
+            ("Spot", LightKind::Spot),
+        ] {
+            scene.add_object(SceneObject::new_light(
+                name,
+                LightData {
+                    kind,
+                    intensity: 5.0,
+                    ..LightData::default()
+                },
+                generate_uv_sphere(0.1, 8, 6),
+            ));
+        }
+
+        let uniform = LightingUniform::from_scene(&scene);
+        assert_eq!(uniform.light_count, 3);
+        let mut kinds: Vec<_> = uniform.lights[..3]
+            .iter()
+            .map(|light| light.position_type[3] as u8)
+            .collect();
+        kinds.sort_unstable();
+        assert_eq!(kinds, [0, 1, 2]);
+        assert!(
+            uniform.lights[..3]
+                .iter()
+                .all(|light| light.direction_intensity[3] == 5.0)
+        );
+
+        let first_id = *scene.objects.keys().next().unwrap();
+        scene
+            .objects
+            .get_mut(&first_id)
+            .unwrap()
+            .light_data
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        assert_eq!(LightingUniform::from_scene(&scene).light_count, 2);
     }
 
     #[test]
@@ -1084,6 +1474,57 @@ mod tests {
     }
 
     #[test]
+    fn test_showcase_uploads_polyhaven_brown_floor_tiles_material() {
+        let Some((ctx, mut renderer, target_view)) = setup_test_env() else {
+            return;
+        };
+
+        let scene = Scene::create_showcase_scene();
+        let selection = SelectionState::new();
+        let camera = Camera::default();
+        renderer.render(
+            &ctx.device,
+            &ctx.queue,
+            &target_view,
+            100,
+            100,
+            &scene,
+            &selection,
+            &camera,
+            false,
+        );
+
+        assert!(
+            renderer
+                .scene_materials
+                .contains_key(forge_scene::BROWN_FLOOR_TILES_MATERIAL_ID),
+            "the showcase must upload its scene-defined PBR material"
+        );
+        assert!(
+            !renderer
+                .failed_materials
+                .contains_key(forge_scene::BROWN_FLOOR_TILES_MATERIAL_ID)
+        );
+        for id in [
+            forge_scene::BROWN_FLOOR_TILES_MATERIAL_ID,
+            "polyhaven/bark_brown_01",
+            "polyhaven/wooden_planks",
+            "polyhaven/mossy_rock",
+        ] {
+            assert!(renderer.scene_materials.contains_key(id));
+            assert!(!renderer.failed_materials.contains_key(id));
+        }
+        let visible_meshes = scene
+            .objects
+            .values()
+            .filter(|object| {
+                object.visible && object.primitive_type != forge_scene::PrimitiveType::Light
+            })
+            .count();
+        assert_eq!(renderer.last_frame_stats.drawn_objects, visible_meshes);
+    }
+
+    #[test]
     fn test_renderer_undo_redo_sync() {
         let Some((ctx, mut renderer, target_view)) = setup_test_env() else {
             return;
@@ -1212,7 +1653,7 @@ mod tests {
         let bytes_per_pixel = 4;
         let unpadded_bytes_per_row = width * bytes_per_pixel;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT; // 256
-        let padded_bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
         let buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
 
         let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1582,10 +2023,12 @@ mod tests {
         scene.add_object(obj);
 
         let selection = SelectionState::new();
-        let mut camera = Camera::default();
-        camera.eye = forge_math::Vec3::new(2.0, 2.0, 2.5);
-        camera.target = forge_math::Vec3::ZERO;
-        camera.up = forge_math::Vec3::new(0.0, 1.0, 0.0);
+        let camera = Camera {
+            eye: forge_math::Vec3::new(2.0, 2.0, 2.5),
+            target: forge_math::Vec3::ZERO,
+            up: forge_math::Vec3::new(0.0, 1.0, 0.0),
+            ..Default::default()
+        };
 
         // 1. Render in Object Mode (solid mesh only, no wireframe)
         renderer.render_with_edit_mesh(
@@ -1847,10 +2290,12 @@ mod tests {
         scene.add_object(obj);
 
         let selection = SelectionState::new();
-        let mut camera = Camera::default();
-        camera.eye = forge_math::Vec3::new(2.0, 2.0, 2.5);
-        camera.target = forge_math::Vec3::ZERO;
-        camera.up = forge_math::Vec3::new(0.0, 1.0, 0.0);
+        let camera = Camera {
+            eye: forge_math::Vec3::new(2.0, 2.0, 2.5),
+            target: forge_math::Vec3::ZERO,
+            up: forge_math::Vec3::new(0.0, 1.0, 0.0),
+            ..Default::default()
+        };
 
         let edit_mesh = EditableMesh::from_mesh(&cube);
 

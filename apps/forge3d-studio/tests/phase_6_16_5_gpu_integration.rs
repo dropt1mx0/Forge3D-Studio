@@ -428,7 +428,7 @@ fn test_depth_bias_hierarchy_and_handle_priority() {
 
     match vert_pick {
         PickResult::Vertex(v_idx) => {
-            let hit_pos = edit_mesh.vertices[v_idx as usize].position;
+            let hit_pos = edit_mesh.vertices[v_idx].position;
             assert!(
                 (hit_pos - target_v0).length() < 0.01,
                 "Picked vertex must match the front vertex projected onto screen"
@@ -597,7 +597,7 @@ fn benchmark_gpu_vs_cpu_edit_pipeline_10k_50k_100k() {
         let vert_count = raw_mesh.vertices.len();
         let mut edit_mesh = EditableMesh::from_mesh(&raw_mesh);
 
-        let mut scene = Scene::new(&format!("{label} Scene"));
+        let mut scene = Scene::new(format!("{label} Scene"));
         let obj = SceneObject::new("DenseMesh", PrimitiveType::Plane, raw_mesh);
         let obj_id = obj.id;
         scene.add_object(obj);

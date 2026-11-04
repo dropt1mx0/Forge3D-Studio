@@ -8,13 +8,21 @@ use forge_geometry::{Mesh, Vertex};
 use forge_math::{Aabb, Quat, Ray, Transform, Vec3};
 use serde::{Deserialize, Serialize};
 
+use crate::material::{LightData, LightKind, PbrMaterial, WorldLighting};
 use crate::object::{PrimitiveType, SceneObject};
+
+/// Material asset ID for Poly Haven's CC0 brown floor tile set.
+pub const BROWN_FLOOR_TILES_MATERIAL_ID: &str = "polyhaven/brown_floor_tiles";
 
 /// The core scene containing all objects, their hierarchy, and dirty state tracking.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
     pub name: String,
     pub objects: HashMap<ObjectId, SceneObject>,
+    #[serde(default)]
+    pub materials: HashMap<String, PbrMaterial>,
+    #[serde(default)]
+    pub world_lighting: WorldLighting,
     pub root_objects: Vec<ObjectId>,
     pub active_camera_id: Option<ObjectId>,
     #[serde(skip)]
@@ -33,6 +41,8 @@ impl Scene {
         Self {
             name: name.into(),
             objects: HashMap::new(),
+            materials: HashMap::new(),
+            world_lighting: WorldLighting::default(),
             root_objects: Vec::new(),
             active_camera_id: None,
             dirty: true,
@@ -580,6 +590,57 @@ impl Scene {
     pub fn create_showcase_scene() -> Self {
         let mut scene = Self::new("House, Tree & Rock Showcase");
 
+        scene.materials.insert(
+            BROWN_FLOOR_TILES_MATERIAL_ID.into(),
+            PbrMaterial::brown_floor_tiles(),
+        );
+        scene.materials.insert(
+            "polyhaven/bark_brown_01".into(),
+            PbrMaterial::bark_brown_01(),
+        );
+        scene.materials.insert(
+            "polyhaven/wooden_planks".into(),
+            PbrMaterial::wooden_planks(),
+        );
+        scene
+            .materials
+            .insert("polyhaven/mossy_rock".into(), PbrMaterial::mossy_rock());
+
+        // The sun and fill are scene objects, so their transforms and values are editable.
+        let mut sun = SceneObject::new_light(
+            "Sun Light",
+            LightData {
+                kind: LightKind::Directional,
+                color: [1.0, 0.91, 0.78],
+                intensity: 2.7,
+                range: 100.0,
+                ..LightData::default()
+            },
+            generate_uv_sphere(0.12, 10, 6),
+        );
+        sun.visible = false;
+        sun.local_transform = Transform::from_translation_rotation_scale(
+            Vec3::new(-4.0, 7.0, 5.0),
+            Quat::from_rotation_x(0.72) * Quat::from_rotation_y(-0.55),
+            Vec3::ONE,
+        );
+        scene.add_object(sun);
+
+        let mut fill = SceneObject::new_light(
+            "Porch Fill Light",
+            LightData {
+                kind: LightKind::Point,
+                color: [0.68, 0.79, 1.0],
+                intensity: 18.0,
+                range: 9.0,
+                ..LightData::default()
+            },
+            generate_uv_sphere(0.1, 8, 6),
+        );
+        fill.visible = false;
+        fill.local_transform.translation = Vec3::new(0.0, 2.2, 2.1);
+        scene.add_object(fill);
+
         add_showcase_object(
             &mut scene,
             "Grassy Ground",
@@ -590,17 +651,18 @@ impl Scene {
         );
 
         // A short stone path makes the front entrance read clearly in the viewport.
-        add_showcase_object(
+        add_showcase_object_with_material(
             &mut scene,
             "Front Path",
             PrimitiveType::Cube,
-            generate_cube(1.0),
+            generate_material_cube(Vec3::new(0.72, 0.07, 1.35)),
             Transform::from_translation_rotation_scale(
                 Vec3::new(0.0, 0.035, 1.72),
                 Quat::IDENTITY,
                 Vec3::new(0.72, 0.07, 1.35),
             ),
-            [0.48, 0.46, 0.42, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+            Some(BROWN_FLOOR_TILES_MATERIAL_ID),
         );
 
         // House body, plinth, and pitched two-piece roof.
@@ -793,33 +855,42 @@ impl Scene {
         }
 
         // A small covered porch frames the entrance and visually anchors the door.
-        for (name, position, scale, color) in [
+        for (name, position, scale, color, material_id) in [
             (
                 "Porch Deck",
                 Vec3::new(0.0, 0.14, 1.27),
                 Vec3::new(1.42, 0.14, 0.78),
-                [0.48, 0.29, 0.17, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+                Some(BROWN_FLOOR_TILES_MATERIAL_ID),
             ),
             (
                 "Porch Awning",
                 Vec3::new(0.0, 1.52, 1.34),
                 Vec3::new(1.34, 0.13, 0.78),
                 [0.42, 0.15, 0.12, 1.0],
+                None,
             ),
             (
                 "Porch Front Beam",
                 Vec3::new(0.0, 1.40, 1.70),
                 Vec3::new(1.38, 0.12, 0.12),
                 [0.34, 0.18, 0.12, 1.0],
+                None,
             ),
         ] {
-            add_showcase_object(
+            let mesh = if material_id.is_some() {
+                generate_material_cube(scale)
+            } else {
+                generate_cube(1.0)
+            };
+            add_showcase_object_with_material(
                 &mut scene,
                 name,
                 PrimitiveType::Cube,
-                generate_cube(1.0),
+                mesh,
                 Transform::from_translation_rotation_scale(position, Quat::IDENTITY, scale),
                 color,
+                material_id,
             );
         }
         for (side, x) in [("Left", -0.55), ("Right", 0.55)] {
@@ -1072,6 +1143,31 @@ impl Scene {
                 Transform::from_translation(Vec3::new(x, 0.48, z)),
                 color,
             );
+        }
+
+        // Exercise full image-based PBR on the tree, garden timber, and natural stone.
+        for object in scene.objects.values_mut() {
+            let material_id =
+                if object.name == "Tree Trunk" || object.name.starts_with("Tree Branch ") {
+                    Some("polyhaven/bark_brown_01")
+                } else if object.name.starts_with("Garden Fence ")
+                    || (object.name.starts_with("Porch ") && object.name != "Porch Deck")
+                {
+                    Some("polyhaven/wooden_planks")
+                } else if object.name == "Rock"
+                    || object.name == "Pebble"
+                    || object.name.starts_with("Stepping Stone ")
+                {
+                    Some("polyhaven/mossy_rock")
+                } else {
+                    None
+                };
+            if let Some(material_id) = material_id {
+                object.material_id = Some(material_id.into());
+                for vertex in &mut object.mesh.vertices {
+                    vertex.color = [1.0; 4];
+                }
+            }
         }
 
         scene
@@ -1328,11 +1424,53 @@ fn add_showcase_object(
     transform: Transform,
     color: [f32; 4],
 ) {
-    scene.add_object(
-        SceneObject::new(name, primitive_type, mesh)
-            .with_transform(transform)
-            .with_color(color),
-    );
+    add_showcase_object_with_material(scene, name, primitive_type, mesh, transform, color, None);
+}
+
+/// Builds a cube with UV density matching the tile asset's 1.7 m physical width.
+fn generate_material_cube(world_scale: Vec3) -> forge_geometry::Mesh {
+    const MATERIAL_WIDTH_METERS: f32 = 1.7;
+    let mut mesh = generate_cube(1.0);
+    for vertex in &mut mesh.vertices {
+        let normal = vertex.normal;
+        let (u_scale, v_scale) = if normal[1].abs() > 0.5 {
+            (
+                world_scale.x / MATERIAL_WIDTH_METERS,
+                world_scale.z / MATERIAL_WIDTH_METERS,
+            )
+        } else if normal[2].abs() > 0.5 {
+            (
+                world_scale.x / MATERIAL_WIDTH_METERS,
+                world_scale.y / MATERIAL_WIDTH_METERS,
+            )
+        } else {
+            (
+                world_scale.z / MATERIAL_WIDTH_METERS,
+                world_scale.y / MATERIAL_WIDTH_METERS,
+            )
+        };
+        vertex.uv[0] *= u_scale;
+        vertex.uv[1] *= v_scale;
+    }
+    mesh
+}
+
+fn add_showcase_object_with_material(
+    scene: &mut Scene,
+    name: impl Into<String>,
+    primitive_type: PrimitiveType,
+    mesh: forge_geometry::Mesh,
+    transform: Transform,
+    color: [f32; 4],
+    material_id: Option<&str>,
+) {
+    let mut object = SceneObject::new(name, primitive_type, mesh)
+        .with_transform(transform)
+        .with_color(color);
+    if let Some(material_id) = material_id {
+        object = object.with_material_id(material_id);
+    }
+    scene.add_object(object);
 }
 
 #[cfg(test)]
@@ -1373,6 +1511,36 @@ mod tests {
         }
         assert!(scene.objects.len() >= 60);
 
+        for material_object_name in ["Front Path", "Porch Deck"] {
+            let material_object = scene
+                .objects
+                .values()
+                .find(|object| object.name == material_object_name)
+                .expect("showcase surface exists");
+            assert_eq!(
+                material_object.material_id.as_deref(),
+                Some(BROWN_FLOOR_TILES_MATERIAL_ID)
+            );
+        }
+
+        for (object_name, material_id) in [
+            ("Tree Trunk", "polyhaven/bark_brown_01"),
+            ("Garden Fence Picket 1", "polyhaven/wooden_planks"),
+            ("Rock", "polyhaven/mossy_rock"),
+        ] {
+            let object = scene
+                .objects
+                .values()
+                .find(|object| object.name == object_name)
+                .expect("showcase surface exists");
+            assert_eq!(object.material_id.as_deref(), Some(material_id));
+            let material = scene.materials.get(material_id).expect("PBR asset exists");
+            assert!(material.textures.base_color.is_some());
+            assert!(material.textures.normal.is_some());
+            assert!(material.textures.roughness.is_some());
+            assert!(material.textures.ambient_occlusion.is_some());
+        }
+
         for textured_name in ["Tree Trunk", "Garden Fence Picket 1", "Rock"] {
             let mesh = &scene
                 .objects
@@ -1381,12 +1549,9 @@ mod tests {
                 .expect("textured showcase object exists")
                 .mesh;
             assert!(mesh.validate().is_ok(), "invalid mesh for {textured_name}");
-            let initial_color = mesh.vertices[0].color;
             assert!(
-                mesh.vertices
-                    .iter()
-                    .any(|vertex| vertex.color != initial_color),
-                "texture colors should vary across {textured_name}"
+                mesh.vertices.iter().all(|vertex| vertex.color == [1.0; 4]),
+                "PBR maps should not be multiplied by old vertex-color patterns on {textured_name}"
             );
         }
     }

@@ -192,6 +192,7 @@ fn render_object_node(
                 PrimitiveType::Capsule => "[Capsule]",
                 PrimitiveType::Monkey => "[Suzanne]",
                 PrimitiveType::Camera => "[Cam]",
+                PrimitiveType::Light => "[Light]",
                 PrimitiveType::Custom => "[Mesh]",
             };
 

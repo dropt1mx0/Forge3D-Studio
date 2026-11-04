@@ -1,8 +1,8 @@
 # Forge3D Rust Edition — Session State
 
 **Document Status:** Current  
-**Last Updated:** 2026-11-04
-**Current Milestone:** Forge3D Phase 5 — Asset Pipeline MVP: Wavefront OBJ Import / Export (Complete, 149/149 tests passing)
+**Last Updated:** 2026-11-05
+**Current Milestone:** Forge3D Phase 4 — Scene-driven PBR materials, multi-light rendering, and directional shadows
 
 ---
 
@@ -57,7 +57,7 @@
 - `SelectionState`: Active and hovered selection management.
 - `EditorState`: Active mode, `active_gizmo_mode` (`GizmoMode`), `panel_settings` (`PanelSettings`), `PointerInteractionState` (`Idle`, `ObjectPressed`, `GizmoDragging`, `BoxSelecting`, `ViewportOrbiting`, `UIInteraction`), modal transform state machine, and `show_debug_info` telemetry toggle.
 - `PanelSettings`: Left toolbar width, display mode (`IconOnly`, `IconAndLabel`), toolbar visibility, right sidebar width and visibility, outliner/properties ratio, bottom timeline height and visibility, clamped limits and disk persistence (`forge3d_settings.json`).
-- `ForgeProject`: JSON schema v1 serialization for `.forge` project files with version check and roundtrip testing.
+- `ForgeProject`: JSON schema v2 serialization for `.forge` project files with version checks, backward-compatible v1 material migration, and roundtrip testing.
 
 ### `crates/forge-gpu`
 - `GpuContext`: Adapter capability discovery and headless initialization with graceful fallback.
@@ -67,7 +67,7 @@
 ### `crates/forge-render`
 - `Camera`: Perspective and Orthographic camera with Orbit (yaw/pitch), Pan (screen right/up), Dolly (look vector translation), Exponential Adaptive Zoom (`zoom_adaptive`), Cursor-Anchored Zoom (`apply_zoom_step`), Smooth Inertial Easing (`update_smooth_zoom`), `sync_zoom_targets` cancellation on all navigation modes, `distance()` method, view matrix, projection matrix, view-proj matrix, and `screen_to_ray` screen unprojection.
 - WGSL Shaders:
-  - `MESH_SHADER`: Blinn-Phong directional sun lighting, ambient term, specular highlights, and warm amber selection tinting.
+  - `MESH_SHADER`: Cook-Torrance/GGX metallic-roughness shading with base-color, normal, metallic, roughness, AO, and emissive maps; scene-driven lights; shadow comparison; and ACES tone mapping.
   - `GRID_SHADER`: Line list pipeline for ground grid and RGB coordinate axes.
 - `RenderPipelines`: WGPU render pipelines with depth testing (`Depth32Float`, LessEqual).
 - `ViewportRenderer`: Viewport renderer with depth texture management, dynamic GPU mesh cache, uniform uploads, and command encoding.
@@ -92,19 +92,19 @@
   - Right Sidebar: Scene Outliner with header tabs (`File | Edit | View | Objects | Tags | Bookmarks`), tree lines with expand icons (`▾`), leading icons, and rounded blue pill selection highlight + Properties Inspector with 3-column Cinema 4D coordinate card (`Position`, `Size`, `Rotation`) with red (`• X`), green (`• Y`), blue (`• Z`) axis dots, and bottom buttons `[ Object ▾ ]`, `[ Size ▾ ]`, `[ Apply ]`.
   - Viewport Overlays: Top-left HUD strip `⚡ Live Viewer :: View Cameras Display Options`, bottom-left orientation tripod with labeled `X`, `Y`, `Z` axes.
   - Bottom Bar: Timeline with 0..30F ruler, signature red progress track with draggable playhead, transport controls (`⏮`, `◀`, `▶`, `⏭`, `🔁`), and bottom material shelf (`Create`, `Edit`, `Function`, `Texture`, `🟡 Gold`, `⚪ Diffuse`, `🔘 Metal`).
-  - Floating Material Inspector Window: `Brushed Metal Material  ‹ › 🔒` dialog with glossy sphere preview, glossy type selector, diffuse/specular/roughness channels, rainbow hue spectrum bar, and sliders.
+  - Floating Material Inspector Window: scene-backed PBR assignment and map paths, base/emissive factors, metallic, roughness, normal/AO strengths, selected light controls, and world-fill controls.
   - Free Cursor Dragging Optimization: Completely eliminated drag jitter and back-and-forth oscillation by suppressing gizmo hit-testing and pointer consumption during free drag, bypassing gizmo rendering, and suppressing hover raycasts during drag.
   - Floating Telemetry Overlay: Monospace debug card reporting pointer state, pointer position, viewport bounds, camera mode, orbit target, and camera distance.
 
 ---
 
 ## 3. Verification & Test Evidence
-- **All Tests**: 149 passed (119 existing + 24 `forge-io` parser/triangulation/import/export/roundtrip + 5 `forge3d-studio` OBJ integration + 1 `forge-scene` import undo/redo), 0 failed, 0 ignored across workspace.
+- **All Tests**: 450 passed, 0 failed across the full workspace, including the PBR material bind-group/render smoke test and v1 project migration.
 - **`cargo fmt --check`**: Clean (exit code 0).
 - **`cargo check --workspace`**: Clean (exit code 0).
 - **`cargo clippy --workspace --all-targets -- -D warnings`**: Clean (exit code 0, zero warnings).
-- **GPU Adapter Test**: Verified live hardware adapter detection (`Mesa Intel(R) HD Graphics 4000 (IVB GT2)` on OpenGL backend).
-- **Release Build**: `cargo build --release --workspace` completed cleanly. Target: `/home/dropt1m/Forge3D Rust Edition/target/release/forge3d-studio`.
+- **GPU Adapter Test**: Verified live rendering on `Mesa Intel(R) HD Graphics 4000 (IVB GT2)` using the OpenGL backend.
+- **Release Build & PBR Material Load**: `cargo build --release -p forge3d-studio` built cleanly; runtime log confirmed Brown Floor Tiles loaded at 4096×4096 and Bark Brown 01, Wooden Planks, and Mossy Rock at 2048×2048. All four-map sets (base color, normal, roughness, AO) loaded, using about 298.7 MiB total GPU texture memory including mipmaps. Target: `/home/dropt1m/Forge3D Rust Edition/target/release/forge3d-studio`.
 
 ---
 
@@ -222,6 +222,26 @@ cargo run --release -p forge3d-studio
 - Expanded `Scene::create_showcase_scene()` with a porch, roof trim, window muntins and sills, tree branches and foliage highlights, garden fence, shrubs, flowers, and individual stepping stones.
 - The graphical app opens with a timed build walkthrough: terrain, house shell, roof, facade, tree, then rock and garden details appear over roughly 8.5 seconds. The finished scene remains fully visible.
 - Added an in-viewport virtual keyboard and animated pointer, explicitly labeled as simulated visual playback that sends no operating-system input. `Examples -> Replay House Build Demo` replays the sequence for screen capture.
-- Baked procedural vertex-color textures into tree bark and branches, fence rails and pickets, the main rock, pebble, and stepping stones. The current renderer displays these without image assets; image texture loading and GPU sampling are not implemented yet.
+- Baked procedural vertex-color patterns into tree bark and branches, fence rails and pickets, the main rock, pebble, and stepping stones.
 - `File -> New Scene` and headless app initialization retain the existing default scene; reloading the showcase still clears transient selection/edit state and invalidates renderer caches.
-- Validation: `cargo fmt --all -- --check`, `cargo check --workspace`, and the final `cargo test --workspace --quiet` run passed. `cargo clippy -p forge-scene --all-targets -- -D warnings` passed. A strict workspace Clippy run remains blocked by existing lints in `forge-render` (nested `if`, long picking APIs, manual `div_ceil`, and test camera field reassignment). One earlier GPU latency assertion failed under the initial full-build load; the isolated rerun and final full suite passed.
+- Validation at this milestone: `cargo fmt --all -- --check`, `cargo check --workspace`, and the full workspace tests passed. The current strict workspace Clippy run also passes.
+
+## 9. Poly Haven Brown Floor Tiles PBR Material (2026-11-04)
+- Added the CC0 4K albedo, OpenGL normal, roughness, and AO maps from Poly Haven at `assets/textures/brown_floor_tiles/`, with source and license notes.
+- Added serde-compatible optional material IDs to `SceneObject`; the showcase Front Path and Porch Deck now select `polyhaven/brown_floor_tiles`.
+- Added one-time GPU texture upload, CPU-generated mipmaps, sRGB albedo sampling, linear data maps, tangent-space normal reconstruction, GGX direct light, and AO-modulated ambient fill in the mesh pass. All other objects use a shared 1×1 default material.
+- Runtime map resolution is limited by `max_texture_dimension_2d`; at full 4K, the four maps and mip chains use about 170.7 MiB on the GPU. Decode/upload happens once on the first rendered frame containing the material. A live release run confirmed the full-resolution load on the Intel HD 4000/OpenGL path.
+- This initial texture-only implementation is superseded by the scene-driven material and lighting system below.
+
+## 10. Scene-Driven PBR and Lighting System (2026-11-04)
+- `forge-scene` now owns serializable `PbrMaterial`, `PbrTextureSet`, `LightData`, and `WorldLighting` domain data; GPU handles remain renderer-owned.
+- Materials support base color, tangent normal, metallic, roughness, ambient occlusion, and emissive maps, plus linear factors, normal/AO strength, and UV scale. Every mesh uses the shared PBR layout; missing maps receive constant defaults.
+- Scene lights support directional, point, and spot types, up to 16 per view. Point/spot lights use inverse-square falloff and finite range; world fill blends sky and ground colors by surface normal.
+- First directional light renders a 1024×1024 shadow map. The PBR viewport uses ACES tone mapping and inverse-transpose normal transforms.
+- Replaced the placeholder inspector with working material assignment/creation, map path/file-picker fields, PBR sliders, selected-light controls, and world fill controls. Diffuse and metal shelf actions now assign actual scene materials.
+- `.forge` schema is version 2. Version-1 scenes load with defaults and recover the bundled brown tile material by its existing ID.
+- Bundled CC0 materials now include 4K brown floor tiles and 2K bark, wooden planks, and mossy rock; the showcase assigns them to the path/deck, tree, fence/porch timber, and rocks/stepping stones. Each set provides base color, OpenGL normal, roughness, and AO maps.
+- Version-1 showcase migration also restores bark, wood, and rock material assignments and clears procedural vertex tint where it would darken the albedo.
+- Texture paths are project-relative when bundled and may also be absolute. The application package must include the source map files.
+- Remaining viewport limits: hemispheric ambient fill rather than HDR IBL; shadow map applies to the first directional light only; point/spot lights do not cast shadows; no cutout shadowing or height/displacement mapping.
+- Validation: `cargo fmt --all -- --check`, `cargo check --workspace`, strict workspace Clippy, and all 450 workspace tests passed. The release app launched on Mesa OpenGL and loaded all four PBR sets: 4K tiles plus three 2K materials, about 298.7 MiB of GPU texture storage including mipmaps.

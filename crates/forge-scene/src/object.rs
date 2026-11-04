@@ -6,6 +6,8 @@ use forge_geometry::Mesh;
 use forge_math::{Quat, Transform, Vec3};
 use serde::{Deserialize, Serialize};
 
+use crate::material::LightData;
+
 /// Type of 3D primitive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PrimitiveType {
@@ -21,6 +23,7 @@ pub enum PrimitiveType {
     Capsule,
     Monkey,
     Camera,
+    Light,
     Custom,
 }
 
@@ -103,10 +106,15 @@ pub struct SceneObject {
     pub primitive_type: PrimitiveType,
     pub mesh: Mesh,
     pub color: [f32; 4],
+    /// Optional renderer material identifier; absent IDs use the default viewport material.
+    #[serde(default)]
+    pub material_id: Option<String>,
     pub parent: Option<ObjectId>,
     pub children: Vec<ObjectId>,
     pub modifiers: forge_modifiers::ModifierStack,
     pub camera_data: Option<CameraData>,
+    #[serde(default)]
+    pub light_data: Option<LightData>,
     #[serde(skip, default)]
     pub generation: u64,
     #[serde(skip, default)]
@@ -126,10 +134,12 @@ impl SceneObject {
             primitive_type,
             mesh,
             color: [0.8, 0.8, 0.85, 1.0], // Neutral clay/matte color
+            material_id: None,
             parent: None,
             children: Vec::new(),
             modifiers: forge_modifiers::ModifierStack::new(),
             camera_data: None,
+            light_data: None,
             generation: 0,
             evaluated_mesh_cache: OnceLock::new(),
         }
@@ -144,6 +154,19 @@ impl SceneObject {
         obj
     }
 
+    /// Constructs a light object with a small viewport marker mesh.
+    pub fn new_light(name: impl Into<String>, light_data: LightData, mesh: Mesh) -> Self {
+        let mut obj = Self::new(name, PrimitiveType::Light, mesh);
+        obj.light_data = Some(light_data);
+        obj.color = [
+            light_data.color[0],
+            light_data.color[1],
+            light_data.color[2],
+            1.0,
+        ];
+        obj
+    }
+
     /// Builder method to set initial transform.
     pub fn with_transform(mut self, transform: Transform) -> Self {
         self.local_transform = transform;
@@ -153,6 +176,12 @@ impl SceneObject {
     /// Builder method to set initial color.
     pub fn with_color(mut self, color: [f32; 4]) -> Self {
         self.color = color;
+        self
+    }
+
+    /// Builder method to select a renderer material by asset ID.
+    pub fn with_material_id(mut self, material_id: impl Into<String>) -> Self {
+        self.material_id = Some(material_id.into());
         self
     }
 

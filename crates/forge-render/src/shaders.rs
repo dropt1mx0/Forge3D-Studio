@@ -1,5 +1,4 @@
-/// WGSL shader for rendered meshes with directional + ambient lighting,
-/// specular highlights, and object selection coloring.
+/// WGSL forward metallic-roughness renderer with scene-driven lights and maps.
 pub const MESH_SHADER: &str = r#"
 struct CameraUniform {
     view_proj: mat4x4<f32>,
@@ -8,6 +7,7 @@ struct CameraUniform {
 
 struct ObjectUniform {
     model: mat4x4<f32>,
+    normal_model: mat4x4<f32>,
     color: vec4<f32>,
     is_selected: u32,
     _pad0: u32,
@@ -15,11 +15,60 @@ struct ObjectUniform {
     _pad2: u32,
 };
 
+struct MaterialUniform {
+    base_color_factor: vec4<f32>,
+    emissive_factor: vec4<f32>,
+    material_params: vec4<f32>, // metallic, roughness, normal scale, AO strength
+    uv_scale: vec2<f32>,
+    _padding: vec2<u32>,
+};
+
+struct LightRecord {
+    position_type: vec4<f32>,       // xyz position; w = 0 directional, 1 point, 2 spot
+    direction_intensity: vec4<f32>, // xyz forward direction; w intensity
+    color_range: vec4<f32>,         // rgb linear color; w range
+    spot_cones: vec4<f32>,          // x inner cone cosine; y outer cone cosine
+};
+
+struct LightingUniform {
+    sky_color_intensity: vec4<f32>,
+    ground_color: vec4<f32>,
+    light_count: u32,
+    shadow_light_index: u32,
+    _padding: vec2<u32>,
+    shadow_view_proj: mat4x4<f32>,
+    lights: array<LightRecord, 16>,
+};
+
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
 @group(1) @binding(0)
 var<uniform> object: ObjectUniform;
+
+@group(2) @binding(0)
+var albedo_texture: texture_2d<f32>;
+@group(2) @binding(1)
+var material_sampler: sampler;
+@group(2) @binding(2)
+var normal_texture: texture_2d<f32>;
+@group(2) @binding(3)
+var metallic_texture: texture_2d<f32>;
+@group(2) @binding(4)
+var roughness_texture: texture_2d<f32>;
+@group(2) @binding(5)
+var ao_texture: texture_2d<f32>;
+@group(2) @binding(6)
+var emissive_texture: texture_2d<f32>;
+@group(2) @binding(7)
+var<uniform> material: MaterialUniform;
+
+@group(3) @binding(0)
+var<uniform> lighting: LightingUniform;
+@group(3) @binding(1)
+var shadow_map: texture_depth_2d;
+@group(3) @binding(2)
+var shadow_sampler: sampler_comparison;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -43,30 +92,144 @@ fn vs_main(model: VertexInput) -> VertexOutput {
     out.world_pos = world_pos4.xyz;
     out.clip_position = camera.view_proj * world_pos4;
     
-    // Normal transform (assuming uniform scale; for non-uniform, model inverse transpose)
-    let normal4 = object.model * vec4<f32>(model.normal, 0.0);
+    let normal4 = object.normal_model * vec4<f32>(model.normal, 0.0);
     out.world_normal = normalize(normal4.xyz);
     out.uv = model.uv;
     out.vertex_color = model.color;
     return out;
 }
 
+fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - clamp(cos_theta, 0.0, 1.0), 5.0);
+}
+
+fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
+    let alpha = roughness * roughness;
+    let alpha_squared = alpha * alpha;
+    let denominator = n_dot_h * n_dot_h * (alpha_squared - 1.0) + 1.0;
+    return alpha_squared / max(3.14159265 * denominator * denominator, 0.0001);
+}
+
+fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32 {
+    let r = roughness + 1.0;
+    let k = (r * r) / 8.0;
+    return n_dot_v / max(n_dot_v * (1.0 - k) + k, 0.0001);
+}
+
+fn evaluate_brdf(
+    normal: vec3<f32>,
+    view_dir: vec3<f32>,
+    light_dir: vec3<f32>,
+    base_color: vec3<f32>,
+    metallic: f32,
+    roughness: f32,
+) -> vec3<f32> {
+    let half_dir = normalize(view_dir + light_dir);
+    let n_dot_l = max(dot(normal, light_dir), 0.0);
+    let n_dot_v = max(dot(normal, view_dir), 0.001);
+    let n_dot_h = max(dot(normal, half_dir), 0.0);
+    let h_dot_v = max(dot(half_dir, view_dir), 0.0);
+    let f0 = mix(vec3<f32>(0.04), base_color, metallic);
+    let fresnel = fresnel_schlick(h_dot_v, f0);
+    let distribution = distribution_ggx(n_dot_h, roughness);
+    let geometry = geometry_schlick_ggx(n_dot_v, roughness)
+        * geometry_schlick_ggx(n_dot_l, roughness);
+    let specular = (distribution * geometry * fresnel)
+        / max(4.0 * n_dot_v * max(n_dot_l, 0.001), 0.001);
+    let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic)
+        * base_color / 3.14159265;
+    return (diffuse + specular) * n_dot_l;
+}
+
+fn aces_tonemap(color: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp((color * (a * color + b)) / (color * (c * color + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn directional_shadow(world_pos: vec3<f32>) -> f32 {
+    let clip = lighting.shadow_view_proj * vec4<f32>(world_pos, 1.0);
+    let ndc = clip.xyz / max(clip.w, 0.0001);
+    if ndc.x < -1.0 || ndc.x > 1.0 || ndc.y < -1.0 || ndc.y > 1.0
+        || ndc.z < 0.0 || ndc.z > 1.0 {
+        return 1.0;
+    }
+    let uv = ndc.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+    return textureSampleCompare(shadow_map, shadow_sampler, uv, ndc.z - 0.0015);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let light_dir = normalize(vec3<f32>(0.5, 0.8, 0.6));
-    let normal = normalize(in.world_normal);
+    let geometric_normal = normalize(in.world_normal);
+    var normal = geometric_normal;
+    let uv = in.uv * material.uv_scale;
+    {
+        let uv_dx = dpdx(uv);
+        let uv_dy = dpdy(uv);
+        let pos_dx = dpdx(in.world_pos);
+        let pos_dy = dpdy(in.world_pos);
+        let uv_determinant = uv_dx.x * uv_dy.y - uv_dx.y * uv_dy.x;
+        let determinant_sign = select(-1.0, 1.0, uv_determinant >= 0.0);
+        let determinant_scale = determinant_sign / max(abs(uv_determinant), 0.0001);
+        let tangent = normalize((pos_dx * uv_dy.y - pos_dy * uv_dx.y) * determinant_scale);
+        let bitangent = normalize((-pos_dx * uv_dy.x + pos_dy * uv_dx.x) * determinant_scale);
+        let normal_xy = (textureSample(normal_texture, material_sampler, uv).rg
+            * 2.0 - vec2<f32>(1.0)) * material.material_params.z;
+        let normal_z = sqrt(max(1.0 - dot(normal_xy, normal_xy), 0.0));
+        let tangent_normal = normalize(vec3<f32>(normal_xy, normal_z));
+        let tangent_basis = mat3x3<f32>(tangent, bitangent, geometric_normal);
+        normal = normalize(tangent_basis * tangent_normal);
+    }
+
+    let base_sample = textureSample(albedo_texture, material_sampler, uv);
+    let base_color = object.color.rgb * in.vertex_color.rgb
+        * material.base_color_factor.rgb * base_sample.rgb;
+    let metallic = clamp(material.material_params.x
+        * textureSample(metallic_texture, material_sampler, uv).r, 0.0, 1.0);
+    let roughness = clamp(material.material_params.y
+        * textureSample(roughness_texture, material_sampler, uv).r, 0.045, 1.0);
+    let ao_sample = textureSample(ao_texture, material_sampler, uv).r;
+    let ambient_occlusion = mix(1.0, ao_sample, clamp(material.material_params.w, 0.0, 1.0));
+    let emissive = material.emissive_factor.rgb
+        * textureSample(emissive_texture, material_sampler, uv).rgb;
     let view_dir = normalize(camera.camera_pos.xyz - in.world_pos);
-    let half_dir = normalize(light_dir + view_dir);
-
-    // Blinn-Phong lighting components
-    let ambient = vec3<f32>(0.22, 0.24, 0.28);
-    let diff = max(dot(normal, light_dir), 0.0);
-    let diffuse = vec3<f32>(0.78, 0.76, 0.72) * diff;
-    let spec = pow(max(dot(normal, half_dir), 0.0), 32.0);
-    let specular = vec3<f32>(0.35) * spec;
-
-    let base_rgb = object.color.rgb * in.vertex_color.rgb;
-    var lit = (ambient + diffuse) * base_rgb + specular;
+    let hemisphere = mix(
+        lighting.ground_color.rgb,
+        lighting.sky_color_intensity.rgb,
+        clamp(normal.y * 0.5 + 0.5, 0.0, 1.0),
+    ) * lighting.sky_color_intensity.w;
+    let ambient_f0 = mix(vec3<f32>(0.04), base_color, metallic);
+    let ambient = (base_color * (1.0 - metallic) + ambient_f0 * (1.0 - roughness * 0.5))
+        * hemisphere * ambient_occlusion;
+    var direct = vec3<f32>(0.0);
+    for (var index = 0u; index < min(lighting.light_count, 16u); index += 1u) {
+        let light = lighting.lights[index];
+        var light_dir = normalize(-light.direction_intensity.xyz);
+        var attenuation = light.direction_intensity.w;
+        if light.position_type.w > 0.5 {
+            let to_light = light.position_type.xyz - in.world_pos;
+            let distance = max(length(to_light), 0.001);
+            light_dir = to_light / distance;
+            let range_ratio = distance / max(light.color_range.w, 0.001);
+            let cutoff = clamp(1.0 - pow(range_ratio, 4.0), 0.0, 1.0);
+            attenuation = light.direction_intensity.w * cutoff * cutoff
+                / max(distance * distance, 0.01);
+            if light.position_type.w > 1.5 {
+                let cone = dot(-light_dir, normalize(light.direction_intensity.xyz));
+                attenuation *= smoothstep(light.spot_cones.y, light.spot_cones.x, cone);
+            }
+        }
+        var visibility = 1.0;
+        if index == lighting.shadow_light_index {
+            visibility = directional_shadow(in.world_pos);
+        }
+        direct += evaluate_brdf(normal, view_dir, light_dir, base_color, metallic, roughness)
+            * light.color_range.rgb * attenuation * visibility;
+    }
+    var lit = ambient + direct + emissive;
 
     // Selection highlight feedback
     if (object.is_selected == 1u) {
@@ -74,7 +237,34 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         lit = mix(lit, selection_tint, 0.35);
     }
 
-    return vec4<f32>(lit, object.color.a);
+    let alpha = object.color.a * in.vertex_color.a * material.base_color_factor.a * base_sample.a;
+    return vec4<f32>(aces_tonemap(lit), alpha);
+}
+"#;
+
+/// Depth-only pass used to cast a single directional sun shadow in the viewport.
+pub const SHADOW_SHADER: &str = r#"
+struct ShadowCameraUniform {
+    view_proj: mat4x4<f32>,
+};
+
+struct ObjectUniform {
+    model: mat4x4<f32>,
+};
+
+@group(0) @binding(0)
+var<uniform> camera: ShadowCameraUniform;
+
+@group(1) @binding(0)
+var<uniform> object: ObjectUniform;
+
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+};
+
+@vertex
+fn vs_main(input: VertexInput) -> @builtin(position) vec4<f32> {
+    return camera.view_proj * object.model * vec4<f32>(input.position, 1.0);
 }
 "#;
 

@@ -143,10 +143,12 @@ fn test_gpu_picking_depth_occlusion() {
     let back_id = back_obj.id;
     scene.add_object(back_obj);
 
-    let mut camera = Camera::default();
-    camera.eye = Vec3::new(0.0, 0.0, -8.0);
-    camera.target = Vec3::new(0.0, 0.0, 0.0);
-    camera.up = Vec3::new(0.0, 1.0, 0.0);
+    let camera = Camera {
+        eye: Vec3::new(0.0, 0.0, -8.0),
+        target: Vec3::ZERO,
+        up: Vec3::new(0.0, 1.0, 0.0),
+        ..Default::default()
+    };
 
     let center_x = width / 2;
     let center_y = height / 2;
@@ -190,10 +192,12 @@ fn test_gpu_picking_edit_mode_vertex_priority() {
     let edit_mesh = EditableMesh::from_mesh(&cube.mesh);
     scene.add_object(cube);
 
-    let mut camera = Camera::default();
-    camera.eye = Vec3::new(3.0, 3.0, 3.0);
-    camera.target = Vec3::ZERO;
-    camera.up = Vec3::Y;
+    let camera = Camera {
+        eye: Vec3::new(3.0, 3.0, 3.0),
+        target: Vec3::ZERO,
+        up: Vec3::Y,
+        ..Default::default()
+    };
 
     // Find the vertex closest to the camera
     let mut closest_idx = 0;
@@ -255,10 +259,12 @@ fn test_gpu_picking_edit_mode_edge_expanded_hitbox() {
     let edit_mesh = EditableMesh::from_mesh(&cube.mesh);
     scene.add_object(cube);
 
-    let mut camera = Camera::default();
-    camera.eye = Vec3::new(0.0, 0.0, 5.0);
-    camera.target = Vec3::ZERO;
-    camera.up = Vec3::Y;
+    let camera = Camera {
+        eye: Vec3::new(0.0, 0.0, 5.0),
+        target: Vec3::ZERO,
+        up: Vec3::Y,
+        ..Default::default()
+    };
 
     // Find a front-facing edge
     let mut test_edge_idx = None;
@@ -343,10 +349,12 @@ fn test_gpu_picking_edit_mode_face_triangulation_mapping() {
     let edit_mesh = EditableMesh::from_mesh(&cube.mesh);
     scene.add_object(cube);
 
-    let mut camera = Camera::default();
-    camera.eye = Vec3::new(0.0, 0.0, 5.0);
-    camera.target = Vec3::ZERO;
-    camera.up = Vec3::Y;
+    let camera = Camera {
+        eye: Vec3::new(0.0, 0.0, 5.0),
+        target: Vec3::ZERO,
+        up: Vec3::Y,
+        ..Default::default()
+    };
 
     // Front face center (facing +Z)
     let mut front_face_idx = None;
