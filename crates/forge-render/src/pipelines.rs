@@ -1,10 +1,11 @@
-use crate::shaders::{GRID_SHADER, MESH_SHADER};
+use crate::shaders::{EDIT_EDGE_SHADER, GRID_SHADER, MESH_SHADER};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 pub struct RenderPipelines {
     pub mesh_pipeline: wgpu::RenderPipeline,
     pub grid_pipeline: wgpu::RenderPipeline,
+    pub edit_edge_pipeline: wgpu::RenderPipeline,
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
     pub object_bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -200,9 +201,65 @@ impl RenderPipelines {
             cache: None,
         });
 
+        // 9. Edit Edge Shader Module
+        let edit_edge_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Edit Edge Shader"),
+            source: wgpu::ShaderSource::Wgsl(EDIT_EDGE_SHADER.into()),
+        });
+
+        // 10. Edit Edge Pipeline (Topology: LineList, DepthTest: Lequal, DepthBias: -2.0)
+        let edit_edge_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Edit Edge Render Pipeline"),
+            layout: Some(&mesh_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &edit_edge_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 12, // 3 * 4 = 12 bytes ([f32; 3] position)
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &edit_edge_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             mesh_pipeline,
             grid_pipeline,
+            edit_edge_pipeline,
             camera_bind_group_layout,
             object_bind_group_layout,
         }

@@ -755,6 +755,13 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.checkbox(&mut app.editor_state.show_grid, "Show Ground Grid");
             ui.checkbox(&mut app.editor_state.show_axes, "Show Coordinate Axes");
             ui.checkbox(&mut app.editor_state.show_wireframe, "Show Wireframe");
+            ui.checkbox(
+                &mut app.editor_state.use_gpu_wireframe,
+                "GPU Edit Wireframe",
+            )
+            .on_hover_text(
+                "Render Edit Mode mesh edges directly via GPU pipeline instead of CPU overlay",
+            );
 
             ui.separator();
             ui.label(egui::RichText::new("Viewport Zoom").weak().size(11.0));

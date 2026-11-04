@@ -1451,7 +1451,13 @@ impl Forge3dStudioApp {
                     && let (Some(renderer), Some(target_view)) =
                         (&mut self.renderer, &self.viewport_texture_view)
                 {
-                    renderer.render(
+                    let edit_obj = if self.editor_state.use_gpu_wireframe {
+                        self.active_edit_mesh.as_ref().map(|(id, m)| (id, m))
+                    } else {
+                        None
+                    };
+
+                    renderer.render_with_edit_mesh(
                         &wgpu_state.device,
                         &wgpu_state.queue,
                         target_view,
@@ -1461,6 +1467,7 @@ impl Forge3dStudioApp {
                         &self.selection,
                         &self.camera,
                         self.editor_state.show_grid,
+                        edit_obj,
                     );
                 }
             });

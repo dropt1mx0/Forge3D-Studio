@@ -1061,7 +1061,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         } else if app.editor_state.edit_mode == EditMode::Edit
             && let Some((_obj_id, edit_mesh)) = &mut app.active_edit_mesh
         {
-            // Draw batched wireframe edges and vertex handles
+            // Draw batched wireframe edges and vertex handles (CPU overlay used for handles or fallback edges)
+            let draw_cpu_edges = !app.editor_state.use_gpu_wireframe;
             render_edit_mode_overlay(
                 &mut app.edit_overlay_cache,
                 &painter,
@@ -1070,6 +1071,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 view_proj,
                 rect,
                 app.scene.dirty,
+                draw_cpu_edges,
             );
 
             let edit_mode_sel = match app.editor_state.selection_element {
@@ -1601,6 +1603,7 @@ pub struct EditOverlayCache {
     pub last_selected_edges: usize,
     pub last_vert_count: usize,
     pub last_edge_count: usize,
+    pub last_draw_edges: bool,
     pub build_count: usize,
 }
 
@@ -1728,6 +1731,7 @@ pub fn render_edit_mode_overlay(
     view_proj: forge_math::Mat4,
     rect: Rect,
     scene_dirty: bool,
+    draw_edges: bool,
 ) {
     let selected_verts = edit_mesh.vertices.iter().filter(|v| v.selected).count();
     let selected_edges = edit_mesh.edges.iter().filter(|e| e.selected).count();
@@ -1741,7 +1745,8 @@ pub fn render_edit_mode_overlay(
         && cache.last_vert_count == edit_mesh.vertices.len()
         && cache.last_edge_count == edit_mesh.edges.len()
         && cache.last_selected_verts == selected_verts
-        && cache.last_selected_edges == selected_edges;
+        && cache.last_selected_edges == selected_edges
+        && cache.last_draw_edges == draw_edges;
 
     if cache_valid {
         if let Some(shape) = &cache.cached_shape {
@@ -1766,7 +1771,7 @@ pub fn render_edit_mode_overlay(
     let cull_rect_edges = rect.expand(20.0);
     let cull_rect_verts = rect.expand(10.0);
 
-    let est_edges = edit_mesh.edges.len();
+    let est_edges = if draw_edges { edit_mesh.edges.len() } else { 0 };
     cache
         .mesh
         .vertices
@@ -1776,27 +1781,29 @@ pub fn render_edit_mode_overlay(
         .indices
         .reserve(est_edges * 6 + edit_mesh.vertices.len() * 6);
 
-    // 3. Batch wireframe edges
-    for edge in &edit_mesh.edges {
-        let (Some(s0), Some(s1)) = (
-            cache.projected_vertices[edge.v0],
-            cache.projected_vertices[edge.v1],
-        ) else {
-            continue;
-        };
+    // 3. Batch wireframe edges (only if CPU edges are requested)
+    if draw_edges {
+        for edge in &edit_mesh.edges {
+            let (Some(s0), Some(s1)) = (
+                cache.projected_vertices[edge.v0],
+                cache.projected_vertices[edge.v1],
+            ) else {
+                continue;
+            };
 
-        // Frustum culling: skip if both endpoints are outside the viewport bounds
-        if !cull_rect_edges.contains(s0) && !cull_rect_edges.contains(s1) {
-            continue;
+            // Frustum culling: skip if both endpoints are outside the viewport bounds
+            if !cull_rect_edges.contains(s0) && !cull_rect_edges.contains(s1) {
+                continue;
+            }
+
+            let col = if edge.selected {
+                Color32::from_rgb(255, 170, 40)
+            } else {
+                Color32::from_rgba_unmultiplied(160, 170, 190, 120)
+            };
+            let half_width = if edge.selected { 1.25 } else { 0.6 };
+            add_line_quad(&mut cache.mesh, s0, s1, half_width, col);
         }
-
-        let col = if edge.selected {
-            Color32::from_rgb(255, 170, 40)
-        } else {
-            Color32::from_rgba_unmultiplied(160, 170, 190, 120)
-        };
-        let half_width = if edge.selected { 1.25 } else { 0.6 };
-        add_line_quad(&mut cache.mesh, s0, s1, half_width, col);
     }
 
     // 4. Batch vertex handles
@@ -1830,6 +1837,7 @@ pub fn render_edit_mode_overlay(
     cache.last_edge_count = edit_mesh.edges.len();
     cache.last_selected_verts = selected_verts;
     cache.last_selected_edges = selected_edges;
+    cache.last_draw_edges = draw_edges;
     cache.build_count += 1;
 
     painter.add(egui::Shape::Mesh(arc_mesh));
@@ -1869,6 +1877,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         assert_eq!(cache.build_count, 1);
         assert!(cache.cached_shape.is_some());
@@ -1884,6 +1893,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         assert_eq!(
             cache.build_count, 1,
@@ -1914,6 +1924,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         let elapsed = t0.elapsed();
 
@@ -1934,6 +1945,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         let cached_elapsed = t1.elapsed();
         assert_eq!(cache.build_count, 1);
@@ -1966,6 +1978,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         assert_eq!(cache.build_count, 1);
 
@@ -1982,6 +1995,7 @@ mod tests {
             new_view_proj,
             rect,
             false,
+            true,
         );
         assert_eq!(cache.build_count, 2);
         // Buffers should reuse existing capacity without growing repeatedly
@@ -2011,6 +2025,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         assert_eq!(cache.build_count, 1);
         assert!(cache.cached_shape.is_some());
@@ -2037,6 +2052,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         assert_eq!(cache.build_count, 1);
 
@@ -2050,6 +2066,7 @@ mod tests {
             view_proj,
             rect,
             true, // scene_dirty = true
+            true,
         );
         assert_eq!(
             cache.build_count, 2,
@@ -2078,6 +2095,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         assert_eq!(cache.build_count, 1);
 
@@ -2091,6 +2109,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         assert_eq!(
             cache.build_count, 2,
@@ -2119,6 +2138,7 @@ mod tests {
             view_proj,
             rect,
             false,
+            true,
         );
         assert!(cache.projected_vertices.capacity() > 0);
         assert!(cache.mesh.vertices.capacity() > 0);
