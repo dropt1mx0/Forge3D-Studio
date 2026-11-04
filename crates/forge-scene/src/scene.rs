@@ -366,6 +366,7 @@ impl Scene {
             active_obj.mesh.vertices.extend(appended_vertices);
             active_obj.mesh.indices.extend(appended_indices);
             active_obj.mesh.recalculate_aabb();
+            active_obj.invalidate_evaluated_mesh();
         }
 
         self.dirty = true;
@@ -394,6 +395,7 @@ impl Scene {
             v.position[2] -= center.z;
         }
         obj.mesh.recalculate_aabb();
+        obj.invalidate_evaluated_mesh();
 
         // Offset position by rotated and scaled center
         let world_offset = obj.local_transform.rotation * (center * obj.local_transform.scale);
@@ -431,6 +433,7 @@ impl Scene {
             v.position[2] -= local_cursor.z;
         }
         obj.mesh.recalculate_aabb();
+        obj.invalidate_evaluated_mesh();
 
         let world_offset =
             obj.local_transform.rotation * (local_cursor * obj.local_transform.scale);

@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use forge_core::id::ObjectId;
 use forge_core::traits::{Identifiable, Named};
 use forge_geometry::Mesh;
@@ -105,6 +107,10 @@ pub struct SceneObject {
     pub children: Vec<ObjectId>,
     pub modifiers: forge_modifiers::ModifierStack,
     pub camera_data: Option<CameraData>,
+    #[serde(skip, default)]
+    pub generation: u64,
+    #[serde(skip, default)]
+    evaluated_mesh_cache: OnceLock<Mesh>,
 }
 
 impl SceneObject {
@@ -124,6 +130,8 @@ impl SceneObject {
             children: Vec::new(),
             modifiers: forge_modifiers::ModifierStack::new(),
             camera_data: None,
+            generation: 0,
+            evaluated_mesh_cache: OnceLock::new(),
         }
     }
 
@@ -148,19 +156,62 @@ impl SceneObject {
         self
     }
 
-    /// Evaluates base mesh through all active modifiers in stack.
-    pub fn evaluated_mesh(&self) -> Mesh {
+    /// Invalidates the cached evaluated mesh and increments geometry generation.
+    pub fn invalidate_evaluated_mesh(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.evaluated_mesh_cache.take();
+    }
+
+    /// Returns whether the evaluated mesh is currently cached in memory.
+    pub fn is_evaluated_mesh_cached(&self) -> bool {
         if self.modifiers.is_empty() {
-            self.mesh.clone()
+            true
         } else {
-            self.modifiers.evaluate(&self.mesh)
+            self.evaluated_mesh_cache.get().is_some()
         }
+    }
+
+    /// Sets a new base mesh, invalidating any cached evaluated mesh and incrementing generation.
+    pub fn set_mesh(&mut self, mesh: Mesh) {
+        self.mesh = mesh;
+        self.invalidate_evaluated_mesh();
+    }
+
+    /// Provides mutable access to the base mesh, invalidating the evaluated cache.
+    pub fn mesh_mut(&mut self) -> &mut Mesh {
+        self.invalidate_evaluated_mesh();
+        &mut self.mesh
+    }
+
+    /// Provides mutable access to the modifier stack, invalidating the evaluated cache.
+    pub fn modifiers_mut(&mut self) -> &mut forge_modifiers::ModifierStack {
+        self.invalidate_evaluated_mesh();
+        &mut self.modifiers
+    }
+
+    /// Evaluates base mesh through all active modifiers in stack with zero-copy caching.
+    ///
+    /// If no modifiers are present, returns a direct reference to `self.mesh` without cloning.
+    /// If modifiers are present, computes the result once and caches it until invalidated.
+    pub fn evaluated_mesh(&self) -> &Mesh {
+        if self.modifiers.is_empty() {
+            &self.mesh
+        } else {
+            self.evaluated_mesh_cache
+                .get_or_init(|| self.modifiers.evaluate(&self.mesh))
+        }
+    }
+
+    /// Returns an owned clone of the evaluated mesh.
+    pub fn evaluated_mesh_cloned(&self) -> Mesh {
+        self.evaluated_mesh().clone()
     }
 
     /// Applies the current local transform permanently to the mesh geometry and resets transform to identity.
     pub fn apply_transform(&mut self) {
         self.mesh.transform(&self.local_transform);
         self.local_transform = Transform::IDENTITY;
+        self.invalidate_evaluated_mesh();
     }
 
     /// Resets translation, rotation, and scale to identity.
@@ -197,5 +248,127 @@ impl Named for SceneObject {
 
     fn set_name(&mut self, name: impl Into<String>) {
         self.name = name.into();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use forge_geometry::primitives::generate_cube;
+    use forge_modifiers::{ModifierEntry, ModifierType, SubdivisionModifier};
+
+    #[test]
+    fn test_zero_copy_without_modifiers() {
+        let cube = generate_cube(1.0);
+        let obj = SceneObject::new("TestCube", PrimitiveType::Cube, cube);
+
+        // When no modifiers are active, evaluated_mesh points directly to obj.mesh without clone
+        let eval_ref = obj.evaluated_mesh();
+        assert!(std::ptr::eq(eval_ref, &obj.mesh));
+        assert!(obj.is_evaluated_mesh_cached());
+    }
+
+    #[test]
+    fn test_evaluated_mesh_caching_with_modifiers() {
+        let cube = generate_cube(1.0);
+        let mut obj = SceneObject::new("TestCube", PrimitiveType::Cube, cube);
+        obj.modifiers
+            .add(ModifierType::Subdivide(SubdivisionModifier::new(1)));
+
+        // Initially not yet evaluated
+        assert!(!obj.is_evaluated_mesh_cached());
+
+        // First evaluation computes and caches the result
+        let eval1_ptr = obj.evaluated_mesh() as *const Mesh;
+        assert!(obj.is_evaluated_mesh_cached());
+
+        // Second evaluation reuses the exact same cached instance in memory
+        let eval2_ptr = obj.evaluated_mesh() as *const Mesh;
+        assert_eq!(
+            eval1_ptr, eval2_ptr,
+            "Subsequent calls must return identical cached mesh address"
+        );
+
+        // Evaluated mesh has more triangles than base cube
+        assert!(obj.evaluated_mesh().indices.len() > obj.mesh.indices.len());
+    }
+
+    #[test]
+    fn test_cache_invalidation_on_mesh_change() {
+        let cube = generate_cube(1.0);
+        let mut obj = SceneObject::new("TestCube", PrimitiveType::Cube, cube);
+        obj.modifiers
+            .add(ModifierType::Subdivide(SubdivisionModifier::new(1)));
+
+        let _ = obj.evaluated_mesh();
+        assert!(obj.is_evaluated_mesh_cached());
+        let gen_before = obj.generation;
+
+        // Invalidate via set_mesh
+        let new_cube = generate_cube(2.0);
+        obj.set_mesh(new_cube);
+
+        assert!(
+            !obj.is_evaluated_mesh_cached(),
+            "Cache must be cleared after set_mesh"
+        );
+        assert_eq!(
+            obj.generation,
+            gen_before + 1,
+            "Generation must increment on mesh change"
+        );
+
+        // Next evaluation re-caches
+        let _ = obj.evaluated_mesh();
+        assert!(obj.is_evaluated_mesh_cached());
+    }
+
+    #[test]
+    fn test_cache_invalidation_on_modifier_change() {
+        let cube = generate_cube(1.0);
+        let mut obj = SceneObject::new("TestCube", PrimitiveType::Cube, cube);
+        obj.modifiers
+            .add(ModifierType::Subdivide(SubdivisionModifier::new(1)));
+
+        let eval1_tris = obj.evaluated_mesh().indices.len() / 3;
+        assert!(obj.is_evaluated_mesh_cached());
+        let gen_before = obj.generation;
+
+        // Mutate modifiers via modifiers_mut()
+        obj.modifiers_mut().modifiers[0] =
+            ModifierEntry::new(ModifierType::Subdivide(SubdivisionModifier::new(2)));
+        assert!(
+            !obj.is_evaluated_mesh_cached(),
+            "Cache must be cleared on modifiers_mut"
+        );
+        assert_eq!(obj.generation, gen_before + 1);
+
+        // Next evaluation computes updated geometry with level 2 subdivision
+        let eval2_tris = obj.evaluated_mesh().indices.len() / 3;
+        assert!(
+            eval2_tris > eval1_tris,
+            "Level 2 subdivision must produce more triangles than level 1"
+        );
+    }
+
+    #[test]
+    fn test_cache_invalidation_on_apply_transform() {
+        let cube = generate_cube(1.0);
+        let mut obj = SceneObject::new("TestCube", PrimitiveType::Cube, cube);
+        obj.local_transform.translation = Vec3::new(5.0, 0.0, 0.0);
+        obj.modifiers
+            .add(ModifierType::Subdivide(SubdivisionModifier::new(1)));
+
+        let _ = obj.evaluated_mesh();
+        assert!(obj.is_evaluated_mesh_cached());
+        let gen_before = obj.generation;
+
+        obj.apply_transform();
+        assert!(
+            !obj.is_evaluated_mesh_cached(),
+            "apply_transform must invalidate evaluated cache"
+        );
+        assert_eq!(obj.generation, gen_before + 1);
+        assert_eq!(obj.local_transform, Transform::IDENTITY);
     }
 }

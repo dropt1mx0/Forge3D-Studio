@@ -17,6 +17,7 @@ struct GpuMeshEntry {
     index_buffer: GpuBuffer<u32>,
     object_uniform_buffer: wgpu::Buffer,
     object_bind_group: wgpu::BindGroup,
+    generation: u64,
 }
 
 /// The main 3D Viewport Renderer orchestrating pipelines, GPU buffers, depth testing, and passes.
@@ -145,30 +146,32 @@ impl ViewportRenderer {
             let is_selected = selection.is_selected(id);
             let obj_uniform = ObjectUniform::new(world_tf.to_matrix(), obj.color, is_selected);
 
-            let eval_mesh = obj.evaluated_mesh();
-
             if let Some(entry) = self.mesh_cache.get_mut(&id) {
-                // If mesh geometry changed, re-upload buffers
-                if entry.vertex_buffer.count != eval_mesh.vertices.len()
-                    || entry.index_buffer.count != eval_mesh.indices.len()
-                {
-                    entry.vertex_buffer = GpuBuffer::new_vertex_buffer(
-                        device,
-                        &format!("{}_vbuf", obj.name),
-                        &eval_mesh.vertices,
-                    );
-                    entry.index_buffer = GpuBuffer::new_index_buffer(
-                        device,
-                        &format!("{}_ibuf", obj.name),
-                        &eval_mesh.indices,
-                    );
-                } else {
-                    // Update vertex buffer in-place if count matches
-                    queue.write_buffer(
-                        &entry.vertex_buffer.buffer,
-                        0,
-                        bytemuck::cast_slice(&eval_mesh.vertices),
-                    );
+                // If mesh geometry or modifiers changed, re-evaluate and re-upload buffers
+                if entry.generation != obj.generation {
+                    let eval_mesh = obj.evaluated_mesh();
+                    if entry.vertex_buffer.count != eval_mesh.vertices.len()
+                        || entry.index_buffer.count != eval_mesh.indices.len()
+                    {
+                        entry.vertex_buffer = GpuBuffer::new_vertex_buffer(
+                            device,
+                            &format!("{}_vbuf", obj.name),
+                            &eval_mesh.vertices,
+                        );
+                        entry.index_buffer = GpuBuffer::new_index_buffer(
+                            device,
+                            &format!("{}_ibuf", obj.name),
+                            &eval_mesh.indices,
+                        );
+                    } else {
+                        // Update vertex buffer in-place if count matches
+                        queue.write_buffer(
+                            &entry.vertex_buffer.buffer,
+                            0,
+                            bytemuck::cast_slice(&eval_mesh.vertices),
+                        );
+                    }
+                    entry.generation = obj.generation;
                 }
 
                 // Update object uniform
@@ -179,6 +182,7 @@ impl ViewportRenderer {
                 );
             } else {
                 // Upload new mesh to GPU
+                let eval_mesh = obj.evaluated_mesh();
                 let v_buf = GpuBuffer::new_vertex_buffer(
                     device,
                     &format!("{}_vbuf", obj.name),
@@ -212,6 +216,7 @@ impl ViewportRenderer {
                         index_buffer: i_buf,
                         object_uniform_buffer: u_buf,
                         object_bind_group: b_group,
+                        generation: obj.generation,
                     },
                 );
             }
@@ -288,5 +293,102 @@ impl ViewportRenderer {
         }
 
         queue.submit(std::iter::once(encoder.finish()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use forge_geometry::primitives::generate_cube;
+    use forge_gpu::GpuContext;
+    use forge_scene::{PrimitiveType, Scene, SceneObject, SelectionState};
+
+    #[test]
+    fn test_renderer_mesh_cache_reuse_and_invalidation() {
+        let Ok(ctx) = GpuContext::init_headless() else {
+            // Headless adapter might not be available in headless CI
+            return;
+        };
+
+        let mut renderer = ViewportRenderer::new(&ctx.device, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let mut scene = Scene::new("Test Scene");
+        let cube = generate_cube(1.0);
+        let obj = SceneObject::new("TestCube", PrimitiveType::Cube, cube);
+        let id = obj.id;
+        scene.add_object(obj);
+
+        let selection = SelectionState::new();
+        let camera = Camera::default();
+
+        let target_desc = wgpu::TextureDescriptor {
+            label: Some("Test Target"),
+            size: wgpu::Extent3d {
+                width: 100,
+                height: 100,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        };
+        let target_tex = ctx.device.create_texture(&target_desc);
+        let target_view = target_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // 1. Initial render uploads mesh to GPU cache
+        renderer.render(
+            &ctx.device,
+            &ctx.queue,
+            &target_view,
+            100,
+            100,
+            &scene,
+            &selection,
+            &camera,
+            false,
+        );
+        assert!(renderer.mesh_cache.contains_key(&id));
+        let entry1_gen = renderer.mesh_cache.get(&id).unwrap().generation;
+        assert_eq!(entry1_gen, 0);
+
+        // 2. Second render reuses GPU cache with zero re-evaluation
+        renderer.render(
+            &ctx.device,
+            &ctx.queue,
+            &target_view,
+            100,
+            100,
+            &scene,
+            &selection,
+            &camera,
+            false,
+        );
+        assert_eq!(renderer.mesh_cache.get(&id).unwrap().generation, entry1_gen);
+
+        // 3. Mutating object base mesh increments generation
+        let obj_mut = scene.get_object_mut(id).unwrap();
+        let new_cube = generate_cube(2.0);
+        obj_mut.set_mesh(new_cube);
+        assert_eq!(obj_mut.generation, 1);
+
+        // 4. Render pass detects generation change and updates GPU cache
+        renderer.render(
+            &ctx.device,
+            &ctx.queue,
+            &target_view,
+            100,
+            100,
+            &scene,
+            &selection,
+            &camera,
+            false,
+        );
+        assert_eq!(renderer.mesh_cache.get(&id).unwrap().generation, 1);
+
+        // 5. Invalidate mesh explicitly clears cache
+        renderer.invalidate_mesh(&id);
+        assert!(!renderer.mesh_cache.contains_key(&id));
     }
 }

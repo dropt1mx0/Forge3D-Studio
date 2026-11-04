@@ -610,12 +610,15 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     });
             });
 
+            let mut modifier_changed = false;
             let num_mods = obj.modifiers.len();
             for i in 0..num_mods {
                 let entry = &mut obj.modifiers.modifiers[i];
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut entry.enabled, "");
+                        if ui.checkbox(&mut entry.enabled, "").changed() {
+                            modifier_changed = true;
+                        }
                         ui.label(egui::RichText::new(&entry.name).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button("✕").on_hover_text("Delete Modifier").clicked() {
@@ -638,41 +641,69 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         ModifierType::Mirror(m) => {
                             ui.horizontal(|ui| {
                                 ui.label("Axis:");
-                                ui.checkbox(&mut m.axis_x, "X");
-                                ui.checkbox(&mut m.axis_y, "Y");
-                                ui.checkbox(&mut m.axis_z, "Z");
+                                if ui.checkbox(&mut m.axis_x, "X").changed() {
+                                    modifier_changed = true;
+                                }
+                                if ui.checkbox(&mut m.axis_y, "Y").changed() {
+                                    modifier_changed = true;
+                                }
+                                if ui.checkbox(&mut m.axis_z, "Z").changed() {
+                                    modifier_changed = true;
+                                }
                             });
                         }
                         ModifierType::Subdivide(s) => {
                             ui.horizontal(|ui| {
                                 ui.label("Levels:");
-                                ui.add(egui::Slider::new(&mut s.levels, 1..=4));
+                                if ui.add(egui::Slider::new(&mut s.levels, 1..=4)).changed() {
+                                    modifier_changed = true;
+                                }
                             });
                         }
                         ModifierType::Solidify(s) => {
                             ui.horizontal(|ui| {
                                 ui.label("Thickness:");
-                                ui.add(
-                                    DragValue::new(&mut s.thickness)
-                                        .speed(0.01)
-                                        .range(0.0..=10.0),
-                                );
+                                if ui
+                                    .add(
+                                        DragValue::new(&mut s.thickness)
+                                            .speed(0.01)
+                                            .range(0.0..=10.0),
+                                    )
+                                    .changed()
+                                {
+                                    modifier_changed = true;
+                                }
                             });
                         }
                         ModifierType::Array(a) => {
                             ui.horizontal(|ui| {
                                 ui.label("Count:");
-                                ui.add(egui::Slider::new(&mut a.count, 1..=20));
+                                if ui.add(egui::Slider::new(&mut a.count, 1..=20)).changed() {
+                                    modifier_changed = true;
+                                }
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Offset:");
-                                ui.add(DragValue::new(&mut a.offset.x).speed(0.1));
-                                ui.add(DragValue::new(&mut a.offset.y).speed(0.1));
-                                ui.add(DragValue::new(&mut a.offset.z).speed(0.1));
+                                if ui.add(DragValue::new(&mut a.offset.x).speed(0.1)).changed() {
+                                    modifier_changed = true;
+                                }
+                                if ui.add(DragValue::new(&mut a.offset.y).speed(0.1)).changed() {
+                                    modifier_changed = true;
+                                }
+                                if ui.add(DragValue::new(&mut a.offset.z).speed(0.1)).changed() {
+                                    modifier_changed = true;
+                                }
                             });
                         }
                     }
                 });
+            }
+
+            if modifier_changed {
+                obj.invalidate_evaluated_mesh();
+                if let Some(r) = &mut app.renderer {
+                    r.invalidate_mesh(&selected_id);
+                }
             }
 
             ui.add_space(8.0);
@@ -735,6 +766,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             && let Some(obj) = app.scene.get_object_mut(selected_id)
         {
             obj.modifiers.add(mod_type);
+            obj.invalidate_evaluated_mesh();
             if let Some(r) = &mut app.renderer {
                 r.invalidate_mesh(&selected_id);
             }
@@ -743,6 +775,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             && let Some(obj) = app.scene.get_object_mut(selected_id)
         {
             obj.modifiers.remove(idx);
+            obj.invalidate_evaluated_mesh();
             if let Some(r) = &mut app.renderer {
                 r.invalidate_mesh(&selected_id);
             }
@@ -751,6 +784,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             && let Some(obj) = app.scene.get_object_mut(selected_id)
         {
             obj.modifiers.apply_to_mesh(idx, &mut obj.mesh);
+            obj.invalidate_evaluated_mesh();
             if let Some(r) = &mut app.renderer {
                 r.invalidate_mesh(&selected_id);
             }
@@ -760,6 +794,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             && let Some(obj) = app.scene.get_object_mut(selected_id)
         {
             obj.modifiers.move_up(idx);
+            obj.invalidate_evaluated_mesh();
             if let Some(r) = &mut app.renderer {
                 r.invalidate_mesh(&selected_id);
             }
@@ -768,6 +803,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             && let Some(obj) = app.scene.get_object_mut(selected_id)
         {
             obj.modifiers.move_down(idx);
+            obj.invalidate_evaluated_mesh();
             if let Some(r) = &mut app.renderer {
                 r.invalidate_mesh(&selected_id);
             }

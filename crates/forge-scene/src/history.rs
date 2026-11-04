@@ -167,7 +167,7 @@ impl HistoryStack {
             }
             Action::ModifyMesh { id, old_mesh, .. } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
-                    obj.mesh = old_mesh.clone();
+                    obj.set_mesh(old_mesh.clone());
                     scene.dirty = true;
                 }
             }
@@ -178,7 +178,7 @@ impl HistoryStack {
             } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
                     obj.local_transform = *old_transform;
-                    obj.mesh = old_mesh.clone();
+                    obj.set_mesh(old_mesh.clone());
                     scene.dirty = true;
                 }
             }
@@ -188,7 +188,7 @@ impl HistoryStack {
                 removed_objects,
             } => {
                 if let Some(obj) = scene.get_object_mut(*active_id) {
-                    obj.mesh = old_mesh.clone();
+                    obj.set_mesh(old_mesh.clone());
                 }
                 for ro in removed_objects {
                     scene.add_object(ro.clone());
@@ -215,7 +215,7 @@ impl HistoryStack {
             } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
                     obj.local_transform = *old_transform;
-                    obj.mesh = old_mesh.clone();
+                    obj.set_mesh(old_mesh.clone());
                     scene.dirty = true;
                 }
             }
@@ -266,7 +266,7 @@ impl HistoryStack {
             }
             Action::ModifyMesh { id, new_mesh, .. } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
-                    obj.mesh = new_mesh.clone();
+                    obj.set_mesh(new_mesh.clone());
                     scene.dirty = true;
                 }
             }
@@ -301,7 +301,7 @@ impl HistoryStack {
             } => {
                 if let Some(obj) = scene.get_object_mut(*id) {
                     obj.local_transform = *new_transform;
-                    obj.mesh = new_mesh.clone();
+                    obj.set_mesh(new_mesh.clone());
                     scene.dirty = true;
                 }
             }

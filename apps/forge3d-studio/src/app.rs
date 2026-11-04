@@ -230,7 +230,7 @@ impl Forge3dStudioApp {
         {
             let old_mesh = obj.mesh.clone();
             let new_mesh = edit_mesh.to_render_mesh();
-            obj.mesh = new_mesh.clone();
+            obj.set_mesh(new_mesh.clone());
             self.scene.dirty = true;
 
             if let Some(r) = &mut self.renderer {
@@ -248,11 +248,15 @@ impl Forge3dStudioApp {
 
     /// Fast sync of edit mesh to scene object during interactive operations without pushing undo step.
     pub fn sync_edit_mesh_to_scene(&mut self) {
-        if let Some((id, edit_mesh)) = &self.active_edit_mesh
-            && let Some(obj) = self.scene.get_object_mut(*id)
-        {
-            obj.mesh = edit_mesh.to_render_mesh();
-            self.scene.dirty = true;
+        if let Some((id, edit_mesh)) = &self.active_edit_mesh {
+            let obj_id = *id;
+            if let Some(obj) = self.scene.get_object_mut(obj_id) {
+                obj.set_mesh(edit_mesh.to_render_mesh());
+                self.scene.dirty = true;
+            }
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(&obj_id);
+            }
         }
     }
 
