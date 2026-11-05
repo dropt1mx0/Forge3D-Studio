@@ -1330,6 +1330,7 @@ dependencies = [
  "forge-render",
  "forge-scene",
  "glam",
+ "image",
  "pollster 0.3.0",
  "rfd",
  "serde",

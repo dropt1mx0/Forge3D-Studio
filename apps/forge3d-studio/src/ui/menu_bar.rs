@@ -14,6 +14,12 @@ use crate::app::Forge3dStudioApp;
 
 pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     egui::MenuBar::new().ui(ui, |ui| {
+        if let Some(logo) = &app.logo_texture {
+            ui.add(
+                egui::Image::new((logo.id(), egui::vec2(22.0, 22.0)))
+                    .fit_to_exact_size(egui::vec2(22.0, 22.0)),
+            );
+        }
         ui.label(
             egui::RichText::new("Forge3D")
                 .strong()

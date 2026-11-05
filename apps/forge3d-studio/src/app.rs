@@ -19,6 +19,19 @@ use crate::ui::status_bar::render_status_bar;
 use crate::ui::toolbar::render_toolbar;
 use crate::ui::viewport::render_viewport;
 
+const FORGE3D_LOGO_BYTES: &[u8] = include_bytes!("../assets/forge3d-logo.jpg");
+
+fn load_forge3d_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let decoded = image::load_from_memory(FORGE3D_LOGO_BYTES).ok()?;
+    let thumbnail = decoded
+        .resize_exact(96, 96, image::imageops::FilterType::Lanczos3)
+        .to_rgba8();
+    let size = [thumbnail.width() as usize, thumbnail.height() as usize];
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, thumbnail.as_raw());
+
+    Some(ctx.load_texture("forge3d-logo", color_image, egui::TextureOptions::LINEAR))
+}
+
 /// Active state for free cursor object dragging in world space.
 #[derive(Debug, Clone)]
 pub struct ObjectDragState {
@@ -72,6 +85,9 @@ pub struct Forge3dStudioApp {
 
     // Stored WGPU render state from CreationContext
     pub wgpu_render_state: Option<egui_wgpu::RenderState>,
+
+    /// Embedded Forge3D brand mark shown in the top menu bar.
+    pub logo_texture: Option<egui::TextureHandle>,
 
     // Offscreen 3D viewport render target
     pub viewport_texture: Option<wgpu::Texture>,
@@ -222,6 +238,11 @@ impl Forge3dStudioApp {
             ));
         }
 
+        let logo_texture = load_forge3d_logo(&cc.egui_ctx);
+        if logo_texture.is_none() {
+            tracing::warn!("Could not decode the embedded Forge3D logo");
+        }
+
         let editor_state = EditorState {
             panel_settings: forge_scene::PanelSettings::load_or_default(),
             ..Default::default()
@@ -256,6 +277,7 @@ impl Forge3dStudioApp {
             active_edit_mesh: None,
             edit_overlay_cache: crate::ui::viewport::EditOverlayCache::default(),
             wgpu_render_state: cc.wgpu_render_state.clone(),
+            logo_texture,
             viewport_texture: None,
             viewport_texture_view: None,
             viewport_egui_texture_id: None,
@@ -302,6 +324,7 @@ impl Forge3dStudioApp {
             active_edit_mesh: None,
             edit_overlay_cache: crate::ui::viewport::EditOverlayCache::default(),
             wgpu_render_state: None,
+            logo_texture: None,
             viewport_texture: None,
             viewport_texture_view: None,
             viewport_egui_texture_id: None,
