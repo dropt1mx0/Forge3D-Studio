@@ -562,6 +562,17 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.merge_selected_geometry();
             } else if input.key_pressed(Key::F) {
                 app.fill_selected_geometry();
+            } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::B)
+            {
+                app.bevel_selected_geometry(0.1);
+            } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::R)
+            {
+                app.loop_cut_selected_geometry(0.5);
+            } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::X)
+            {
+                app.dissolve_selected_geometry();
+            } else if !input.modifiers.any() && input.key_pressed(Key::P) {
+                app.separate_selected_geometry();
             }
         }
 

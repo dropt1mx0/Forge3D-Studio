@@ -11,7 +11,9 @@ pub mod topology;
 pub mod validation;
 pub mod vertex;
 
-pub use edit_mesh::{EditEdge, EditFace, EditSelectionMode, EditVertex, EditableMesh};
+pub use edit_mesh::{
+    EditEdge, EditFace, EditSelectionMode, EditVertex, EditableMesh, ProportionalFalloff,
+};
 pub use mesh::Mesh;
 pub use primitives::{
     generate_circle, generate_cone, generate_cube, generate_cylinder, generate_grid_lines,

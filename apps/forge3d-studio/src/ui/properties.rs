@@ -1,7 +1,8 @@
 use egui::{DragValue, Slider, Ui};
 use forge_core::id::ObjectId;
 use forge_modifiers::{
-    ArrayModifier, MirrorModifier, ModifierType, SolidifyModifier, SubdivisionModifier,
+    ArrayModifier, BevelModifier, DecimateModifier, DisplaceModifier, MirrorModifier, ModifierType,
+    SolidifyModifier, SubdivisionModifier, WeightedNormalModifier,
 };
 use forge_scene::{CameraData, CameraProjectionType, PrimitiveType, TransformOrientation};
 
@@ -607,6 +608,22 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         if ui.selectable_label(false, "Array").clicked() {
                             add_modifier_type = Some(ModifierType::Array(ArrayModifier::default()));
                         }
+                        if ui.selectable_label(false, "Bevel").clicked() {
+                            add_modifier_type = Some(ModifierType::Bevel(BevelModifier::default()));
+                        }
+                        if ui.selectable_label(false, "Decimate").clicked() {
+                            add_modifier_type =
+                                Some(ModifierType::Decimate(DecimateModifier::default()));
+                        }
+                        if ui.selectable_label(false, "Displace").clicked() {
+                            add_modifier_type =
+                                Some(ModifierType::Displace(DisplaceModifier::default()));
+                        }
+                        if ui.selectable_label(false, "Weighted Normal").clicked() {
+                            add_modifier_type = Some(ModifierType::WeightedNormal(
+                                WeightedNormalModifier::default(),
+                            ));
+                        }
                     });
             });
 
@@ -691,6 +708,72 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                     modifier_changed = true;
                                 }
                                 if ui.add(DragValue::new(&mut a.offset.z).speed(0.1)).changed() {
+                                    modifier_changed = true;
+                                }
+                            });
+                        }
+                        ModifierType::Bevel(b) => {
+                            ui.horizontal(|ui| {
+                                ui.label("Width:");
+                                if ui
+                                    .add(
+                                        DragValue::new(&mut b.width)
+                                            .speed(0.01)
+                                            .range(0.001..=10.0),
+                                    )
+                                    .changed()
+                                {
+                                    modifier_changed = true;
+                                }
+                            });
+                        }
+                        ModifierType::Decimate(d) => {
+                            ui.horizontal(|ui| {
+                                ui.label("Ratio:");
+                                if ui
+                                    .add(Slider::new(&mut d.ratio, 0.05..=1.0).step_by(0.05))
+                                    .changed()
+                                {
+                                    modifier_changed = true;
+                                }
+                            });
+                        }
+                        ModifierType::Displace(d) => {
+                            ui.horizontal(|ui| {
+                                ui.label("Strength:");
+                                if ui
+                                    .add(DragValue::new(&mut d.strength).speed(0.01))
+                                    .changed()
+                                {
+                                    modifier_changed = true;
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Frequency:");
+                                if ui
+                                    .add(
+                                        DragValue::new(&mut d.frequency)
+                                            .speed(0.1)
+                                            .range(0.01..=50.0),
+                                    )
+                                    .changed()
+                                {
+                                    modifier_changed = true;
+                                }
+                            });
+                        }
+                        ModifierType::WeightedNormal(w) => {
+                            ui.horizontal(|ui| {
+                                ui.label("Weight:");
+                                if ui
+                                    .add(Slider::new(&mut w.weight, 0.0..=1.0).step_by(0.05))
+                                    .changed()
+                                {
+                                    modifier_changed = true;
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                if ui.checkbox(&mut w.keep_sharp, "Keep Sharp").changed() {
                                     modifier_changed = true;
                                 }
                             });

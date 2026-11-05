@@ -2,9 +2,13 @@ use forge_geometry::Mesh;
 use serde::{Deserialize, Serialize};
 
 use crate::array::ArrayModifier;
+use crate::bevel::BevelModifier;
+use crate::decimate::DecimateModifier;
+use crate::displace::DisplaceModifier;
 use crate::mirror::MirrorModifier;
 use crate::solidify::SolidifyModifier;
 use crate::subdiv::SubdivisionModifier;
+use crate::weighted_normal::WeightedNormalModifier;
 
 /// Supported modifier types in Forge3D.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -13,6 +17,10 @@ pub enum ModifierType {
     Subdivide(SubdivisionModifier),
     Solidify(SolidifyModifier),
     Array(ArrayModifier),
+    Bevel(BevelModifier),
+    Decimate(DecimateModifier),
+    Displace(DisplaceModifier),
+    WeightedNormal(WeightedNormalModifier),
 }
 
 impl ModifierType {
@@ -22,6 +30,10 @@ impl ModifierType {
             Self::Subdivide(_) => "Subdivision Surface",
             Self::Solidify(_) => "Solidify",
             Self::Array(_) => "Array",
+            Self::Bevel(_) => "Bevel",
+            Self::Decimate(_) => "Decimate",
+            Self::Displace(_) => "Displace",
+            Self::WeightedNormal(_) => "Weighted Normal",
         }
     }
 
@@ -31,6 +43,10 @@ impl ModifierType {
             Self::Subdivide(s) => s.apply(mesh),
             Self::Solidify(s) => s.apply(mesh),
             Self::Array(a) => a.apply(mesh),
+            Self::Bevel(b) => b.apply(mesh),
+            Self::Decimate(d) => d.apply(mesh),
+            Self::Displace(dp) => dp.apply(mesh),
+            Self::WeightedNormal(wn) => wn.apply(mesh),
         }
     }
 }
@@ -140,5 +156,43 @@ mod tests {
         let result = stack.evaluate(&cube);
         // Initial 24 verts -> mirror doubles to 48 -> array doubles to 96
         assert_eq!(result.vertices.len(), cube.vertices.len() * 2 * 2);
+    }
+
+    #[test]
+    fn test_bevel_modifier_cube() {
+        let cube = generate_cube(1.0);
+        let bevel = BevelModifier::new(0.05);
+        let result = bevel.apply(&cube);
+        assert!(!result.vertices.is_empty());
+        assert!(!result.indices.is_empty());
+    }
+
+    #[test]
+    fn test_displace_modifier() {
+        let cube = generate_cube(1.0);
+        let displace = DisplaceModifier::new(0.2);
+        let result = displace.apply(&cube);
+        assert_eq!(result.vertices.len(), cube.vertices.len());
+        assert_eq!(result.indices.len(), cube.indices.len());
+        assert!(result.validate().is_ok());
+    }
+
+    #[test]
+    fn test_decimate_modifier() {
+        let cube = generate_cube(1.0);
+        let decimate = DecimateModifier::new(0.5);
+        let result = decimate.apply(&cube);
+        assert!(!result.vertices.is_empty());
+        assert!(result.validate().is_ok());
+    }
+
+    #[test]
+    fn test_weighted_normal_modifier() {
+        let cube = generate_cube(1.0);
+        let wn = WeightedNormalModifier::new();
+        let result = wn.apply(&cube);
+        assert_eq!(result.vertices.len(), cube.vertices.len());
+        assert_eq!(result.indices.len(), cube.indices.len());
+        assert!(result.validate().is_ok());
     }
 }

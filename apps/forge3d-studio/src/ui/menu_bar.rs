@@ -692,6 +692,64 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.close();
             }
 
+            if ui.button("Bevel (Ctrl+B)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.bevel_selected_geometry(0.1);
+                ui.close();
+            }
+
+            if ui.button("Loop Cut (Ctrl+R)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.loop_cut_selected_geometry(0.5);
+                ui.close();
+            }
+
+            if ui.button("Dissolve (Ctrl+X)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.dissolve_selected_geometry();
+                ui.close();
+            }
+
+            if ui.button("Bridge Edge Loops").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.bridge_selected_geometry();
+                ui.close();
+            }
+
+            if ui.button("Separate (P)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.separate_selected_geometry();
+                ui.close();
+            }
+
+            ui.separator();
+
+            if ui.button("Tris to Quads").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.tris_to_quads_selected_geometry();
+                ui.close();
+            }
+
+            if ui.button("Weld Co-located Vertices").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.weld_colocated_selected_geometry(1e-4);
+                ui.close();
+            }
+
             ui.separator();
 
             if ui.button("Delete Selected").clicked() {

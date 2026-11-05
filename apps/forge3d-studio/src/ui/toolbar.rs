@@ -252,6 +252,27 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         app.fill_selected_geometry();
                     }
 
+                    if tool_button(ui, false, "Bev", "Bevel", "Ctrl+B", display_mode).clicked() {
+                        app.bevel_selected_geometry(0.1);
+                    }
+
+                    if tool_button(ui, false, "Loop", "Loop Cut", "Ctrl+R", display_mode).clicked()
+                    {
+                        app.loop_cut_selected_geometry(0.5);
+                    }
+
+                    if tool_button(ui, false, "Dis", "Dissolve", "Ctrl+X", display_mode).clicked() {
+                        app.dissolve_selected_geometry();
+                    }
+
+                    if tool_button(ui, false, "Brdg", "Bridge", "", display_mode).clicked() {
+                        app.bridge_selected_geometry();
+                    }
+
+                    if tool_button(ui, false, "Sep", "Separate", "P", display_mode).clicked() {
+                        app.separate_selected_geometry();
+                    }
+
                     ui.add_space(4.0);
                     ui.separator();
                 }

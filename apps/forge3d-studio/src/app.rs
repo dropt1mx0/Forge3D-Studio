@@ -7,7 +7,8 @@ use forge_gpu::GpuAdapterInfo;
 use forge_math::{Ray, Transform, Vec2, Vec3};
 use forge_render::{Camera, ViewportRenderer};
 use forge_scene::{
-    Action, EditMode, EditorState, HistoryStack, Scene, SelectionElement, SelectionState,
+    Action, EditMode, EditorState, HistoryStack, PrimitiveType, Scene, SceneObject,
+    SelectionElement, SelectionState,
 };
 
 use crate::ui::gizmo::GizmoState;
@@ -384,6 +385,116 @@ impl Forge3dStudioApp {
         {
             self.sync_edit_mesh_to_scene();
             self.status_message = format!("Created Face #{}", idx);
+        }
+    }
+
+    pub fn bevel_selected_geometry(&mut self, width: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            match edit_mesh.bevel_selected_edges(width) {
+                Ok(faces) if !faces.is_empty() => {
+                    self.sync_edit_mesh_to_scene();
+                    self.status_message = format!("Beveled {} edge(s)", faces.len());
+                }
+                Ok(_) => {
+                    self.status_message = "No eligible edges for bevel (select edges)".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Bevel: {e}");
+                }
+            }
+        }
+    }
+
+    pub fn loop_cut_selected_geometry(&mut self, factor: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            let target_edge_idx = edit_mesh.edges.iter().position(|e| e.selected).unwrap_or(0);
+
+            match edit_mesh.loop_cut(target_edge_idx, factor) {
+                Ok(faces) if !faces.is_empty() => {
+                    self.sync_edit_mesh_to_scene();
+                    self.status_message = format!("Loop Cut: created {} new face(s)", faces.len());
+                }
+                Ok(_) => {
+                    self.status_message = "Loop Cut completed".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Loop Cut: {e}");
+                }
+            }
+        }
+    }
+
+    pub fn dissolve_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            match edit_mesh.dissolve_selected_edges() {
+                Ok(count) if count > 0 => {
+                    self.sync_edit_mesh_to_scene();
+                    self.status_message = format!("Dissolved {} edge(s)", count);
+                }
+                Ok(_) => {
+                    self.status_message =
+                        "No internal manifold edges selected to dissolve".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Dissolve: {e}");
+                }
+            }
+        }
+    }
+
+    pub fn bridge_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            match edit_mesh.bridge_edge_loops() {
+                Ok(count) if count > 0 => {
+                    self.sync_edit_mesh_to_scene();
+                    self.status_message = format!("Bridged edge loops: created {} face(s)", count);
+                }
+                Ok(_) => {
+                    self.status_message = "No edge loops bridged".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Bridge: {e}");
+                }
+            }
+        }
+    }
+
+    pub fn separate_selected_geometry(&mut self) {
+        if let Some((active_id, edit_mesh)) = &mut self.active_edit_mesh {
+            if let Some(mut separated_mesh) = edit_mesh.separate_selected() {
+                separated_mesh.recalculate_normals();
+                let render_mesh = separated_mesh.to_render_mesh();
+                let parent_tf = self
+                    .scene
+                    .get_object(*active_id)
+                    .map(|o| o.local_transform)
+                    .unwrap_or(Transform::IDENTITY);
+                let mut new_obj =
+                    SceneObject::new("Separated_Part", PrimitiveType::Custom, render_mesh);
+                new_obj.local_transform = parent_tf;
+                let new_id = self.scene.add_object(new_obj.clone());
+                self.history.push(Action::AddObject { object: new_obj });
+                self.sync_edit_mesh_to_scene();
+                self.status_message = format!("Separated selection into new object {:?}", new_id);
+            } else {
+                self.status_message = "No faces selected to separate".to_string();
+            }
+        }
+    }
+
+    pub fn tris_to_quads_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            edit_mesh.tris_to_quads();
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Converted coplanar triangles to quads".to_string();
+        }
+    }
+
+    pub fn weld_colocated_selected_geometry(&mut self, tolerance: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            edit_mesh.weld_colocated_vertices(tolerance);
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Welded co-located vertices".to_string();
         }
     }
 
