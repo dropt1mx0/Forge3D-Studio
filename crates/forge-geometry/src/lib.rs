@@ -23,12 +23,10 @@ pub use primitives::{
 };
 pub use sculpt::{SculptBrush, SculptSettings, apply_sculpt_stroke, sculpt_falloff};
 pub use topology::{
-    BevelEdgeResult, CollapseEdgeResult, EdgeHandle, EdgeSelectionPath, ExtrudeFaceResult,
-    FaceHandle, FlipEdgeResult, HalfEdge, HalfEdgeEdge, HalfEdgeFace, HalfEdgeHandle, HalfEdgeMesh,
-    HalfEdgeVertex, InsetFaceResult, IssueCategory, IssueSeverity, MergeFacesResult,
-    PokeFaceResult, SplitEdgeResult, SplitFaceResult, TerminationReason, TopologyBuilder,
-    TopologyError, TopologyReport, TopologyValidator, ValidationIssue, ValidationReport,
-    VertexHandle,
+    EdgeHandle, EdgeSelectionPath, FaceHandle, HalfEdge, HalfEdgeEdge, HalfEdgeFace,
+    HalfEdgeHandle, HalfEdgeMesh, HalfEdgeVertex, IssueCategory, IssueSeverity, TerminationReason,
+    TopologyBuilder, TopologyError, TopologyReport, TopologyValidator, ValidationIssue,
+    ValidationReport, VertexHandle,
 };
 pub use uv::{
     SmartProjectOptions, box_project_uvs, cylinder_project_uvs, pack_uv_islands, smart_project_uvs,

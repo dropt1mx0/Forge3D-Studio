@@ -34,10 +34,6 @@ pub use face::{Face, HalfEdgeFace};
 pub use half_edge::HalfEdge;
 pub use handles::{EdgeHandle, FaceHandle, HalfEdgeHandle, VertexHandle};
 pub use mesh::HalfEdgeMesh;
-pub use operations::{
-    BevelEdgeResult, CollapseEdgeResult, ExtrudeFaceResult, FlipEdgeResult, InsetFaceResult,
-    MergeFacesResult, PokeFaceResult, SplitEdgeResult, SplitFaceResult,
-};
 pub use selection::{EdgeSelectionPath, TerminationReason};
 pub use validation::{
     IssueCategory, IssueSeverity, TopologyReport, TopologyValidator, ValidationIssue,
