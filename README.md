@@ -47,6 +47,18 @@ cargo test --workspace
 - **Alpha 0.1**: Initial native application, GPU viewport, camera navigation, primitives, selection, transforms, and scene hierarchy.
 - **Alpha 0.2**: Interaction & Workspace UX, automatic gizmo, modal transforms, resizable workspace, expanded primitives.
 
+## Donate
+
+You can support Forge3D directly using one of these wallets. Please use the matching asset and network.
+
+| Asset | Network | Wallet address |
+| --- | --- | --- |
+| ETH | Ethereum | `0x285E817deBfddd18286B1B2ef6bc14fBA0c9E382` |
+| BTC | Bitcoin | `bc1q0muwvll862k4w9eavuu9837wulw5s4xxfmq6fv` |
+| SOL | Solana | `3BuKpWvAosSo61dFJgx1MVmFbNMwTDZStUEJkPseLsPM` |
+| BNB | BNB Smart Chain | `0x285E817deBfddd18286B1B2ef6bc14fBA0c9E382` |
+| TRX | TRON | `TSKSLWq4kWVw4y79ripbYLA4yPrQip2Ggz` |
+
 ---
 
 ## Security
