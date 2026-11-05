@@ -474,4 +474,26 @@
 - **Consequences:**
   Studio provides comprehensive Blender-equivalent modeling, sculpting, search, and layout features, passing 100% of workspace test suite with zero clippy warnings.
 
+## ADR-0027: Clean-Room glTF 2.0 and Binary GLB Asset Pipeline
+- **Status:** Accepted
+- **Date:** 2026-11-05
+- **Context:**
+  Section 22.1 ("Матрица форматов") designates glTF 2.0 / GLB as P0 / High Priority for mesh models, PBR metallic-roughness materials, transforms, and scene interchange. The application required a robust, self-contained, clean-room implementation without heavy C/C++ dependencies or unsafe bindings.
+- **Decision:**
+  1. Implement glTF 2.0 and GLB support in `crates/forge-io/src/gltf/`:
+     - `types.rs`: Complete serde-based data model for glTF 2.0 JSON structures (`asset`, `scenes`, `nodes`, `meshes`, `primitives`, `materials`, `accessors`, `bufferViews`, `buffers`).
+     - `base64.rs`: Standalone clean-room Base64 encoder and decoder for data URI interchange without external crate dependencies.
+     - `importer.rs`: Dual-mode reader parsing self-contained binary GLB containers (magic `0x4654_6C67`, version 2, JSON and BIN chunks) and text glTF files with data URIs or relative external buffers. Reconstructs `Mesh` with positions, normals, UVs, vertex colors, and indices. Maps node hierarchies to local transforms and imports PBR metallic-roughness materials (`baseColorFactor`, `metallicFactor`, `roughnessFactor`, `emissiveFactor`).
+     - `exporter.rs`: Serializes scene geometry and PBR materials into binary `.glb` containers (with 4-byte padding alignments on chunks) or `.gltf` with embedded base64 buffers. Supports whole scene and selected-only exports.
+  2. Integrate into `apps/forge3d-studio`:
+     - Added `import_gltf_from_path` and `export_gltf_to_path` in `app.rs` with atomic Undo/Redo tracking.
+     - Added menu items in `ui/menu_bar.rs` under `File -> Import -> glTF 2.0 / GLB` and `File -> Export -> glTF 2.0 / GLB`.
+     - Added command palette actions in `ui/command_palette.rs`.
+  3. Added comprehensive test coverage:
+     - `crates/forge-io/tests/gltf_tests.rs`: Cube roundtrip, sphere data URI roundtrip, multi-object PBR material preservation, and header error handling.
+     - `apps/forge3d-studio/tests/gltf_studio_integration.rs`: Studio import/export roundtrip, selection sync, and undo/redo.
+- **Consequences:**
+  Forge3D now supports full-cycle industry-standard glTF 2.0 / GLB interchange. Passes 100% of workspace tests and Clippy on Rust 1.99 with `-D warnings`.
+
+
 

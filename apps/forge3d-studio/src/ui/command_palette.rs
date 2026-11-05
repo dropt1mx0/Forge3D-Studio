@@ -595,6 +595,69 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
                 app.status_message = "Added Weighted Normal modifier".to_string();
             }
         }
+        "import_stl" => {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("STL Mesh", &["stl"])
+                .set_title("Import STL Mesh")
+                .pick_file()
+                && let Err(e) = app.import_stl_from_path(&path)
+            {
+                app.status_message = format!("Import error: {e}");
+            }
+        }
+        "export_stl" => {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("STL Mesh", &["stl"])
+                .set_file_name("scene.stl")
+                .set_title("Export STL Mesh")
+                .save_file()
+                && let Err(e) = app.export_stl_to_path(&path, false)
+            {
+                app.status_message = format!("Export error: {e}");
+            }
+        }
+        "import_ply" => {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Stanford PLY", &["ply"])
+                .set_title("Import Stanford PLY")
+                .pick_file()
+                && let Err(e) = app.import_ply_from_path(&path)
+            {
+                app.status_message = format!("Import error: {e}");
+            }
+        }
+        "export_ply" => {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Stanford PLY", &["ply"])
+                .set_file_name("scene.ply")
+                .set_title("Export Stanford PLY")
+                .save_file()
+                && let Err(e) = app.export_ply_to_path(&path, false)
+            {
+                app.status_message = format!("Export error: {e}");
+            }
+        }
+        "import_gltf" => {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("glTF 2.0 / GLB", &["glb", "gltf"])
+                .set_title("Import glTF 2.0 / GLB")
+                .pick_file()
+                && let Err(e) = app.import_gltf_from_path(&path)
+            {
+                app.status_message = format!("Import error: {e}");
+            }
+        }
+        "export_gltf" => {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Binary glTF (GLB)", &["glb"])
+                .set_file_name("scene.glb")
+                .set_title("Export glTF 2.0 (GLB)")
+                .save_file()
+                && let Err(e) = app.export_gltf_to_path(&path, false)
+            {
+                app.status_message = format!("Export error: {e}");
+            }
+        }
         "ws_modeling" => {
             app.set_workspace(WorkspaceMode::Modeling);
         }

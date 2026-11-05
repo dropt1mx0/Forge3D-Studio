@@ -112,6 +112,17 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         app.status_message = format!("Import error: {e}");
                     }
                 }
+                if ui.button("glTF 2.0 / GLB (.glb, .gltf)...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("glTF 2.0 / GLB", &["glb", "gltf"])
+                        .set_title("Import glTF 2.0 / GLB")
+                        .pick_file()
+                        && let Err(e) = app.import_gltf_from_path(&path)
+                    {
+                        app.status_message = format!("Import error: {e}");
+                    }
+                }
             });
 
             ui.menu_button("Export", |ui| {
@@ -185,6 +196,31 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         .set_title("Export Selected to Stanford PLY")
                         .save_file()
                         && let Err(e) = app.export_ply_to_path(&path, true)
+                    {
+                        app.status_message = format!("Export error: {e}");
+                    }
+                }
+                ui.separator();
+                if ui.button("glTF 2.0 / GLB (.glb)...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Binary glTF (GLB)", &["glb"])
+                        .set_file_name("scene.glb")
+                        .set_title("Export glTF 2.0 (GLB)")
+                        .save_file()
+                        && let Err(e) = app.export_gltf_to_path(&path, false)
+                    {
+                        app.status_message = format!("Export error: {e}");
+                    }
+                }
+                if ui.button("glTF 2.0 / GLB (.glb) [Selected]...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Binary glTF (GLB)", &["glb"])
+                        .set_file_name("selected.glb")
+                        .set_title("Export Selected to glTF 2.0 (GLB)")
+                        .save_file()
+                        && let Err(e) = app.export_gltf_to_path(&path, true)
                     {
                         app.status_message = format!("Export error: {e}");
                     }

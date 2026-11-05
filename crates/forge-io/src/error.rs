@@ -51,6 +51,9 @@ pub enum ForgeIoError {
     #[error("Export error: {0}")]
     ExportError(String),
 
+    #[error("JSON serialization/deserialization error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("Core error: {0}")]
     Core(#[from] CoreError),
 }

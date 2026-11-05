@@ -12,6 +12,8 @@ forge-core = { workspace = true }
 forge-math = { workspace = true }
 forge-geometry = { workspace = true }
 forge-scene = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

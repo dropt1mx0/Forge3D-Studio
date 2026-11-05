@@ -1200,6 +1200,126 @@ impl Forge3dStudioApp {
         Ok(())
     }
 
+    pub fn import_gltf_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(), String> {
+        let path_ref = path.as_ref();
+        let options = forge_io::GltfImportOptions::default();
+        let result = match forge_io::import_gltf(path_ref, &options) {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = format!("glTF/GLB Import failed: {e}");
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+        };
+
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("model.glb");
+
+        let total_objs = result.objects.len();
+        let total_mats = result.materials.len();
+
+        if result.objects.is_empty() {
+            let msg = "glTF/GLB Import failed: No objects imported".to_string();
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        // Add materials to scene
+        for mat in result.materials {
+            self.scene.materials.insert(mat.name.clone(), mat);
+        }
+
+        let mut imported_ids = std::collections::HashSet::new();
+        let mut first_id = None;
+
+        for obj in &result.objects {
+            imported_ids.insert(obj.id);
+            if first_id.is_none() {
+                first_id = Some(obj.id);
+            }
+        }
+
+        let history_objects = result.objects.clone();
+        for obj in result.objects {
+            self.scene.add_object(obj);
+        }
+
+        self.history.push(Action::ImportObjects {
+            objects: history_objects,
+        });
+
+        self.selection.selected_ids = imported_ids;
+        self.selection.active_id = first_id;
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_all_meshes();
+        }
+
+        self.status_message = format!(
+            "Imported glTF/GLB {} ({} object{}, {} material{})",
+            file_name,
+            total_objs,
+            if total_objs == 1 { "" } else { "s" },
+            total_mats,
+            if total_mats == 1 { "" } else { "s" },
+        );
+
+        Ok(())
+    }
+
+    pub fn export_gltf_to_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        selected_only: bool,
+    ) -> Result<(), String> {
+        let path_ref = path.as_ref();
+
+        let ext = path_ref
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        let format = if ext == "gltf" {
+            forge_io::GltfExportFormat::GltfEmbedded
+        } else {
+            forge_io::GltfExportFormat::Glb
+        };
+
+        let options = forge_io::GltfExportOptions {
+            format,
+            export_selected_only: selected_only,
+            selected_ids: if selected_only {
+                Some(self.selection.selected_ids.clone())
+            } else {
+                None
+            },
+            include_normals: true,
+            include_uvs: true,
+            include_colors: true,
+            include_materials: true,
+        };
+
+        if let Err(e) = forge_io::export_scene_gltf_to_file(&self.scene, path_ref, &options) {
+            let msg = format!("glTF/GLB Export error: {e}");
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("export.glb");
+
+        self.status_message = format!("Exported glTF/GLB to {file_name}");
+        Ok(())
+    }
+
     pub fn duplicate_selected(&mut self) {
         if let Some(active_id) = self.selection.active_id
             && let Some(new_id) = self.scene.duplicate_object(active_id)

@@ -1,9 +1,15 @@
 pub mod error;
+pub mod gltf;
 pub mod obj;
 pub mod ply;
 pub mod stl;
 
 pub use error::{ForgeIoError, Result};
+pub use gltf::{
+    GltfExportFormat, GltfExportOptions, GltfImportOptions, GltfImportResult, export_mesh_to_glb,
+    export_scene_gltf_to_file, export_scene_to_glb, export_scene_to_gltf_embedded, import_gltf,
+    import_gltf_from_bytes,
+};
 pub use obj::{
     ExportOptions, ImportOptions, ImportedAsset, ImportedObject, ObjDocument, ObjFace,
     ObjFaceVertex, ObjObject, export_mesh_obj, export_mesh_obj_to_string, export_scene_obj,
