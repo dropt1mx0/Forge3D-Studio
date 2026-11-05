@@ -573,6 +573,17 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.dissolve_selected_geometry();
             } else if !input.modifiers.any() && input.key_pressed(Key::P) {
                 app.separate_selected_geometry();
+            } else if !input.modifiers.any() && input.key_pressed(Key::K) {
+                app.knife_connect_selected_geometry();
+            } else if input.modifiers.alt && input.key_pressed(Key::B) {
+                app.bisect_selected_geometry(
+                    forge_math::Vec3::ZERO,
+                    forge_math::Vec3::Y,
+                    true,
+                    true,
+                );
+            } else if input.modifiers.alt && input.key_pressed(Key::S) {
+                app.spin_selected_geometry(12, std::f32::consts::TAU);
             }
         }
 
@@ -586,6 +597,18 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.ctx().request_repaint();
         } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::Y) {
             app.redo();
+            ui.ctx().request_repaint();
+        }
+
+        // Command Palette Shortcut: F3, Ctrl+K, or Space (when not dragging)
+        if input.key_pressed(Key::F3)
+            || ((input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::K))
+            || (!input.modifiers.any()
+                && input.key_pressed(Key::Space)
+                && !app.editor_state.modal_transform.active
+                && app.object_drag_state.is_none())
+        {
+            app.show_command_palette = true;
             ui.ctx().request_repaint();
         }
 
@@ -1552,6 +1575,49 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         }
 
+        // Live Sculpting Interaction
+        if app.editor_state.edit_mode == EditMode::Sculpt
+            && lmb_down
+            && is_pointer_in_viewport
+            && let Some(pos) = mouse_pos
+        {
+            let local_pos = pos - rect.min;
+            let screen_pos = Vec2::new(local_pos.x, local_pos.y);
+            let viewport_size = Vec2::new(rect.width(), rect.height());
+            let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
+
+            if let Some((active_id, edit_mesh)) = &mut app.active_edit_mesh {
+                let temp_mesh = edit_mesh.to_render_mesh();
+                let tf = app.scene.world_transform(*active_id);
+                if let Some(hit_dist) = temp_mesh.raycast(&ray, &tf) {
+                    let hit_world_pt = ray.origin + ray.direction * hit_dist;
+                    let hit_local_pt = tf.inverse().transform_point(hit_world_pt);
+                    let hit_local_norm = -tf
+                        .inverse()
+                        .transform_vector(ray.direction)
+                        .normalize_or_zero();
+                    let ptr_delta = input.pointer.delta();
+                    let stroke_delta = Vec3::new(ptr_delta.x * 0.01, -ptr_delta.y * 0.01, 0.0);
+                    let affected = forge_geometry::apply_sculpt_stroke(
+                        edit_mesh,
+                        hit_local_pt,
+                        hit_local_norm,
+                        stroke_delta,
+                        &app.sculpt_settings,
+                    );
+                    if affected > 0 {
+                        app.sync_edit_mesh_to_scene();
+                        app.status_message = format!(
+                            "Sculpting ({}): {} vertices affected",
+                            app.sculpt_settings.brush.name(),
+                            affected
+                        );
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
+        }
+
         // C. Pointer Release Handling
         if lmb_released {
             match app.editor_state.pointer_state {
@@ -1632,6 +1698,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     let mode_str = match app.editor_state.edit_mode {
         EditMode::Object => "Object Mode".to_string(),
         EditMode::Edit => format!("Edit Mode ({:?})", app.editor_state.selection_element),
+        EditMode::Sculpt => "Sculpt Mode".to_string(),
     };
     let tool_str = format!("{:?}", app.editor_state.transform_mode);
     let proj_str = match app.camera.projection {

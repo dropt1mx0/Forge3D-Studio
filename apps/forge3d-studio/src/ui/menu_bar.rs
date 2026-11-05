@@ -7,6 +7,7 @@ use forge_math::{Transform, Vec3};
 use forge_render::{CameraProjection, ViewPreset};
 use forge_scene::{
     Action, EditMode, ForgeProject, LightData, LightKind, PrimitiveType, Scene, SceneObject,
+    WorkspaceMode,
 };
 
 use crate::app::Forge3dStudioApp;
@@ -249,6 +250,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             let mode_text = match app.editor_state.edit_mode {
                 EditMode::Object => "Switch to Edit Mode (Tab)",
                 EditMode::Edit => "Switch to Object Mode (Tab)",
+                EditMode::Sculpt => "Switch to Object Mode (Tab)",
             };
             if ui.button(mode_text).clicked() {
                 app.toggle_edit_mode();
@@ -724,6 +726,35 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.close();
             }
 
+            if ui.button("Knife Connect (K)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.knife_connect_selected_geometry();
+                ui.close();
+            }
+
+            if ui.button("Bisect (Alt+B)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.bisect_selected_geometry(
+                    forge_math::Vec3::ZERO,
+                    forge_math::Vec3::Y,
+                    true,
+                    true,
+                );
+                ui.close();
+            }
+
+            if ui.button("Spin Revolve (Alt+S)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.spin_selected_geometry(12, std::f32::consts::TAU);
+                ui.close();
+            }
+
             if ui.button("Separate (P)").clicked() {
                 if app.editor_state.edit_mode != EditMode::Edit {
                     app.toggle_edit_mode();
@@ -1074,13 +1105,71 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.add_space(4.0);
 
             // Layout Mode Selector
+            let current_ws = app.editor_state.workspace;
+            let current_label = match current_ws {
+                WorkspaceMode::Modeling => "Layout: Modeling ▾",
+                WorkspaceMode::Sculpting => "Layout: Sculpting ▾",
+                WorkspaceMode::UvEditing => "Layout: UV Editing ▾",
+                WorkspaceMode::Shading => "Layout: Shading ▾",
+                WorkspaceMode::Animation => "Layout: Animation ▾",
+                WorkspaceMode::Rendering => "Layout: Rendering ▾",
+                WorkspaceMode::GeometryNodes => "Layout: Geometry Nodes ▾",
+                WorkspaceMode::Scripting => "Layout: Scripting ▾",
+            };
             egui::ComboBox::from_id_salt("layout_mode_selector")
-                .selected_text("Layout: Model ▾")
+                .selected_text(current_label)
                 .show_ui(ui, |ui| {
-                    let _ = ui.selectable_label(true, "Model");
-                    let _ = ui.selectable_label(false, "Animate");
-                    let _ = ui.selectable_label(false, "Sculpt");
-                    let _ = ui.selectable_label(false, "Render / UV");
+                    if ui
+                        .selectable_label(current_ws == WorkspaceMode::Modeling, "Modeling")
+                        .clicked()
+                    {
+                        app.set_workspace(WorkspaceMode::Modeling);
+                    }
+                    if ui
+                        .selectable_label(current_ws == WorkspaceMode::Sculpting, "Sculpting")
+                        .clicked()
+                    {
+                        app.set_workspace(WorkspaceMode::Sculpting);
+                    }
+                    if ui
+                        .selectable_label(current_ws == WorkspaceMode::UvEditing, "UV Editing")
+                        .clicked()
+                    {
+                        app.set_workspace(WorkspaceMode::UvEditing);
+                    }
+                    if ui
+                        .selectable_label(current_ws == WorkspaceMode::Shading, "Shading")
+                        .clicked()
+                    {
+                        app.set_workspace(WorkspaceMode::Shading);
+                    }
+                    if ui
+                        .selectable_label(current_ws == WorkspaceMode::Animation, "Animation")
+                        .clicked()
+                    {
+                        app.set_workspace(WorkspaceMode::Animation);
+                    }
+                    if ui
+                        .selectable_label(current_ws == WorkspaceMode::Rendering, "Rendering")
+                        .clicked()
+                    {
+                        app.set_workspace(WorkspaceMode::Rendering);
+                    }
+                    if ui
+                        .selectable_label(
+                            current_ws == WorkspaceMode::GeometryNodes,
+                            "Geometry Nodes",
+                        )
+                        .clicked()
+                    {
+                        app.set_workspace(WorkspaceMode::GeometryNodes);
+                    }
+                    if ui
+                        .selectable_label(current_ws == WorkspaceMode::Scripting, "Scripting")
+                        .clicked()
+                    {
+                        app.set_workspace(WorkspaceMode::Scripting);
+                    }
                 });
 
             // Draggable window title space in the center

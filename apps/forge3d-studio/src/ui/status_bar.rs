@@ -9,6 +9,7 @@ pub fn render_status_bar(app: &Forge3dStudioApp, ui: &mut Ui) {
         let mode_tag = match app.editor_state.edit_mode {
             EditMode::Object => "[Object Mode]".to_string(),
             EditMode::Edit => format!("[Edit Mode: {:?}]", app.editor_state.selection_element),
+            EditMode::Sculpt => "[Sculpt Mode]".to_string(),
         };
         ui.label(egui::RichText::new(mode_tag).strong());
         ui.label(&app.status_message);

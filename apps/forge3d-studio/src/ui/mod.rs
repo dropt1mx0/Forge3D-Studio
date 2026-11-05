@@ -1,3 +1,4 @@
+pub mod command_palette;
 pub mod gizmo;
 pub mod menu_bar;
 pub mod outliner;

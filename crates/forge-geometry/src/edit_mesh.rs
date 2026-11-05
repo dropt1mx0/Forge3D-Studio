@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use forge_math::{Vec2, Vec3};
+use forge_math::{Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::mesh::Mesh;
@@ -1302,6 +1302,349 @@ impl EditableMesh {
 
         self.recalculate_normals();
     }
+
+    /// Cuts mesh with a 3D plane defined by a point and normal.
+    /// If `clear_outer` is true, geometry on the positive half-space (dot > 0) is discarded.
+    /// If `fill_cut` is true, a face capping the cut boundary loop on the plane is generated.
+    pub fn bisect(
+        &mut self,
+        plane_point: Vec3,
+        plane_normal: Vec3,
+        clear_outer: bool,
+        fill_cut: bool,
+    ) -> Result<usize, String> {
+        let norm = plane_normal.normalize_or_zero();
+        if norm.length_squared() < 1e-6 {
+            return Err("Plane normal cannot be zero".to_string());
+        }
+
+        // Signed distances from plane for all vertices
+        let dists: Vec<f32> = self
+            .vertices
+            .iter()
+            .map(|v| (v.position - plane_point).dot(norm))
+            .collect();
+
+        // Edge split map: (min(v0, v1), max(v0, v1)) -> new_vertex_index
+        let mut edge_splits: HashMap<(usize, usize), usize> = HashMap::new();
+
+        // Find intersecting edges and create cut vertices
+        for edge in &self.edges {
+            let d0 = dists[edge.v0];
+            let d1 = dists[edge.v1];
+            if (d0 > 1e-5 && d1 < -1e-5) || (d0 < -1e-5 && d1 > 1e-5) {
+                let t = d0 / (d0 - d1);
+                let p0 = self.vertices[edge.v0].position;
+                let p1 = self.vertices[edge.v1].position;
+                let n0 = self.vertices[edge.v0].normal;
+                let n1 = self.vertices[edge.v1].normal;
+                let uv0 = self.vertices[edge.v0].uv;
+                let uv1 = self.vertices[edge.v1].uv;
+
+                let new_pos = p0.lerp(p1, t);
+                let new_norm = n0.lerp(n1, t).normalize_or_zero();
+                let new_uv = uv0.lerp(uv1, t);
+
+                let new_idx = self.vertices.len();
+                self.vertices
+                    .push(EditVertex::new(new_pos, new_norm, new_uv));
+                edge_splits.insert((edge.v0.min(edge.v1), edge.v0.max(edge.v1)), new_idx);
+            }
+        }
+
+        let mut new_faces = Vec::new();
+        let mut cut_plane_edges = Vec::new();
+
+        for face in &self.faces {
+            let n = face.vertices.len();
+            let mut has_pos = false;
+            let mut has_neg = false;
+            for &v in &face.vertices {
+                if dists[v] > 1e-5 {
+                    has_pos = true;
+                } else if dists[v] < -1e-5 {
+                    has_neg = true;
+                }
+            }
+
+            if !has_pos {
+                new_faces.push(face.clone());
+            } else if !has_neg {
+                if !clear_outer {
+                    new_faces.push(face.clone());
+                }
+            } else {
+                let mut inner_poly = Vec::new();
+                let mut outer_poly = Vec::new();
+                let mut cut_verts = Vec::new();
+
+                for i in 0..n {
+                    let curr = face.vertices[i];
+                    let next = face.vertices[(i + 1) % n];
+                    let curr_d = dists[curr];
+
+                    if curr_d <= 1e-5 {
+                        inner_poly.push(curr);
+                    }
+                    if curr_d >= -1e-5 {
+                        outer_poly.push(curr);
+                    }
+
+                    let edge_key = (curr.min(next), curr.max(next));
+                    if let Some(&cut_idx) = edge_splits.get(&edge_key) {
+                        inner_poly.push(cut_idx);
+                        outer_poly.push(cut_idx);
+                        cut_verts.push(cut_idx);
+                    }
+                }
+
+                if cut_verts.len() >= 2 {
+                    cut_plane_edges.push((cut_verts[0], cut_verts[1]));
+                }
+
+                if inner_poly.len() >= 3 {
+                    new_faces.push(EditFace::new(inner_poly, face.normal));
+                }
+                if !clear_outer && outer_poly.len() >= 3 {
+                    new_faces.push(EditFace::new(outer_poly, face.normal));
+                }
+            }
+        }
+
+        self.faces = new_faces;
+
+        if fill_cut && !cut_plane_edges.is_empty() {
+            let mut unique_cut_verts = Vec::new();
+            for (v0, v1) in &cut_plane_edges {
+                if !unique_cut_verts.contains(v0) {
+                    unique_cut_verts.push(*v0);
+                }
+                if !unique_cut_verts.contains(v1) {
+                    unique_cut_verts.push(*v1);
+                }
+            }
+
+            if unique_cut_verts.len() >= 3 {
+                let mut centroid = Vec3::ZERO;
+                for &v in &unique_cut_verts {
+                    centroid += self.vertices[v].position;
+                }
+                centroid /= unique_cut_verts.len() as f32;
+
+                let up = if norm.y.abs() < 0.9 { Vec3::Y } else { Vec3::Z };
+                let tangent = norm.cross(up).normalize();
+                let bitangent = norm.cross(tangent).normalize();
+
+                unique_cut_verts.sort_by(|&a, &b| {
+                    let da = self.vertices[a].position - centroid;
+                    let db = self.vertices[b].position - centroid;
+                    let angle_a = da.dot(bitangent).atan2(da.dot(tangent));
+                    let angle_b = db.dot(bitangent).atan2(db.dot(tangent));
+                    angle_a
+                        .partial_cmp(&angle_b)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                self.faces.push(EditFace::new(unique_cut_verts, norm));
+            }
+        }
+
+        if clear_outer {
+            self.prune_unreferenced_vertices();
+        } else {
+            self.rebuild_edges();
+        }
+        self.recalculate_normals();
+        Ok(self.faces.len())
+    }
+
+    /// Prunes vertices that are not referenced by any face and remaps face indices.
+    pub fn prune_unreferenced_vertices(&mut self) {
+        let mut used = vec![false; self.vertices.len()];
+        for f in &self.faces {
+            for &v in &f.vertices {
+                if v < used.len() {
+                    used[v] = true;
+                }
+            }
+        }
+
+        let mut old_to_new = vec![None; self.vertices.len()];
+        let mut new_vertices = Vec::new();
+
+        for (old_idx, &is_used) in used.iter().enumerate() {
+            if is_used {
+                old_to_new[old_idx] = Some(new_vertices.len());
+                new_vertices.push(self.vertices[old_idx].clone());
+            }
+        }
+
+        for f in &mut self.faces {
+            f.vertices = f.vertices.iter().filter_map(|&v| old_to_new[v]).collect();
+        }
+
+        self.vertices = new_vertices;
+        self.rebuild_edges();
+    }
+
+    /// Knife connect: connects two vertices across a common face, splitting the face into two faces.
+    pub fn knife_connect_vertices(
+        &mut self,
+        v_start: usize,
+        v_end: usize,
+    ) -> Result<usize, String> {
+        if v_start == v_end || v_start >= self.vertices.len() || v_end >= self.vertices.len() {
+            return Err("Invalid vertex indices for knife connect".to_string());
+        }
+
+        let target_face_idx = self
+            .faces
+            .iter()
+            .position(|f| f.vertices.contains(&v_start) && f.vertices.contains(&v_end));
+
+        let face_idx = match target_face_idx {
+            Some(idx) => idx,
+            None => return Err("Selected vertices do not share a face".to_string()),
+        };
+
+        let face = &self.faces[face_idx];
+        let n = face.vertices.len();
+        if n < 4 {
+            return Err("Face must have at least 4 vertices to be split".to_string());
+        }
+
+        let pos_start = face.vertices.iter().position(|&v| v == v_start).unwrap();
+        let pos_end = face.vertices.iter().position(|&v| v == v_end).unwrap();
+
+        let diff = (pos_start as isize - pos_end as isize).abs();
+        if diff == 1 || diff == (n as isize - 1) {
+            return Err("Vertices are already connected by an edge".to_string());
+        }
+
+        let (first_pos, second_pos) = if pos_start < pos_end {
+            (pos_start, pos_end)
+        } else {
+            (pos_end, pos_start)
+        };
+
+        let mut face1_verts = Vec::new();
+        for i in first_pos..=second_pos {
+            face1_verts.push(face.vertices[i]);
+        }
+
+        let mut face2_verts = Vec::new();
+        for i in second_pos..n {
+            face2_verts.push(face.vertices[i]);
+        }
+        for i in 0..=first_pos {
+            face2_verts.push(face.vertices[i]);
+        }
+
+        let face_normal = face.normal;
+        self.faces[face_idx] = EditFace::new(face1_verts, face_normal);
+        self.faces.push(EditFace::new(face2_verts, face_normal));
+
+        self.rebuild_edges();
+        self.recalculate_normals();
+        Ok(face_idx)
+    }
+
+    /// Spin / Lathe / Screw tool: revolves selected vertices or edges around an axis through center.
+    /// Returns the indices of the created faces.
+    pub fn spin_selected(
+        &mut self,
+        axis: Vec3,
+        center: Vec3,
+        angle_radians: f32,
+        steps: usize,
+        screw_pitch: f32,
+    ) -> Result<Vec<usize>, String> {
+        let norm_axis = axis.normalize_or_zero();
+        if norm_axis.length_squared() < 1e-6 {
+            return Err("Spin axis cannot be zero".to_string());
+        }
+        if steps == 0 {
+            return Err("Spin steps must be at least 1".to_string());
+        }
+
+        let selected_vert_indices: Vec<usize> = self
+            .vertices
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.selected)
+            .map(|(i, _)| i)
+            .collect();
+
+        if selected_vert_indices.is_empty() {
+            return Err("No vertices selected for spin".to_string());
+        }
+
+        let selected_edges: Vec<EditEdge> = self
+            .edges
+            .iter()
+            .filter(|e| {
+                e.selected || (self.vertices[e.v0].selected && self.vertices[e.v1].selected)
+            })
+            .copied()
+            .collect();
+
+        let mut step_vert_map: Vec<HashMap<usize, usize>> = Vec::with_capacity(steps + 1);
+        let mut initial_map = HashMap::new();
+        for &v in &selected_vert_indices {
+            initial_map.insert(v, v);
+        }
+        step_vert_map.push(initial_map);
+
+        let step_angle = angle_radians / steps as f32;
+        let step_offset = norm_axis * (screw_pitch / steps as f32);
+
+        for s in 1..=steps {
+            let mut curr_map = HashMap::new();
+            let is_closed = (angle_radians.abs() - std::f32::consts::TAU).abs() < 1e-4
+                && screw_pitch.abs() < 1e-4
+                && s == steps;
+
+            if is_closed {
+                for &v in &selected_vert_indices {
+                    curr_map.insert(v, v);
+                }
+            } else {
+                let rot = Quat::from_axis_angle(norm_axis, step_angle * s as f32);
+                for &v in &selected_vert_indices {
+                    let rel_pos = self.vertices[v].position - center;
+                    let spun_pos = center + rot * rel_pos + step_offset * s as f32;
+                    let spun_norm = rot * self.vertices[v].normal;
+                    let uv = self.vertices[v].uv + Vec2::new(s as f32 / steps as f32, 0.0);
+                    let new_idx = self.vertices.len();
+                    self.vertices.push(EditVertex::new(spun_pos, spun_norm, uv));
+                    curr_map.insert(v, new_idx);
+                }
+            }
+            step_vert_map.push(curr_map);
+        }
+
+        let mut created_face_indices = Vec::new();
+
+        for s in 0..steps {
+            let m0 = &step_vert_map[s];
+            let m1 = &step_vert_map[s + 1];
+
+            for e in &selected_edges {
+                if let (Some(&v0_curr), Some(&v1_curr), Some(&v0_next), Some(&v1_next)) =
+                    (m0.get(&e.v0), m0.get(&e.v1), m1.get(&e.v0), m1.get(&e.v1))
+                {
+                    let face_verts = vec![v0_curr, v1_curr, v1_next, v0_next];
+                    let face_idx = self.faces.len();
+                    self.faces.push(EditFace::new(face_verts, Vec3::Y));
+                    created_face_indices.push(face_idx);
+                }
+            }
+        }
+
+        self.rebuild_edges();
+        self.recalculate_normals();
+        Ok(created_face_indices)
+    }
 }
 
 /// Falloff curve type for proportional editing.
@@ -1546,5 +1889,71 @@ mod tests {
         // Both selected and nearby vertices should have moved along Y
         assert!(edit_mesh.vertices[0].position.y > p0_initial.y);
         assert!(edit_mesh.vertices[1].position.y > p1_initial.y);
+    }
+
+    #[test]
+    fn test_bisect_cube() {
+        let cube_mesh = generate_cube(2.0);
+        let mut edit_mesh = EditableMesh::from_mesh(&cube_mesh);
+        edit_mesh.weld_colocated_vertices(1e-4);
+
+        // Bisect along Y = 0 plane, clearing positive half space and filling cut cap
+        let res = edit_mesh.bisect(Vec3::ZERO, Vec3::Y, true, true);
+        assert!(res.is_ok(), "Bisect should succeed: {:?}", res);
+
+        // All remaining vertices must be at Y <= 1e-4
+        for v in &edit_mesh.vertices {
+            assert!(
+                v.position.y <= 1e-4,
+                "Vertex at Y = {} should have been sliced or kept on negative side",
+                v.position.y
+            );
+        }
+    }
+
+    #[test]
+    fn test_knife_connect_vertices() {
+        let cube_mesh = generate_cube(2.0);
+        let mut edit_mesh = EditableMesh::from_mesh(&cube_mesh);
+        edit_mesh.weld_colocated_vertices(1e-4);
+        edit_mesh.tris_to_quads();
+
+        let initial_faces = edit_mesh.faces.len();
+        // Quad face 0 has 4 vertices: v0, v1, v2, v3
+        let v0 = edit_mesh.faces[0].vertices[0];
+        let v2 = edit_mesh.faces[0].vertices[2];
+
+        let res = edit_mesh.knife_connect_vertices(v0, v2);
+        assert!(res.is_ok(), "Knife connect should succeed: {:?}", res);
+        assert_eq!(edit_mesh.faces.len(), initial_faces + 1);
+    }
+
+    #[test]
+    fn test_spin_selected() {
+        let mut edit_mesh = EditableMesh::new();
+        // Create a single vertical edge segment
+        let v0 = edit_mesh.vertices.len();
+        edit_mesh.vertices.push(EditVertex::new(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::X,
+            Vec2::ZERO,
+        ));
+        let v1 = edit_mesh.vertices.len();
+        edit_mesh.vertices.push(EditVertex::new(
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::X,
+            Vec2::new(0.0, 1.0),
+        ));
+        edit_mesh.edges.push(EditEdge::new(v0, v1));
+
+        // Select all vertices
+        edit_mesh.vertices[v0].selected = true;
+        edit_mesh.vertices[v1].selected = true;
+
+        // Revolve 360 degrees around Y axis in 8 steps
+        let res = edit_mesh.spin_selected(Vec3::Y, Vec3::ZERO, std::f32::consts::TAU, 8, 0.0);
+        assert!(res.is_ok(), "Spin should succeed: {:?}", res);
+        let created_faces = res.unwrap();
+        assert_eq!(created_faces.len(), 8);
     }
 }

@@ -76,12 +76,17 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.vertical(|ui| {
                 // --- 0. Top Controls (Mode Toggle & Display Mode) ---
                 let mode_is_edit = app.editor_state.edit_mode == EditMode::Edit;
-                let mode_btn_label = if mode_is_edit {
-                    "Edit Mode"
-                } else {
-                    "Object Mode"
+                let mode_is_sculpt = app.editor_state.edit_mode == EditMode::Sculpt;
+                let mode_btn_label = match app.editor_state.edit_mode {
+                    EditMode::Object => "Object Mode",
+                    EditMode::Edit => "Edit Mode",
+                    EditMode::Sculpt => "Sculpt Mode",
                 };
-                let mode_btn_icon = if mode_is_edit { "Edit" } else { "Obj" };
+                let mode_btn_icon = match app.editor_state.edit_mode {
+                    EditMode::Object => "Obj",
+                    EditMode::Edit => "Edit",
+                    EditMode::Sculpt => "Sclp",
+                };
 
                 let mode_btn = egui::Button::new(
                     egui::RichText::new(match display_mode {
@@ -90,20 +95,26 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     })
                     .strong()
                     .size(11.5)
-                    .color(if mode_is_edit {
+                    .color(if mode_is_sculpt {
+                        egui::Color32::from_rgb(147, 197, 253)
+                    } else if mode_is_edit {
                         egui::Color32::from_rgb(255, 175, 50)
                     } else {
                         egui::Color32::from_rgb(205, 215, 235)
                     }),
                 )
-                .fill(if mode_is_edit {
+                .fill(if mode_is_sculpt {
+                    egui::Color32::from_rgb(30, 45, 65)
+                } else if mode_is_edit {
                     egui::Color32::from_rgb(45, 35, 20)
                 } else {
                     egui::Color32::from_rgb(26, 28, 36)
                 })
                 .stroke(egui::Stroke::new(
                     1.0,
-                    if mode_is_edit {
+                    if mode_is_sculpt {
+                        egui::Color32::from_rgb(59, 130, 246)
+                    } else if mode_is_edit {
                         egui::Color32::from_rgb(240, 144, 32)
                     } else {
                         egui::Color32::from_rgb(45, 50, 65)
@@ -113,10 +124,17 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                 if ui
                     .add_sized([ui.available_width().max(32.0), 24.0], mode_btn)
-                    .on_hover_text("Toggle Object Mode / Edit Mode (Tab)")
+                    .on_hover_text("Toggle Object / Edit / Sculpt Mode")
                     .clicked()
                 {
-                    app.toggle_edit_mode();
+                    match app.editor_state.edit_mode {
+                        EditMode::Object => app.toggle_edit_mode(),
+                        EditMode::Edit => {
+                            app.editor_state.edit_mode = EditMode::Sculpt;
+                            app.status_message = "Sculpt Mode".to_string();
+                        }
+                        EditMode::Sculpt => app.toggle_edit_mode(),
+                    }
                 }
 
                 ui.add_space(2.0);
@@ -271,6 +289,84 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                     if tool_button(ui, false, "Sep", "Separate", "P", display_mode).clicked() {
                         app.separate_selected_geometry();
+                    }
+
+                    if tool_button(ui, false, "Knf", "Knife", "K", display_mode).clicked() {
+                        app.knife_connect_selected_geometry();
+                    }
+
+                    if tool_button(ui, false, "Bsc", "Bisect", "Alt+B", display_mode).clicked() {
+                        app.bisect_selected_geometry(
+                            forge_math::Vec3::ZERO,
+                            forge_math::Vec3::Y,
+                            true,
+                            true,
+                        );
+                    }
+
+                    if tool_button(ui, false, "Spn", "Spin", "Alt+S", display_mode).clicked() {
+                        app.spin_selected_geometry(12, std::f32::consts::TAU);
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+                }
+
+                // --- 3b. Sculpting Mode Tools & Brushes ---
+                if app.editor_state.edit_mode == EditMode::Sculpt {
+                    if display_mode == ToolbarDisplayMode::IconAndLabel {
+                        ui.label(egui::RichText::new("Sculpt Brushes").weak().size(11.0));
+                    }
+
+                    for brush in [
+                        forge_geometry::SculptBrush::Draw,
+                        forge_geometry::SculptBrush::Clay,
+                        forge_geometry::SculptBrush::Smooth,
+                        forge_geometry::SculptBrush::Flatten,
+                        forge_geometry::SculptBrush::Inflate,
+                        forge_geometry::SculptBrush::Deflate,
+                        forge_geometry::SculptBrush::Grab,
+                        forge_geometry::SculptBrush::Pinch,
+                        forge_geometry::SculptBrush::Crease,
+                    ] {
+                        let is_active = app.sculpt_settings.brush == brush;
+                        let icon = match brush {
+                            forge_geometry::SculptBrush::Draw => "Drw",
+                            forge_geometry::SculptBrush::Clay => "Cly",
+                            forge_geometry::SculptBrush::Smooth => "Smth",
+                            forge_geometry::SculptBrush::Flatten => "Flt",
+                            forge_geometry::SculptBrush::Inflate => "Inf",
+                            forge_geometry::SculptBrush::Deflate => "Def",
+                            forge_geometry::SculptBrush::Grab => "Grb",
+                            forge_geometry::SculptBrush::Pinch => "Pnch",
+                            forge_geometry::SculptBrush::Crease => "Crs",
+                        };
+                        if tool_button(ui, is_active, icon, brush.name(), "", display_mode)
+                            .clicked()
+                        {
+                            app.sculpt_settings.brush = brush;
+                        }
+                    }
+
+                    ui.add_space(4.0);
+                    ui.separator();
+
+                    if display_mode == ToolbarDisplayMode::IconAndLabel {
+                        ui.horizontal(|ui| {
+                            ui.label("Radius:");
+                            ui.add(egui::Slider::new(
+                                &mut app.sculpt_settings.radius,
+                                0.05..=2.0,
+                            ));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Str:");
+                            ui.add(egui::Slider::new(
+                                &mut app.sculpt_settings.strength,
+                                0.01..=1.0,
+                            ));
+                        });
+                        ui.checkbox(&mut app.sculpt_settings.symmetry_x, "Symm X");
                     }
 
                     ui.add_space(4.0);

@@ -937,7 +937,7 @@ impl GpuPickingContext {
                         }
                     }
                 }
-                EditMode::Edit => {
+                EditMode::Edit | EditMode::Sculpt => {
                     // 1. Render all solid scene meshes first to populate the depth buffer and provide occlusion
                     pass.set_pipeline(&self.pipelines.mesh_pipeline);
                     self.mesh_cache

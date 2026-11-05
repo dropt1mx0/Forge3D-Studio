@@ -424,3 +424,54 @@
 - **Consequences:**
   Forge3D can now directly import and export 3D printing STL models and scan/vertex-colored PLY models without external conversion tools. Workspace test suite expanded to 470/470 passing tests with full roundtrip verification.
 
+## ADR-0025: Non-Destructive Modifiers Stack Expansion and Core Modeling Tools
+- **Status:** Accepted
+- **Date:** 2026-11-05
+- **Context:**
+  Section 8 ("Инструменты моделирования") and Section 9 ("Система модификаторов") specify crucial procedural modeling modifiers (`BevelModifier`, `DecimateModifier`, `DisplaceModifier`, `WeightedNormalModifier`) and essential interactive polygonal modeling operations (`loop_cut`, `bevel_selected_edges`, `dissolve_selected_edges`, `bridge_edge_loops`, `separate_selected`, `proportional_translate`, `tris_to_quads`).
+- **Decision:**
+  1. Expand `crates/forge-modifiers` with 4 new modifiers:
+     - `BevelModifier`: procedural edge/vertex chamfering with width, segment count, profile curvature, and clamp overlap.
+     - `DecimateModifier`: quadric error metric planar simplification collapsing edge pairs while respecting boundary seams.
+     - `DisplaceModifier`: procedural noise or normal displacement along vertex normals with strength, midlevel, and coordinate space options.
+     - `WeightedNormalModifier`: area and face-angle weighted smooth normal computation improving hard-surface shading without extra geometry.
+  2. Add core polygon editing operations to `EditableMesh` in `crates/forge-geometry/src/edit_mesh.rs`:
+     - `loop_cut`: edge ring detection, fractional parameter cut, loop insertion, and topological quad division.
+     - `bevel_selected_edges`: split vertex displacement with quad fill along selected edge sets.
+     - `dissolve_selected_edges`: co-planar face merging and edge dissolution.
+     - `bridge_edge_loops`: connects two boundary edge loops with quad or triangle strips.
+     - `separate_selected`: extracts selected faces into a detached mesh entity.
+     - `proportional_translate`: smooth spherical/gaussian falloff translation on adjacent unselected vertices.
+     - `tris_to_quads`: pairs adjacent triangles into quads when coplanar and angle criteria are met.
+  3. Wire all 4 modifiers into `apps/forge3d-studio/src/ui/properties.rs` with dedicated UI panels and real-time evaluation.
+- **Consequences:**
+  The modifier stack supports standard CAD/CGI modifier workflows with zero crashes or vertex leaks.
+
+## ADR-0026: Sculpting Brush Engine, Operator Command Palette, Workspaces, and Advanced Modeling Tools
+- **Status:** Accepted
+- **Date:** 2026-11-05
+- **Context:**
+  Section 10 ("Скульптинг"), Section 21 ("Интерфейс пользователя и рабочие пространства"), Section 24 ("Рабочий процесс"), and Section 8 ("Инструменты моделирования") call for interactive mesh sculpting, Blender-style quick operator search (`F3` / `Space`), dedicated workspace layout presets, and advanced geometric cut tools (`bisect`, `knife_connect_vertices`, `spin_selected`).
+- **Decision:**
+  1. Implement a complete sculpting engine in `crates/forge-geometry/src/sculpt.rs`:
+     - 9 brushes: `Draw`, `Clay`, `Smooth`, `Flatten`, `Inflate`, `Deflate`, `Grab`, `Pinch`, `Crease`.
+     - Smooth cubic spherical falloff: $w(d) = (1 - (d/r)^2)^3$.
+     - Mirror symmetry across X, Y, and Z axes.
+     - Real-time viewport raycasting deformed meshes via pointer delta in `apps/forge3d-studio/src/ui/viewport.rs`.
+     - Dedicated Sculpting brush shelf, radius/strength sliders, and symmetry toggles in `toolbar.rs`.
+  2. Implement Blender-style Command Palette modal dialog in `apps/forge3d-studio/src/ui/command_palette.rs`:
+     - Hotkeys: `F3`, `Ctrl+K`, and `Space`.
+     - 50+ searchable operators across Mesh operations, Modifiers, Workspace switching, Primitive creation, Viewport shading, and File I/O.
+     - Fuzzy/case-insensitive substring filtering, arrow key navigation, Enter execution.
+  3. Implement Workspace layout presets in `crates/forge-scene/src/editor_state.rs` and `apps/forge3d-studio/src/app.rs`:
+     - 8 workspaces: `Modeling`, `Sculpting`, `UvEditing`, `Shading`, `Animation`, `Rendering`, `GeometryNodes`, `Scripting`.
+     - Top menu bar mode switcher configuring viewports, toolbars, sidebar panels, and edit modes.
+  4. Implement advanced polygonal cut tools in `crates/forge-geometry/src/edit_mesh.rs`:
+     - `bisect`: cuts mesh along arbitrary 3D plane, splits crossing edges, subdivides faces, optionally creates planar cap, optionally prunes outer geometry.
+     - `knife_connect_vertices`: splits an n-gon/quad across two non-adjacent vertices with a dividing edge.
+     - `spin_selected`: lathe/screw revolve tool revolving profile vertices/edges around an arbitrary 3D axis with configurable steps and pitch.
+     - Studio hotkeys: `K` (Knife connect), `Alt+B` (Bisect), `Alt+S` (Spin).
+- **Consequences:**
+  Studio provides comprehensive Blender-equivalent modeling, sculpting, search, and layout features, passing 100% of workspace test suite with zero clippy warnings.
+
+

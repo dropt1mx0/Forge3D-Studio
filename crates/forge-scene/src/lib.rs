@@ -16,7 +16,7 @@ pub mod serialization;
 pub use editor_state::{
     AxisConstraint, EditMode, EditorState, GizmoMode, ModalTransformState, PanelSettings,
     PivotPoint, PointerInteractionState, SelectionElement, SnapSettings, ToolbarDisplayMode,
-    TransformMode, TransformOrientation,
+    TransformMode, TransformOrientation, WorkspaceMode,
 };
 pub use history::{Action, HistoryStack};
 pub use material::{LightData, LightKind, PbrMaterial, PbrTextureSet, WorldLighting};

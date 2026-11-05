@@ -53,6 +53,10 @@ pub struct Forge3dStudioApp {
     pub show_about_dialog: bool,
     pub show_gpu_dialog: bool,
     pub show_material_editor: bool,
+    pub show_command_palette: bool,
+    pub command_palette_query: String,
+    pub command_palette_selected_index: usize,
+    pub sculpt_settings: forge_geometry::SculptSettings,
 
     // Undo / Redo Command History
     pub history: HistoryStack,
@@ -214,6 +218,10 @@ impl Forge3dStudioApp {
             show_about_dialog: false,
             show_gpu_dialog: false,
             show_material_editor: false,
+            show_command_palette: false,
+            command_palette_query: String::new(),
+            command_palette_selected_index: 0,
+            sculpt_settings: forge_geometry::SculptSettings::default(),
             history: HistoryStack::new(),
             gizmo_state: GizmoState::new(),
             active_edit_mesh: None,
@@ -254,6 +262,10 @@ impl Forge3dStudioApp {
             show_about_dialog: false,
             show_gpu_dialog: false,
             show_material_editor: false,
+            show_command_palette: false,
+            command_palette_query: String::new(),
+            command_palette_selected_index: 0,
+            sculpt_settings: forge_geometry::SculptSettings::default(),
             history: HistoryStack::new(),
             gizmo_state: GizmoState::new(),
             active_edit_mesh: None,
@@ -294,7 +306,7 @@ impl Forge3dStudioApp {
                     self.status_message = "Select an object to enter Edit Mode.".to_string();
                 }
             }
-            EditMode::Edit => {
+            EditMode::Edit | EditMode::Sculpt => {
                 self.commit_edit_mesh_to_scene();
                 self.active_edit_mesh = None;
                 self.edit_overlay_cache.clear();
@@ -302,6 +314,73 @@ impl Forge3dStudioApp {
                 self.status_message = "Object Mode".to_string();
             }
         }
+    }
+
+    pub fn set_workspace(&mut self, workspace: forge_scene::WorkspaceMode) {
+        self.editor_state.workspace = workspace;
+        match workspace {
+            forge_scene::WorkspaceMode::Modeling => {
+                self.editor_state.panel_settings.toolbar_visible = true;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = false;
+                self.show_material_editor = false;
+                if self.editor_state.edit_mode == EditMode::Sculpt {
+                    self.editor_state.edit_mode = EditMode::Object;
+                }
+            }
+            forge_scene::WorkspaceMode::Sculpting => {
+                self.editor_state.panel_settings.toolbar_visible = true;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = false;
+                self.show_material_editor = false;
+                if self.editor_state.edit_mode != EditMode::Sculpt {
+                    if let Some(active_id) = self.selection.active_id
+                        && let Some(obj) = self.scene.get_object(active_id)
+                    {
+                        let edit_mesh = EditableMesh::from_mesh(&obj.mesh);
+                        self.active_edit_mesh = Some((active_id, edit_mesh));
+                    }
+                    self.editor_state.edit_mode = EditMode::Sculpt;
+                }
+            }
+            forge_scene::WorkspaceMode::UvEditing => {
+                self.editor_state.panel_settings.toolbar_visible = true;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = false;
+                self.show_material_editor = false;
+            }
+            forge_scene::WorkspaceMode::Shading => {
+                self.editor_state.panel_settings.toolbar_visible = true;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = false;
+                self.show_material_editor = true;
+            }
+            forge_scene::WorkspaceMode::Animation => {
+                self.editor_state.panel_settings.toolbar_visible = true;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = true;
+                self.show_material_editor = false;
+            }
+            forge_scene::WorkspaceMode::Rendering => {
+                self.editor_state.panel_settings.toolbar_visible = false;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = false;
+                self.show_material_editor = true;
+            }
+            forge_scene::WorkspaceMode::GeometryNodes => {
+                self.editor_state.panel_settings.toolbar_visible = true;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = false;
+                self.show_material_editor = false;
+            }
+            forge_scene::WorkspaceMode::Scripting => {
+                self.editor_state.panel_settings.toolbar_visible = false;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = true;
+                self.show_material_editor = false;
+            }
+        }
+        self.status_message = format!("Switched to {:?} Workspace", workspace);
     }
 
     /// Commits changes in `active_edit_mesh` back to the scene object and marks scene dirty.
@@ -482,6 +561,165 @@ impl Forge3dStudioApp {
         }
     }
 
+    pub fn add_primitive(&mut self, prim: PrimitiveType) {
+        let cursor = self.editor_state.cursor_3d;
+        let (name, color, mesh, tf) = match prim {
+            PrimitiveType::Cube => (
+                "Cube",
+                [0.85, 0.45, 0.25, 1.0],
+                forge_geometry::primitives::generate_cube(1.0),
+                Transform::from_translation(cursor + Vec3::new(0.0, 0.5, 0.0)),
+            ),
+            PrimitiveType::Sphere => (
+                "UV Sphere",
+                [0.25, 0.65, 0.85, 1.0],
+                forge_geometry::primitives::generate_uv_sphere(0.75, 32, 16),
+                Transform::from_translation(cursor + Vec3::new(0.0, 0.75, 0.0)),
+            ),
+            PrimitiveType::Icosphere => (
+                "Icosphere",
+                [0.45, 0.75, 0.45, 1.0],
+                forge_geometry::primitives::generate_icosphere(0.75, 2),
+                Transform::from_translation(cursor + Vec3::new(0.0, 0.75, 0.0)),
+            ),
+            PrimitiveType::Cylinder => (
+                "Cylinder",
+                [0.85, 0.75, 0.25, 1.0],
+                forge_geometry::primitives::generate_cylinder(0.5, 1.5, 32),
+                Transform::from_translation(cursor + Vec3::new(0.0, 0.75, 0.0)),
+            ),
+            PrimitiveType::Cone => (
+                "Cone",
+                [0.75, 0.35, 0.65, 1.0],
+                forge_geometry::primitives::generate_cone(0.75, 1.5, 32),
+                Transform::from_translation(cursor + Vec3::new(0.0, 0.75, 0.0)),
+            ),
+            PrimitiveType::Torus => (
+                "Torus",
+                [0.85, 0.55, 0.45, 1.0],
+                forge_geometry::primitives::generate_torus(0.75, 0.25, 32, 16),
+                Transform::from_translation(cursor + Vec3::new(0.0, 0.25, 0.0)),
+            ),
+            PrimitiveType::Plane => (
+                "Plane",
+                [0.45, 0.45, 0.45, 1.0],
+                forge_geometry::primitives::generate_plane(8.0, 8),
+                Transform::from_translation(cursor),
+            ),
+            PrimitiveType::Monkey => (
+                "Suzanne",
+                [0.75, 0.55, 0.25, 1.0],
+                forge_geometry::primitives::generate_monkey(1.0),
+                Transform::from_translation(cursor + Vec3::new(0.0, 0.75, 0.0)),
+            ),
+            PrimitiveType::Capsule => (
+                "Capsule",
+                [0.45, 0.65, 0.65, 1.0],
+                forge_geometry::primitives::generate_capsule(0.4, 1.0, 16, 8),
+                Transform::from_translation(cursor + Vec3::new(0.0, 0.9, 0.0)),
+            ),
+            PrimitiveType::Circle => (
+                "Circle",
+                [0.5, 0.7, 0.8, 1.0],
+                forge_geometry::primitives::generate_circle(1.0, 32),
+                Transform::from_translation(cursor),
+            ),
+            PrimitiveType::Grid => (
+                "Grid",
+                [0.3, 0.35, 0.4, 1.0],
+                forge_geometry::primitives::generate_plane(10.0, 10),
+                Transform::from_translation(cursor),
+            ),
+            PrimitiveType::Camera => (
+                "Camera",
+                [0.3, 0.7, 1.0, 1.0],
+                forge_geometry::primitives::generate_camera_marker(),
+                Transform::from_translation(cursor + Vec3::new(0.0, 1.5, 4.0)),
+            ),
+            PrimitiveType::Light => (
+                "Light",
+                [1.0, 0.95, 0.8, 1.0],
+                forge_geometry::primitives::generate_icosphere(0.2, 1),
+                Transform::from_translation(cursor + Vec3::new(0.0, 2.0, 0.0)),
+            ),
+            PrimitiveType::Custom => (
+                "Custom",
+                [0.7, 0.7, 0.7, 1.0],
+                forge_geometry::primitives::generate_cube(1.0),
+                Transform::from_translation(cursor),
+            ),
+        };
+
+        let id = self.scene.add_object(
+            SceneObject::new(name, prim, mesh)
+                .with_color(color)
+                .with_transform(tf),
+        );
+        if let Some(obj) = self.scene.get_object(id) {
+            self.history.push(Action::AddObject {
+                object: obj.clone(),
+            });
+        }
+        self.selection.select(id);
+        self.status_message = format!("Added {}", name);
+    }
+
+    pub fn add_point_light(&mut self) {
+        let cursor = self.editor_state.cursor_3d;
+        let mut obj = SceneObject::new_light(
+            "Point Light",
+            forge_scene::LightData {
+                kind: forge_scene::LightKind::Point,
+                enabled: true,
+                color: [1.0, 0.95, 0.8],
+                intensity: 80.0,
+                range: 15.0,
+                inner_cone_angle_deg: 25.0,
+                outer_cone_angle_deg: 35.0,
+            },
+            forge_geometry::primitives::generate_icosphere(0.2, 1),
+        );
+        obj.color = [1.0, 0.95, 0.8, 1.0];
+        obj.local_transform = Transform::from_translation(cursor + Vec3::new(0.0, 2.0, 0.0));
+        let id = self.scene.add_object(obj.clone());
+        self.history.push(Action::AddObject { object: obj });
+        self.selection.select(id);
+        self.status_message = "Added Point Light".to_string();
+    }
+
+    pub fn add_directional_light(&mut self) {
+        let cursor = self.editor_state.cursor_3d;
+        let mut obj = SceneObject::new_light(
+            "Directional Light",
+            forge_scene::LightData {
+                kind: forge_scene::LightKind::Directional,
+                enabled: true,
+                color: [1.0, 1.0, 0.95],
+                intensity: 3.0,
+                range: 50.0,
+                inner_cone_angle_deg: 25.0,
+                outer_cone_angle_deg: 35.0,
+            },
+            forge_geometry::primitives::generate_cone(0.2, 0.5, 8),
+        );
+        obj.color = [1.0, 1.0, 0.9, 1.0];
+        obj.local_transform = Transform::from_translation(cursor + Vec3::new(2.0, 4.0, 2.0));
+        let id = self.scene.add_object(obj.clone());
+        self.history.push(Action::AddObject { object: obj });
+        self.selection.select(id);
+        self.status_message = "Added Directional Light (Sun)".to_string();
+    }
+
+    pub fn add_camera(&mut self) {
+        let cursor = self.editor_state.cursor_3d;
+        let mut obj = SceneObject::new_camera("Camera");
+        obj.local_transform = Transform::from_translation(cursor + Vec3::new(0.0, 1.5, 4.0));
+        let id = self.scene.add_object(obj.clone());
+        self.history.push(Action::AddObject { object: obj });
+        self.selection.select(id);
+        self.status_message = "Added Camera".to_string();
+    }
+
     pub fn tris_to_quads_selected_geometry(&mut self) {
         if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
             edit_mesh.tris_to_quads();
@@ -495,6 +733,62 @@ impl Forge3dStudioApp {
             edit_mesh.weld_colocated_vertices(tolerance);
             self.sync_edit_mesh_to_scene();
             self.status_message = "Welded co-located vertices".to_string();
+        }
+    }
+
+    pub fn bisect_selected_geometry(
+        &mut self,
+        plane_point: Vec3,
+        plane_normal: Vec3,
+        clear_outer: bool,
+        fill_cut: bool,
+    ) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            match edit_mesh.bisect(plane_point, plane_normal, clear_outer, fill_cut) {
+                Ok(face_count) => {
+                    self.sync_edit_mesh_to_scene();
+                    self.status_message = format!("Bisect complete: {} face(s)", face_count);
+                }
+                Err(e) => {
+                    self.status_message = format!("Bisect error: {e}");
+                }
+            }
+        }
+    }
+
+    pub fn knife_connect_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            let selected_verts = edit_mesh.selected_vertices();
+            if selected_verts.len() >= 2 {
+                match edit_mesh.knife_connect_vertices(selected_verts[0], selected_verts[1]) {
+                    Ok(face_idx) => {
+                        self.sync_edit_mesh_to_scene();
+                        self.status_message = format!("Knife cut face {}", face_idx);
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Knife connect error: {e}");
+                    }
+                }
+            } else {
+                self.status_message = "Select 2 vertices across a face to knife cut".to_string();
+            }
+        }
+    }
+
+    pub fn spin_selected_geometry(&mut self, steps: usize, angle_radians: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            match edit_mesh.spin_selected(Vec3::Y, Vec3::ZERO, angle_radians, steps, 0.0) {
+                Ok(faces) if !faces.is_empty() => {
+                    self.sync_edit_mesh_to_scene();
+                    self.status_message = format!("Spin complete: created {} faces", faces.len());
+                }
+                Ok(_) => {
+                    self.status_message = "No faces created by spin".to_string();
+                }
+                Err(e) => {
+                    self.status_message = format!("Spin error: {e}");
+                }
+            }
         }
     }
 
@@ -518,7 +812,7 @@ impl Forge3dStudioApp {
                 }
                 self.status_message = "Deleted selected object(s)".to_string();
             }
-            EditMode::Edit => {
+            EditMode::Edit | EditMode::Sculpt => {
                 if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
                     let sel_mode = match self.editor_state.selection_element {
                         forge_scene::SelectionElement::Vertex => EditSelectionMode::Vertex,
@@ -2304,6 +2598,9 @@ impl Forge3dStudioApp {
                 });
             self.show_material_editor = open;
         }
+
+        // 9. Command Palette Modal Dialog (F3 / Space / Ctrl+K)
+        crate::ui::command_palette::render_command_palette(self, &ctx);
     }
 }
 

@@ -10,6 +10,21 @@ pub enum EditMode {
     #[default]
     Object,
     Edit,
+    Sculpt,
+}
+
+/// Workspaces layout preset configuring panel and viewport layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum WorkspaceMode {
+    #[default]
+    Modeling,
+    Sculpting,
+    UvEditing,
+    Shading,
+    Animation,
+    Rendering,
+    GeometryNodes,
+    Scripting,
 }
 
 /// Active manipulation mode for the selected object or geometry in the viewport.
@@ -308,6 +323,7 @@ pub struct EditorState {
     pub pivot_point: PivotPoint,
     pub snap_settings: SnapSettings,
     pub panel_settings: PanelSettings,
+    pub workspace: WorkspaceMode,
     pub cursor_3d: Vec3,
     pub show_grid: bool,
     pub show_axes: bool,
@@ -352,6 +368,7 @@ impl Default for EditorState {
             pivot_point: PivotPoint::MedianPoint,
             snap_settings: SnapSettings::default(),
             panel_settings: PanelSettings::default(),
+            workspace: WorkspaceMode::Modeling,
             cursor_3d: Vec3::ZERO,
             show_grid: true,
             show_axes: true,
