@@ -29,6 +29,25 @@ pub enum ForgeIoError {
     #[error("No valid geometry could be constructed from asset: {0}")]
     NoValidGeometry(String),
 
+    #[error("Invalid asset header in {format}: {message}")]
+    InvalidHeader {
+        format: &'static str,
+        message: String,
+    },
+
+    #[error("Unsupported asset format or feature in {format}: {message}")]
+    UnsupportedFormat {
+        format: &'static str,
+        message: String,
+    },
+
+    #[error("Truncated data encountered in {format}: expected {expected} bytes, found {found}")]
+    TruncatedData {
+        format: &'static str,
+        expected: usize,
+        found: usize,
+    },
+
     #[error("Export error: {0}")]
     ExportError(String),
 

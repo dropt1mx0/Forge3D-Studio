@@ -245,3 +245,23 @@ cargo run --release -p forge3d-studio
 - Texture paths are project-relative when bundled and may also be absolute. The application package must include the source map files.
 - Remaining viewport limits: hemispheric ambient fill rather than HDR IBL; shadow map applies to the first directional light only; point/spot lights do not cast shadows; no cutout shadowing or height/displacement mapping.
 - Validation: `cargo fmt --all -- --check`, `cargo check --workspace`, strict workspace Clippy, and all 450 workspace tests passed. The release app launched on Mesa OpenGL and loaded all four PBR sets: 4K tiles plus three 2K materials, about 298.7 MiB of GPU texture storage including mipmaps.
+
+## 11. STL & Stanford PLY Asset Pipeline (2026-11-05)
+- Implemented clean-room STL parser, importer, and exporter in `crates/forge-io/src/stl/`.
+  - Supports ASCII and Binary STL formats with automatic format detection.
+  - Robust against binary files whose 80-byte header starts with `"solid"`.
+  - Spatial quantization vertex welding with configurable tolerance and area-weighted smooth normal recalculation.
+  - Exporter bakes world transforms and formats as Binary or ASCII.
+- Implemented clean-room Stanford PLY parser, importer, and exporter in `crates/forge-io/src/ply/`.
+  - Supports ASCII and Binary Little Endian formats with dynamic element and property parsing.
+  - Supports position, normal, UV, and RGBA vertex colors.
+  - Automatically triangulates quads and arbitrary $N$-gon faces using 3D Ear Clipping.
+  - Exporter supports ASCII and Binary Little Endian with custom comments and world transform baking.
+- Studio Integration:
+  - Added `File -> Import -> STL 3D (.stl)...` and `File -> Import -> Stanford PLY (.ply)...`.
+  - Added `File -> Export -> STL 3D (.stl)...` (full scene and selected-only) and `File -> Export -> Stanford PLY (.ply)...` (full scene and selected-only).
+  - Integrated with atomic `Action::ImportObjects` Undo/Redo history.
+- Validation:
+  - 13 new unit tests in `crates/forge-io/tests/` (`stl_tests.rs`, `ply_tests.rs`).
+  - 7 new integration tests in `apps/forge3d-studio/tests/stl_ply_studio_integration.rs`.
+  - Total **470/470 tests passing** across workspace with zero clippy warnings and zero formatting diffs.

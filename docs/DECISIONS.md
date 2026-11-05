@@ -411,3 +411,16 @@
   5. Replace the fake material inspector with controls that assign/create materials, edit PBR values and map paths, edit selected lights, and tune world fill. Bump the project schema to version 2 and restore the bundled tile material when loading older version-1 showcases.
 - **Consequences:**
   Any object can now use the same metallic-roughness path, including the packaged 4K tile material. The live viewport performs direct PBR lighting and directional shadows on the available GPU backend. The renderer still uses hemispheric ambient fill rather than HDR image-based lighting; spot and point lights do not cast shadow maps, and transparent-cutout materials are not supported in the shadow pass.
+
+## ADR-0024: Clean-Room STL and Stanford PLY Asset Pipeline
+- **Status:** Accepted
+- **Date:** 2026-11-05
+- **Context:**
+  Section 22.1 ("Матрица форматов") of the master specification designates STL (for 3D printing and rapid fabrication) and PLY (for point cloud, 3D scanning, and vertex color interchange) as high-priority early interchange formats. Previously, only Wavefront OBJ was supported in `crates/forge-io`.
+- **Decision:**
+  1. Implement clean-room STL parsers, importers, and exporters in `crates/forge-io/src/stl/` supporting both ASCII and Binary STL formats. Distinguish formats via an exact file length invariant check (`file_len == 84 + triangle_count * 50`) and header heuristics, robustly handling binary files whose 80-byte header starts with `"solid"`. Provide spatial-quantization vertex welding with area-weighted smooth normal calculation.
+  2. Implement clean-room Stanford PLY parsers, importers, and exporters in `crates/forge-io/src/ply/` supporting ASCII and Binary Little Endian formats. Support custom vertex attributes (position, normal, UV, RGBA vertex color) and polygon face triangulation using 3D Ear Clipping.
+  3. Wire STL and PLY import/export into `apps/forge3d-studio` under the top `File -> Import` and `File -> Export` menus with native file dialog filters, status bar telemetry, and atomic `Action::ImportObjects` Undo/Redo integration.
+- **Consequences:**
+  Forge3D can now directly import and export 3D printing STL models and scan/vertex-colored PLY models without external conversion tools. Workspace test suite expanded to 470/470 passing tests with full roundtrip verification.
+

@@ -560,6 +560,241 @@ impl Forge3dStudioApp {
         Ok(())
     }
 
+    pub fn import_stl_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(), String> {
+        let path_ref = path.as_ref();
+        let options = forge_io::StlImportOptions::default();
+        let asset = match forge_io::import_stl(path_ref, &options) {
+            Ok(a) => a,
+            Err(e) => {
+                let msg = format!("STL Import failed: {e}");
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+        };
+
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("model.stl");
+
+        let total_objs = asset.objects.len();
+        let total_tris = asset.total_triangles();
+
+        let scene_objects = asset.into_scene_objects();
+        if scene_objects.is_empty() {
+            let msg = "STL Import failed: No objects imported".to_string();
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        let mut imported_ids = std::collections::HashSet::new();
+        let mut first_id = None;
+
+        for obj in &scene_objects {
+            imported_ids.insert(obj.id);
+            if first_id.is_none() {
+                first_id = Some(obj.id);
+            }
+        }
+
+        let history_objects = scene_objects.clone();
+        for obj in scene_objects {
+            self.scene.add_object(obj);
+        }
+
+        self.history.push(Action::ImportObjects {
+            objects: history_objects,
+        });
+
+        self.selection.selected_ids = imported_ids;
+        self.selection.active_id = first_id;
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_all_meshes();
+        }
+
+        self.status_message = format!(
+            "Imported STL {} ({} object{}, {} tris)",
+            file_name,
+            total_objs,
+            if total_objs == 1 { "" } else { "s" },
+            total_tris
+        );
+
+        Ok(())
+    }
+
+    pub fn export_stl_to_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        selected_only: bool,
+    ) -> Result<(), String> {
+        let path_ref = path.as_ref();
+
+        let export_scene = if selected_only {
+            if self.selection.selected_ids.is_empty() {
+                let msg = "Export error: No objects selected to export".to_string();
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+            let mut sub_scene = Scene::new("SelectedExport");
+            for &id in &self.selection.selected_ids {
+                if let Some(obj) = self.scene.get_object(id) {
+                    sub_scene.add_object(obj.clone());
+                }
+            }
+            sub_scene
+        } else {
+            self.scene.clone()
+        };
+
+        let solid_name = path_ref
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("forge3d_export")
+            .to_string();
+
+        let options = forge_io::StlExportOptions {
+            format: forge_io::StlFormat::Binary,
+            apply_world_transform: true,
+            solid_name,
+            visible_only: true,
+        };
+
+        if let Err(e) = forge_io::export_scene_stl_to_file(&export_scene, path_ref, &options) {
+            let msg = format!("STL Export error: {e}");
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("export.stl");
+
+        self.status_message = format!("Exported STL to {file_name}");
+        Ok(())
+    }
+
+    pub fn import_ply_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(), String> {
+        let path_ref = path.as_ref();
+        let options = forge_io::PlyImportOptions::default();
+        let asset = match forge_io::import_ply(path_ref, &options) {
+            Ok(a) => a,
+            Err(e) => {
+                let msg = format!("PLY Import failed: {e}");
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+        };
+
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("model.ply");
+
+        let total_objs = asset.objects.len();
+        let total_tris = asset.total_triangles();
+
+        let scene_objects = asset.into_scene_objects();
+        if scene_objects.is_empty() {
+            let msg = "PLY Import failed: No objects imported".to_string();
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        let mut imported_ids = std::collections::HashSet::new();
+        let mut first_id = None;
+
+        for obj in &scene_objects {
+            imported_ids.insert(obj.id);
+            if first_id.is_none() {
+                first_id = Some(obj.id);
+            }
+        }
+
+        let history_objects = scene_objects.clone();
+        for obj in scene_objects {
+            self.scene.add_object(obj);
+        }
+
+        self.history.push(Action::ImportObjects {
+            objects: history_objects,
+        });
+
+        self.selection.selected_ids = imported_ids;
+        self.selection.active_id = first_id;
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_all_meshes();
+        }
+
+        self.status_message = format!(
+            "Imported PLY {} ({} object{}, {} tris)",
+            file_name,
+            total_objs,
+            if total_objs == 1 { "" } else { "s" },
+            total_tris
+        );
+
+        Ok(())
+    }
+
+    pub fn export_ply_to_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        selected_only: bool,
+    ) -> Result<(), String> {
+        let path_ref = path.as_ref();
+
+        let export_scene = if selected_only {
+            if self.selection.selected_ids.is_empty() {
+                let msg = "Export error: No objects selected to export".to_string();
+                self.status_message = msg.clone();
+                return Err(msg);
+            }
+            let mut sub_scene = Scene::new("SelectedExport");
+            for &id in &self.selection.selected_ids {
+                if let Some(obj) = self.scene.get_object(id) {
+                    sub_scene.add_object(obj.clone());
+                }
+            }
+            sub_scene
+        } else {
+            self.scene.clone()
+        };
+
+        let options = forge_io::PlyExportOptions {
+            format: forge_io::PlyFormat::BinaryLittleEndian,
+            apply_world_transform: true,
+            export_normals: true,
+            export_colors: true,
+            export_uvs: true,
+            visible_only: true,
+            comments: vec!["Exported from Forge3D Rust Edition".to_string()],
+        };
+
+        if let Err(e) = forge_io::export_scene_ply_to_file(&export_scene, path_ref, &options) {
+            let msg = format!("PLY Export error: {e}");
+            self.status_message = msg.clone();
+            return Err(msg);
+        }
+
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("export.ply");
+
+        self.status_message = format!("Exported PLY to {file_name}");
+        Ok(())
+    }
+
     pub fn duplicate_selected(&mut self) {
         if let Some(active_id) = self.selection.active_id
             && let Some(new_id) = self.scene.duplicate_object(active_id)

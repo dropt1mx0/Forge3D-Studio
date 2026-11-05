@@ -89,6 +89,28 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         app.status_message = format!("Import error: {e}");
                     }
                 }
+                if ui.button("STL 3D (.stl)...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("STL Mesh", &["stl"])
+                        .set_title("Import STL Mesh")
+                        .pick_file()
+                        && let Err(e) = app.import_stl_from_path(&path)
+                    {
+                        app.status_message = format!("Import error: {e}");
+                    }
+                }
+                if ui.button("Stanford PLY (.ply)...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Stanford PLY", &["ply"])
+                        .set_title("Import Stanford PLY")
+                        .pick_file()
+                        && let Err(e) = app.import_ply_from_path(&path)
+                    {
+                        app.status_message = format!("Import error: {e}");
+                    }
+                }
             });
 
             ui.menu_button("Export", |ui| {
@@ -112,6 +134,56 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         .set_title("Export Selected to Wavefront OBJ")
                         .save_file()
                         && let Err(e) = app.export_obj_to_path(&path, true)
+                    {
+                        app.status_message = format!("Export error: {e}");
+                    }
+                }
+                ui.separator();
+                if ui.button("STL 3D (.stl)...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("STL Mesh", &["stl"])
+                        .set_file_name("scene.stl")
+                        .set_title("Export STL Mesh")
+                        .save_file()
+                        && let Err(e) = app.export_stl_to_path(&path, false)
+                    {
+                        app.status_message = format!("Export error: {e}");
+                    }
+                }
+                if ui.button("STL 3D (.stl) [Selected]...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("STL Mesh", &["stl"])
+                        .set_file_name("selected.stl")
+                        .set_title("Export Selected to STL Mesh")
+                        .save_file()
+                        && let Err(e) = app.export_stl_to_path(&path, true)
+                    {
+                        app.status_message = format!("Export error: {e}");
+                    }
+                }
+                ui.separator();
+                if ui.button("Stanford PLY (.ply)...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Stanford PLY", &["ply"])
+                        .set_file_name("scene.ply")
+                        .set_title("Export Stanford PLY")
+                        .save_file()
+                        && let Err(e) = app.export_ply_to_path(&path, false)
+                    {
+                        app.status_message = format!("Export error: {e}");
+                    }
+                }
+                if ui.button("Stanford PLY (.ply) [Selected]...").clicked() {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Stanford PLY", &["ply"])
+                        .set_file_name("selected.ply")
+                        .set_title("Export Selected to Stanford PLY")
+                        .save_file()
+                        && let Err(e) = app.export_ply_to_path(&path, true)
                     {
                         app.status_message = format!("Export error: {e}");
                     }
