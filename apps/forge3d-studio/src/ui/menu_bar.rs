@@ -818,6 +818,38 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
 
             ui.separator();
+            ui.label(
+                egui::RichText::new("UV Unwrapping & Projection")
+                    .weak()
+                    .size(11.0),
+            );
+
+            if ui.button("Smart UV Project (U)").clicked() {
+                app.smart_project_selected_geometry();
+                ui.close();
+            }
+
+            if ui.button("Cube / Box UV Project").clicked() {
+                app.box_project_selected_geometry(1.0);
+                ui.close();
+            }
+
+            if ui.button("Sphere UV Project").clicked() {
+                app.sphere_project_selected_geometry();
+                ui.close();
+            }
+
+            if ui.button("Cylinder UV Project").clicked() {
+                app.cylinder_project_selected_geometry(2.0);
+                ui.close();
+            }
+
+            if ui.button("Pack UV Islands").clicked() {
+                app.pack_uv_islands_selected_geometry(0.02);
+                ui.close();
+            }
+
+            ui.separator();
 
             if ui.button("Delete Selected").clicked() {
                 app.delete_selected();
@@ -846,7 +878,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // ---------------- Plugins Menu ----------------
         ui.menu_button("Plugins", |ui| {
             if ui.button("Plugin Manager...").clicked() {
-                app.status_message = "Plugins: 0 loaded".to_string();
+                app.show_plugin_manager = true;
                 ui.close();
             }
             if ui.button("Cinema 4D / Octane Bridge").clicked() {

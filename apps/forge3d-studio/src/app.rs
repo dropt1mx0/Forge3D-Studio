@@ -54,6 +54,8 @@ pub struct Forge3dStudioApp {
     pub show_gpu_dialog: bool,
     pub show_material_editor: bool,
     pub show_command_palette: bool,
+    pub show_plugin_manager: bool,
+    pub extension_manager: forge_scene::ExtensionManager,
     pub command_palette_query: String,
     pub command_palette_selected_index: usize,
     pub sculpt_settings: forge_geometry::SculptSettings,
@@ -149,6 +151,31 @@ fn reveal_showcase_through_stage(scene: &mut Scene, stage: usize) -> bool {
     changed
 }
 
+fn default_extension_manager() -> forge_scene::ExtensionManager {
+    let mut mgr = forge_scene::ExtensionManager::new();
+    let core_manifest = forge_scene::PluginManifest::new(
+        "org.forge3d.core_tools",
+        "Core Modeling Tools",
+        "0.1.0",
+        "Forge3D Team",
+    )
+    .with_permission(forge_scene::PluginPermission::SceneMutate);
+    let _ = mgr.register_plugin(core_manifest);
+
+    let batch_manifest = forge_scene::PluginManifest::new(
+        "org.forge3d.batch_converter",
+        "Batch Format Converter",
+        "0.1.0",
+        "Forge3D Team",
+    )
+    .with_permission(forge_scene::PluginPermission::FileRead)
+    .with_permission(forge_scene::PluginPermission::FileWrite)
+    .with_permission(forge_scene::PluginPermission::SceneMutate);
+    let _ = mgr.register_plugin(batch_manifest);
+
+    mgr
+}
+
 impl Forge3dStudioApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         // Set Cinema 4D / Octane dark studio aesthetic (#121316 base, #2563eb selection)
@@ -219,6 +246,8 @@ impl Forge3dStudioApp {
             show_gpu_dialog: false,
             show_material_editor: false,
             show_command_palette: false,
+            show_plugin_manager: false,
+            extension_manager: default_extension_manager(),
             command_palette_query: String::new(),
             command_palette_selected_index: 0,
             sculpt_settings: forge_geometry::SculptSettings::default(),
@@ -263,6 +292,8 @@ impl Forge3dStudioApp {
             show_gpu_dialog: false,
             show_material_editor: false,
             show_command_palette: false,
+            show_plugin_manager: false,
+            extension_manager: default_extension_manager(),
             command_palette_query: String::new(),
             command_palette_selected_index: 0,
             sculpt_settings: forge_geometry::SculptSettings::default(),
@@ -788,6 +819,107 @@ impl Forge3dStudioApp {
                 Err(e) => {
                     self.status_message = format!("Spin error: {e}");
                 }
+            }
+        }
+    }
+
+    pub fn smart_project_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            forge_geometry::smart_project_uvs(
+                edit_mesh,
+                &forge_geometry::SmartProjectOptions::default(),
+            );
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Smart UV Projection complete (packed into [0, 1])".to_string();
+        } else if let Some(active_id) = self.selection.active_id
+            && let Some(obj) = self.scene.get_object_mut(active_id)
+        {
+            let mut edit_mesh = forge_geometry::EditableMesh::from_mesh(&obj.mesh);
+            forge_geometry::smart_project_uvs(
+                &mut edit_mesh,
+                &forge_geometry::SmartProjectOptions::default(),
+            );
+            obj.mesh = edit_mesh.to_render_mesh();
+            obj.invalidate_evaluated_mesh();
+            self.status_message = format!("Smart UV Projection applied to {}", obj.name);
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(&active_id);
+            }
+        }
+    }
+
+    pub fn box_project_selected_geometry(&mut self, scale: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            forge_geometry::box_project_uvs(edit_mesh, scale);
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Box UV Projection complete".to_string();
+        } else if let Some(active_id) = self.selection.active_id
+            && let Some(obj) = self.scene.get_object_mut(active_id)
+        {
+            let mut edit_mesh = forge_geometry::EditableMesh::from_mesh(&obj.mesh);
+            forge_geometry::box_project_uvs(&mut edit_mesh, scale);
+            obj.mesh = edit_mesh.to_render_mesh();
+            obj.invalidate_evaluated_mesh();
+            self.status_message = format!("Box UV Projection applied to {}", obj.name);
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(&active_id);
+            }
+        }
+    }
+
+    pub fn sphere_project_selected_geometry(&mut self) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            forge_geometry::sphere_project_uvs(edit_mesh, Vec3::ZERO);
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Sphere UV Projection complete".to_string();
+        } else if let Some(active_id) = self.selection.active_id
+            && let Some(obj) = self.scene.get_object_mut(active_id)
+        {
+            let mut edit_mesh = forge_geometry::EditableMesh::from_mesh(&obj.mesh);
+            forge_geometry::sphere_project_uvs(&mut edit_mesh, Vec3::ZERO);
+            obj.mesh = edit_mesh.to_render_mesh();
+            obj.invalidate_evaluated_mesh();
+            self.status_message = format!("Sphere UV Projection applied to {}", obj.name);
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(&active_id);
+            }
+        }
+    }
+
+    pub fn cylinder_project_selected_geometry(&mut self, height: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            forge_geometry::cylinder_project_uvs(edit_mesh, Vec3::ZERO, height);
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Cylinder UV Projection complete".to_string();
+        } else if let Some(active_id) = self.selection.active_id
+            && let Some(obj) = self.scene.get_object_mut(active_id)
+        {
+            let mut edit_mesh = forge_geometry::EditableMesh::from_mesh(&obj.mesh);
+            forge_geometry::cylinder_project_uvs(&mut edit_mesh, Vec3::ZERO, height);
+            obj.mesh = edit_mesh.to_render_mesh();
+            obj.invalidate_evaluated_mesh();
+            self.status_message = format!("Cylinder UV Projection applied to {}", obj.name);
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(&active_id);
+            }
+        }
+    }
+
+    pub fn pack_uv_islands_selected_geometry(&mut self, margin: f32) {
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            forge_geometry::pack_uv_islands(edit_mesh, margin);
+            self.sync_edit_mesh_to_scene();
+            self.status_message = "Packed UV Islands".to_string();
+        } else if let Some(active_id) = self.selection.active_id
+            && let Some(obj) = self.scene.get_object_mut(active_id)
+        {
+            let mut edit_mesh = forge_geometry::EditableMesh::from_mesh(&obj.mesh);
+            forge_geometry::pack_uv_islands(&mut edit_mesh, margin);
+            obj.mesh = edit_mesh.to_render_mesh();
+            obj.invalidate_evaluated_mesh();
+            self.status_message = format!("Packed UV Islands on {}", obj.name);
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_mesh(&active_id);
             }
         }
     }
@@ -2721,6 +2853,120 @@ impl Forge3dStudioApp {
 
         // 9. Command Palette Modal Dialog (F3 / Space / Ctrl+K)
         crate::ui::command_palette::render_command_palette(self, &ctx);
+
+        // 10. Plugin Manager Modal Dialog
+        if self.show_plugin_manager {
+            let mut open = self.show_plugin_manager;
+            egui::Window::new("Extension & Plugin Manager")
+                .open(&mut open)
+                .resizable(true)
+                .default_size(egui::vec2(560.0, 420.0))
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(&ctx, |ui| {
+                    ui.heading("Installed Extensions");
+                    ui.label(
+                        "Manage native and scripting extensions with runtime sandbox permissions.",
+                    );
+                    ui.add_space(8.0);
+
+                    let plugin_ids: Vec<String> = self
+                        .extension_manager
+                        .plugins()
+                        .map(|p| p.manifest.id.clone())
+                        .collect();
+                    for id in plugin_ids {
+                        let plugin = self
+                            .extension_manager
+                            .plugins()
+                            .find(|p| p.manifest.id == id)
+                            .map(|p| (p.manifest.clone(), p.state));
+                        if let Some((manifest, state)) = plugin {
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    let is_enabled = state == forge_scene::PluginState::Enabled;
+                                    let status_text = if is_enabled {
+                                        "● Enabled"
+                                    } else {
+                                        "○ Disabled"
+                                    };
+                                    let status_color = if is_enabled {
+                                        egui::Color32::from_rgb(34, 197, 94)
+                                    } else {
+                                        egui::Color32::GRAY
+                                    };
+                                    ui.colored_label(status_color, status_text);
+                                    ui.strong(&manifest.name);
+                                    ui.label(format!("v{}", manifest.version));
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let toggle_btn =
+                                                if is_enabled { "Disable" } else { "Enable" };
+                                            if ui.button(toggle_btn).clicked() {
+                                                if is_enabled {
+                                                    let _ =
+                                                        self.extension_manager.disable_plugin(&id);
+                                                    self.status_message = format!(
+                                                        "Disabled plugin: {}",
+                                                        manifest.name
+                                                    );
+                                                } else {
+                                                    let _ =
+                                                        self.extension_manager.enable_plugin(&id);
+                                                    self.status_message = format!(
+                                                        "Enabled plugin: {}",
+                                                        manifest.name
+                                                    );
+                                                }
+                                            }
+                                        },
+                                    );
+                                });
+
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(&manifest.id).weak().size(11.0));
+                                    ui.label("•");
+                                    ui.label(
+                                        egui::RichText::new(format!("By {}", manifest.author))
+                                            .weak()
+                                            .size(11.0),
+                                    );
+                                });
+
+                                if !manifest.permissions.is_empty() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("Permissions:").size(11.0));
+                                        for perm in &manifest.permissions {
+                                            ui.label(
+                                                egui::RichText::new(format!("[{}]", perm.name()))
+                                                    .weak()
+                                                    .size(11.0),
+                                            );
+                                        }
+                                    });
+                                }
+                            });
+                            ui.add_space(4.0);
+                        }
+                    }
+
+                    ui.add_space(10.0);
+                    ui.collapsing("Event Log & Sandbox Telemetry", |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(100.0)
+                            .show(ui, |ui| {
+                                if self.extension_manager.event_logs().is_empty() {
+                                    ui.label(egui::RichText::new("No event logs recorded").weak());
+                                } else {
+                                    for log in self.extension_manager.event_logs().iter().rev() {
+                                        ui.label(egui::RichText::new(log).monospace().size(11.0));
+                                    }
+                                }
+                            });
+                    });
+                });
+            self.show_plugin_manager = open;
+        }
     }
 }
 

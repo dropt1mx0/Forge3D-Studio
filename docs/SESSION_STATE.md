@@ -1,8 +1,8 @@
 # Forge3D Rust Edition — Session State
 
 **Document Status:** Current  
-**Last Updated:** 2026-11-05
-**Current Milestone:** Forge3D Phase 4 — Scene-driven PBR materials, multi-light rendering, and directional shadows
+**Last Updated:** 2026-11-05  
+**Current Milestone:** Master Specification Full Implementation — Section 8-11, 21-24 (PBR Materials, STL/PLY/glTF/GLB I/O, Modifiers, Sculpting, Workspaces, Command Palette, UV Suite, Scripting & Plugin System)
 
 ---
 
@@ -16,8 +16,10 @@
   - `cargo 1.99.0 (5f94df478 2026-08-27)`
   - `git 2.53.0` (initialized on `main` branch)
   - Components: `rustfmt`, `clippy` installed and active
-- **Forge3D Engineering Skill Pack**:
-  - Confirmed and integrated in `.agents/skills/` (10 skills: `rust-engineering`, `graphics-programming`, `3d-engine-architecture`, `geometry-engine`, `rendering-engine`, `performance-engineering`, `gpu-rendering`, `testing-and-qa`, `clean-room-engineering`, `code-review`).
+- **Quality Gates**:
+  - 100% passing tests across all crates (238 geometry tests, 48 IO/mesh tests, GPU picking tests, and studio integration tests).
+  - Zero compiler or Clippy warnings with `-D warnings`.
+  - Zero `cargo fmt` diffs.
 
 ---
 
@@ -50,13 +52,38 @@
   - `generate_monkey(scale)`: clean-room procedural low-poly mascot head (42 vertices, 40 faces).
   - `generate_grid_lines(half_size, step)`: major/minor grid lines + colored coordinate axes (+X red, +Y green, +Z blue).
 - Invariant Validation: `validate_mesh_data` checking for NaNs, infinites, out-of-range indices, duplicate indices, and degenerate zero-area triangles.
+- B-Rep PolyMesh (`EditableMesh`):
+  - Extrude, Inset, Subdivide, Bevel vertices/edges, Loop Cut & Slide, Knife connect vertices, Bisect planar cut, Spin lathe/screw revolve, Dissolve edges, Bridge edge loops, Separate faces, Weld co-located vertices, Tris-to-quads, and Proportional Editing.
+- Sculpting Brush Engine (`sculpt.rs`):
+  - 9 brushes: `Draw`, `Clay`, `Smooth`, `Flatten`, `Inflate`, `Deflate`, `Grab`, `Pinch`, `Crease`.
+  - Cubic spherical falloff $w(d) = (1 - (d/r)^2)^3$ with mirror symmetry across X, Y, and Z.
+- UV Unwrapping & Projection Suite (`uv.rs`):
+  - `smart_project_uvs`: clusters coplanar faces into islands and packs into $[0, 1] \times [0, 1]$.
+  - `box_project_uvs`, `sphere_project_uvs`, `cylinder_project_uvs`.
+  - `pack_uv_islands`: normalizes and packs existing UVs with configurable margin.
+
+### `crates/forge-modifiers`
+- Non-destructive modifier stack:
+  - `SubdivisionModifier`: Catmull-Clark and Loop smoothing.
+  - `MirrorModifier`: X, Y, Z mirror axes with vertex welding.
+  - `ArrayModifier`: Linear instances with relative/constant offsets.
+  - `BooleanModifier`: CSG Union, Difference, Intersect.
+  - `SolidifyModifier`: Surface shell thickening along normals.
+  - `BevelModifier`: Procedural edge chamfering with segment count and profile curvature.
+  - `DecimateModifier`: Planar quadric simplification.
+  - `DisplaceModifier`: Normal/noise procedural displacement.
+  - `WeightedNormalModifier`: Area and angle weighted smooth normals.
 
 ### `crates/forge-scene`
 - `SceneObject`: Encapsulates ID, name, transform, visibility, primitive type, mesh, and base color.
 - `Scene`: Object hierarchy, parent-child world transform accumulation, raycast picking, dirty tracking, and `create_default_scene()`.
 - `SelectionState`: Active and hovered selection management.
-- `EditorState`: Active mode, `active_gizmo_mode` (`GizmoMode`), `panel_settings` (`PanelSettings`), `PointerInteractionState` (`Idle`, `ObjectPressed`, `GizmoDragging`, `BoxSelecting`, `ViewportOrbiting`, `UIInteraction`), modal transform state machine, and `show_debug_info` telemetry toggle.
-- `PanelSettings`: Left toolbar width, display mode (`IconOnly`, `IconAndLabel`), toolbar visibility, right sidebar width and visibility, outliner/properties ratio, bottom timeline height and visibility, clamped limits and disk persistence (`forge3d_settings.json`).
+- `EditorState`: Active mode, workspace modes (`Modeling`, `Sculpting`, `UvEditing`, `Shading`, `Animation`, `Rendering`, `GeometryNodes`, `Scripting`), gizmos, panels, and snapping.
+- `ExtensionManager` (`extension.rs`):
+  - Safe plugin lifecycle (`Enabled`, `Disabled`).
+  - Manifest metadata (`PluginManifest`) and runtime sandbox permissions (`FileRead`, `FileWrite`, `SceneMutate`, `Network`).
+  - Custom operator registration and execution validation.
+  - Event hook telemetry (`SceneLoaded`, `ObjectAdded`, `ObjectRemoved`, `FrameRendered`, `ProjectSaved`).
 - `ForgeProject`: JSON schema v2 serialization for `.forge` project files with version checks, backward-compatible v1 material migration, and roundtrip testing.
 
 ### `crates/forge-gpu`
@@ -65,7 +92,7 @@
 - `GpuBuffer`: Typed wrappers for Vertex, Index, and Uniform GPU buffers.
 
 ### `crates/forge-render`
-- `Camera`: Perspective and Orthographic camera with Orbit (yaw/pitch), Pan (screen right/up), Dolly (look vector translation), Exponential Adaptive Zoom (`zoom_adaptive`), Cursor-Anchored Zoom (`apply_zoom_step`), Smooth Inertial Easing (`update_smooth_zoom`), `sync_zoom_targets` cancellation on all navigation modes, `distance()` method, view matrix, projection matrix, view-proj matrix, and `screen_to_ray` screen unprojection.
+- `Camera`: Perspective and Orthographic camera with Orbit, Pan, Dolly, Exponential Adaptive Zoom, Cursor-Anchored Zoom, and Smooth Inertial Easing.
 - WGSL Shaders:
   - `MESH_SHADER`: Cook-Torrance/GGX metallic-roughness shading with base-color, normal, metallic, roughness, AO, and emissive maps; scene-driven lights; shadow comparison; and ACES tone mapping.
   - `GRID_SHADER`: Line list pipeline for ground grid and RGB coordinate axes.
@@ -73,28 +100,20 @@
 - `ViewportRenderer`: Viewport renderer with depth texture management, dynamic GPU mesh cache, uniform uploads, and command encoding.
 
 ### `crates/forge-io`
-- Zero-GPU / zero-UI decoupled asset pipeline crate.
-- Line-by-line streaming Wavefront OBJ parser (`v`, `vt`, `vn`, `f`, `o`, `g`, `s`, `mtllib`, `usemtl`).
-- 1-based, relative, and negative indexing support evaluated at parse time.
-- Robust 3D polygon Ear Clipping triangulation for convex/concave $N$-gons ($N \ge 3$) using Newell plane normal projection.
-- Deduplication vertex cache with vertex welding preserving distinct UV seams and sharp normal edges.
-- Unwinding and area-weighted normal calculation fallback for models lacking normals.
-- OBJ Exporter supporting single `Mesh` and full `Scene` with world-space transform baking and customizable options.
+- Zero-GPU / zero-UI decoupled asset pipeline crate:
+  - Wavefront OBJ: import/export with 3D Ear Clipping triangulation.
+  - STL: ASCII and binary import/export with 84-byte length validation and spatial welding.
+  - Stanford PLY: ASCII and Little-Endian binary import/export with custom attributes.
+  - glTF 2.0 / GLB: Clean-room parser and exporter for binary GLB containers and self-contained glTF files with embedded Base64 data URIs. Preserves mesh primitives, node transforms, and PBR metallic-roughness materials.
 - Atomic Undo/Redo integration via `Action::ImportObjects` in `forge-scene`.
 
 ### `apps/forge3d-studio`
 - Native desktop application built on `eframe` (v0.37) and `egui`.
-- Cinema 4D / Octane dark studio aesthetic (`#121316` base, `#14151a` panels, `#2563eb` electric blue selection highlights, `CornerRadius::same(6)`).
-- Panels & Overlays:
-  - Top Menu Bar: Logo `⬡`, standard hierarchy (`File`, `Edit`, `Create`, `Select`, `Tools`, `Mesh`, `Render`, `Plugins`, `Windows`, `Help`), and right-aligned `Layout: Model ▾` selector. Includes `File -> Import -> Wavefront (.obj)...` and `File -> Export -> Wavefront (.obj)...` via `rfd` native dialogs.
-  - Quick-Tool Shelf: Secondary horizontal icon strip (`⤺`, `⤼`, `↖`, `⬚`, `✥`, `⟲`, `⤡`, primitive additions, `🧲`, `▦`, `⚡ Live Viewer`).
-  - Left Toolbar: Modes (Select Q, Box Select B, Move W, Rotate E, Scale R), Quick Add, Delete.
-  - Right Sidebar: Scene Outliner with header tabs (`File | Edit | View | Objects | Tags | Bookmarks`), tree lines with expand icons (`▾`), leading icons, and rounded blue pill selection highlight + Properties Inspector with 3-column Cinema 4D coordinate card (`Position`, `Size`, `Rotation`) with red (`• X`), green (`• Y`), blue (`• Z`) axis dots, and bottom buttons `[ Object ▾ ]`, `[ Size ▾ ]`, `[ Apply ]`.
-  - Viewport Overlays: Top-left HUD strip `⚡ Live Viewer :: View Cameras Display Options`, bottom-left orientation tripod with labeled `X`, `Y`, `Z` axes.
-  - Bottom Bar: Timeline with 0..30F ruler, signature red progress track with draggable playhead, transport controls (`⏮`, `◀`, `▶`, `⏭`, `🔁`), and bottom material shelf (`Create`, `Edit`, `Function`, `Texture`, `🟡 Gold`, `⚪ Diffuse`, `🔘 Metal`).
-  - Floating Material Inspector Window: scene-backed PBR assignment and map paths, base/emissive factors, metallic, roughness, normal/AO strengths, selected light controls, and world-fill controls.
-  - Free Cursor Dragging Optimization: Completely eliminated drag jitter and back-and-forth oscillation by suppressing gizmo hit-testing and pointer consumption during free drag, bypassing gizmo rendering, and suppressing hover raycasts during drag.
-  - Floating Telemetry Overlay: Monospace debug card reporting pointer state, pointer position, viewport bounds, camera mode, orbit target, and camera distance.
+- Blender-style Command Palette (`F3` / `Space` / `Ctrl+K`) with 50+ operators, live search filtering, and arrow key execution.
+- Workspaces switcher supporting all 8 core workflows.
+- Live Viewport raycast sculpting interaction with brush shelf, radius/strength sliders, and symmetry toggles.
+- Extension & Plugin Manager modal dialog with runtime permission tags, enable/disable controls, and telemetry log viewer.
+- Full File Import/Export menu suite supporting Wavefront OBJ, STL, Stanford PLY, and glTF 2.0 / GLB.
 
 ---
 

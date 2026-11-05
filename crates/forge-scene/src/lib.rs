@@ -6,6 +6,7 @@
 //! Strictly contains NO GPU handles or UI dependencies.
 
 pub mod editor_state;
+pub mod extension;
 pub mod history;
 pub mod material;
 pub mod object;
@@ -17,6 +18,10 @@ pub use editor_state::{
     AxisConstraint, EditMode, EditorState, GizmoMode, ModalTransformState, PanelSettings,
     PivotPoint, PointerInteractionState, SelectionElement, SnapSettings, ToolbarDisplayMode,
     TransformMode, TransformOrientation, WorkspaceMode,
+};
+pub use extension::{
+    CustomOperator, EventHook, ExtensionManager, PluginManifest, PluginPermission, PluginState,
+    RegisteredPlugin,
 };
 pub use history::{Action, HistoryStack};
 pub use material::{LightData, LightKind, PbrMaterial, PbrTextureSet, WorldLighting};

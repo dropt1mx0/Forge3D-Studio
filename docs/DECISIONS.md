@@ -495,5 +495,29 @@
 - **Consequences:**
   Forge3D now supports full-cycle industry-standard glTF 2.0 / GLB interchange. Passes 100% of workspace tests and Clippy on Rust 1.99 with `-D warnings`.
 
+## ADR-0028: UV Unwrapping & Projection Suite and Extension / Plugin Sandbox System
+- **Status:** Accepted
+- **Date:** 2026-11-05
+- **Context:**
+  Section 11 ("UV & Texture Painting") and Section 23 ("Scripting & Extensions") require robust UV mapping tools (Smart UV Projection, Box, Cylinder, Sphere projections, Island packing) and an extensible plugin system with manifest declarations, runtime capability permissions, sandboxing, and operator registration.
+- **Decision:**
+  1. Implement UV projection and packing algorithms in `crates/forge-geometry/src/uv.rs`:
+     - `smart_project_uvs`: Clusters faces into planar UV islands based on normal divergence threshold (`angle_limit_rad`), computes tangent-plane 2D projections, and arranges islands into non-overlapping grid cells within $[0, 1] \times [0, 1]$ texture space with user margin.
+     - `box_project_uvs`: Orthogonal tri-planar box projection along the dominant normal axis (X, Y, or Z).
+     - `sphere_project_uvs`: Spherical polar coordinates $(u, v)$ centered around arbitrary 3D origins.
+     - `cylinder_project_uvs`: Radial azimuth and vertical height projection.
+     - `pack_uv_islands`: Bounds and scales existing vertex UV coordinates to fit cleanly within $[margin, 1 - margin]$.
+  2. Implement Scripting & Extension Manager in `crates/forge-scene/src/extension.rs`:
+     - `PluginManifest`: Declares plugin identity (id, name, version, author), API compatibility, and required capabilities.
+     - `PluginPermission`: Runtime permissions (`FileRead`, `FileWrite`, `SceneMutate`, `Network`).
+     - `ExtensionManager`: Manages plugin lifecycle (`Enabled`/`Disabled`), custom operator registration, runtime permission validation, and event hook telemetry (`SceneLoaded`, `ObjectAdded`, `ObjectRemoved`, `FrameRendered`, `ProjectSaved`).
+  3. Studio Integration:
+     - Added UV projection tools under `Mesh -> UV Unwrapping & Projection` and command palette (`uv_smart_project`, `uv_box_project`, `uv_sphere_project`, `uv_cylinder_project`, `uv_pack_islands`).
+     - Added `show_plugin_manager` modal dialog showing installed plugins, permission tags, enable/disable toggles, and event log telemetry.
+     - Wired into menu bar `Plugins -> Plugin Manager...` and command palette `Open Plugin & Extension Manager`.
+- **Consequences:**
+  Completes Section 11 and Section 23 specification requirements. Verified with unit and workspace integration tests passing 100%.
+
+
 
 

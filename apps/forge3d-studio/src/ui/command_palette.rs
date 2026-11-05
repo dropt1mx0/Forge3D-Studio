@@ -180,6 +180,37 @@ pub fn get_all_commands() -> Vec<CommandItem> {
             shortcut: "",
             action_id: "mesh_tris_to_quads",
         },
+        // UV Operations
+        CommandItem {
+            category: "UV",
+            title: "Smart UV Project",
+            shortcut: "U",
+            action_id: "uv_smart_project",
+        },
+        CommandItem {
+            category: "UV",
+            title: "Cube / Box UV Project",
+            shortcut: "",
+            action_id: "uv_box_project",
+        },
+        CommandItem {
+            category: "UV",
+            title: "Sphere UV Project",
+            shortcut: "",
+            action_id: "uv_sphere_project",
+        },
+        CommandItem {
+            category: "UV",
+            title: "Cylinder UV Project",
+            shortcut: "",
+            action_id: "uv_cylinder_project",
+        },
+        CommandItem {
+            category: "UV",
+            title: "Pack UV Islands",
+            shortcut: "",
+            action_id: "uv_pack_islands",
+        },
         // Modifiers
         CommandItem {
             category: "Modifier",
@@ -345,6 +376,12 @@ pub fn get_all_commands() -> Vec<CommandItem> {
             title: "Reset View / Home",
             shortcut: "Home",
             action_id: "view_home",
+        },
+        CommandItem {
+            category: "Plugin",
+            title: "Open Plugin & Extension Manager",
+            shortcut: "",
+            action_id: "open_plugin_manager",
         },
         CommandItem {
             category: "View",
@@ -513,6 +550,21 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
                 app.toggle_edit_mode();
             }
             app.tris_to_quads_selected_geometry();
+        }
+        "uv_smart_project" => {
+            app.smart_project_selected_geometry();
+        }
+        "uv_box_project" => {
+            app.box_project_selected_geometry(1.0);
+        }
+        "uv_sphere_project" => {
+            app.sphere_project_selected_geometry();
+        }
+        "uv_cylinder_project" => {
+            app.cylinder_project_selected_geometry(2.0);
+        }
+        "uv_pack_islands" => {
+            app.pack_uv_islands_selected_geometry(0.02);
         }
         "mod_mirror" => {
             if let Some(id) = app.selection.active_id
@@ -717,6 +769,9 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
             app.camera.eye = forge_math::Vec3::new(6.0, 5.0, 8.0);
             app.camera.up = forge_math::Vec3::Y;
             app.status_message = "View reset to Home".to_string();
+        }
+        "open_plugin_manager" => {
+            app.show_plugin_manager = true;
         }
         _ => {}
     }

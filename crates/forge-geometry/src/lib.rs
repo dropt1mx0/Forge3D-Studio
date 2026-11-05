@@ -9,6 +9,7 @@ pub mod mesh;
 pub mod primitives;
 pub mod sculpt;
 pub mod topology;
+pub mod uv;
 pub mod validation;
 pub mod vertex;
 
@@ -28,6 +29,10 @@ pub use topology::{
     PokeFaceResult, SplitEdgeResult, SplitFaceResult, TerminationReason, TopologyBuilder,
     TopologyError, TopologyReport, TopologyValidator, ValidationIssue, ValidationReport,
     VertexHandle,
+};
+pub use uv::{
+    SmartProjectOptions, box_project_uvs, cylinder_project_uvs, pack_uv_islands, smart_project_uvs,
+    sphere_project_uvs,
 };
 pub use validation::validate_mesh_data;
 pub use vertex::{LineVertex, Vertex};
