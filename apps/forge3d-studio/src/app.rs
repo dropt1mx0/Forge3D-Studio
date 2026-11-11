@@ -98,6 +98,19 @@ pub struct ObjectDragState {
     pub was_already_selected: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PieMenuKind {
+    Mode,
+    Shading,
+    Pivot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PieMenuState {
+    pub kind: PieMenuKind,
+    pub center: egui::Pos2,
+}
+
 pub struct Forge3dStudioApp {
     pub scene: Scene,
     pub selection: SelectionState,
@@ -111,6 +124,7 @@ pub struct Forge3dStudioApp {
     pub show_material_editor: bool,
     pub show_command_palette: bool,
     pub show_quick_add_menu: Option<egui::Pos2>,
+    pub active_pie_menu: Option<PieMenuState>,
     pub show_plugin_manager: bool,
     pub is_in_startup_hub: bool,
     pub extension_manager: forge_scene::ExtensionManager,
@@ -367,6 +381,7 @@ impl Forge3dStudioApp {
             show_material_editor: false,
             show_command_palette: false,
             show_quick_add_menu: None,
+            active_pie_menu: None,
             show_plugin_manager: false,
             is_in_startup_hub: true,
             extension_manager: default_extension_manager(),
@@ -416,6 +431,7 @@ impl Forge3dStudioApp {
             show_material_editor: false,
             show_command_palette: false,
             show_quick_add_menu: None,
+            active_pie_menu: None,
             show_plugin_manager: false,
             is_in_startup_hub: false,
             extension_manager: default_extension_manager(),
@@ -444,16 +460,31 @@ impl Forge3dStudioApp {
         }
     }
 
-    /// Toggles between Object Mode and Edit Mode.
-    pub fn toggle_edit_mode(&mut self) {
+    /// Sets the active interaction mode (Object, Edit, Sculpt).
+    pub fn set_edit_mode(&mut self, target_mode: EditMode) {
+        if self.editor_state.edit_mode == target_mode {
+            return;
+        }
         self.pending_hover_pick = None;
         if let Some(r) = &mut self.renderer {
             r.invalidate_picking();
         }
 
-        match self.editor_state.edit_mode {
+        match target_mode {
             EditMode::Object => {
-                if let Some(active_id) = self.selection.active_id {
+                if self.editor_state.edit_mode == EditMode::Edit || self.editor_state.edit_mode == EditMode::Sculpt {
+                    self.commit_edit_mesh_to_scene();
+                    self.active_edit_mesh = None;
+                    self.edit_overlay_cache.clear();
+                }
+                self.editor_state.edit_mode = EditMode::Object;
+                self.status_message = "Object Mode".to_string();
+            }
+            EditMode::Edit => {
+                if self.editor_state.edit_mode == EditMode::Sculpt {
+                    self.editor_state.edit_mode = EditMode::Edit;
+                    self.status_message = "Edit Mode".to_string();
+                } else if let Some(active_id) = self.selection.active_id {
                     if let Some(obj) = self.scene.get_object(active_id) {
                         let edit_mesh = EditableMesh::from_mesh(&obj.mesh);
                         self.active_edit_mesh = Some((active_id, edit_mesh));
@@ -465,13 +496,31 @@ impl Forge3dStudioApp {
                     self.status_message = "Select an object to enter Edit Mode.".to_string();
                 }
             }
-            EditMode::Edit | EditMode::Sculpt => {
-                self.commit_edit_mesh_to_scene();
-                self.active_edit_mesh = None;
-                self.edit_overlay_cache.clear();
-                self.editor_state.edit_mode = EditMode::Object;
-                self.status_message = "Object Mode".to_string();
+            EditMode::Sculpt => {
+                if self.editor_state.edit_mode == EditMode::Edit {
+                    self.editor_state.edit_mode = EditMode::Sculpt;
+                    self.status_message = "Sculpt Mode".to_string();
+                } else if let Some(active_id) = self.selection.active_id {
+                    if let Some(obj) = self.scene.get_object(active_id) {
+                        let edit_mesh = EditableMesh::from_mesh(&obj.mesh);
+                        self.active_edit_mesh = Some((active_id, edit_mesh));
+                        self.edit_overlay_cache.reset();
+                        self.editor_state.edit_mode = EditMode::Sculpt;
+                        self.status_message = format!("Sculpt Mode: {}", obj.name);
+                    }
+                } else {
+                    self.status_message = "Select an object to enter Sculpt Mode.".to_string();
+                }
             }
+        }
+    }
+
+    /// Toggles between Object Mode and Edit Mode.
+    pub fn toggle_edit_mode(&mut self) {
+        if self.editor_state.edit_mode == EditMode::Object {
+            self.set_edit_mode(EditMode::Edit);
+        } else {
+            self.set_edit_mode(EditMode::Object);
         }
     }
 
@@ -3362,5 +3411,35 @@ mod tests {
         assert_eq!(core[3], 255);
         // Check vibrant orange core
         assert!(core[0] > 200 && core[1] > 100);
+    }
+
+    #[test]
+    fn test_pie_menu_state_and_mode_switching() {
+        let mut app = Forge3dStudioApp::new_headless();
+        assert_eq!(app.editor_state.edit_mode, EditMode::Object);
+        assert_eq!(app.active_pie_menu, None);
+
+        // Set pie menu state
+        app.active_pie_menu = Some(PieMenuState {
+            kind: PieMenuKind::Mode,
+            center: egui::pos2(400.0, 300.0),
+        });
+        assert!(app.active_pie_menu.is_some());
+        assert_eq!(app.active_pie_menu.unwrap().kind, PieMenuKind::Mode);
+
+        // Select an object and test mode switching via set_edit_mode
+        let cube_id = app.scene.objects.keys().next().copied().unwrap();
+        app.selection.select(cube_id);
+
+        app.set_edit_mode(EditMode::Edit);
+        assert_eq!(app.editor_state.edit_mode, EditMode::Edit);
+        assert!(app.active_edit_mesh.is_some());
+
+        app.set_edit_mode(EditMode::Sculpt);
+        assert_eq!(app.editor_state.edit_mode, EditMode::Sculpt);
+
+        app.set_edit_mode(EditMode::Object);
+        assert_eq!(app.editor_state.edit_mode, EditMode::Object);
+        assert!(app.active_edit_mesh.is_none());
     }
 }

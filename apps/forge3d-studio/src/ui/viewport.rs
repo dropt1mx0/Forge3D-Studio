@@ -5,11 +5,11 @@ use forge_geometry::EditSelectionMode;
 use forge_math::{Quat, Vec2, Vec3};
 use forge_render::{CameraProjection, PickResult, ViewPreset, screen_to_texture_coords};
 use forge_scene::{
-    Action, AxisConstraint, EditMode, LightData, LightKind, PointerInteractionState,
+    Action, AxisConstraint, EditMode, LightData, LightKind, PivotPoint, PointerInteractionState,
     PrimitiveType, SceneObject, TransformMode,
 };
 
-use crate::app::Forge3dStudioApp;
+use crate::app::{Forge3dStudioApp, PieMenuKind, PieMenuState};
 use crate::ui::gizmo::{render_and_interact_gizmo, world_to_screen_pos};
 
 pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
@@ -396,9 +396,16 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         && !app.editor_state.modal_transform.active
         && !app.editor_state.fly_nav_active
     {
-        // Mode Switch: Tab
+        // Mode Switch: Tab (fast toggle) or Ctrl+Tab (Mode Pie Menu)
         if input.key_pressed(Key::Tab) {
-            app.toggle_edit_mode();
+            if input.modifiers.ctrl {
+                app.active_pie_menu = Some(PieMenuState {
+                    kind: PieMenuKind::Mode,
+                    center: mouse_pos.unwrap_or_else(|| rect.center()),
+                });
+            } else {
+                app.toggle_edit_mode();
+            }
             ui.ctx().request_repaint();
         }
 
@@ -745,12 +752,30 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             app.show_quick_add_menu = mouse_pos.or_else(|| Some(rect.center()));
             ui.ctx().request_repaint();
         }
+
+        // Shading Pie Menu: Z (Blender-compatible)
+        if !input.modifiers.any() && input.key_pressed(Key::Z) {
+            app.active_pie_menu = Some(PieMenuState {
+                kind: PieMenuKind::Shading,
+                center: mouse_pos.unwrap_or_else(|| rect.center()),
+            });
+            ui.ctx().request_repaint();
+        }
+
+        // Pivot Point Pie Menu: Period (.)
+        if !input.modifiers.any() && input.key_pressed(Key::Period) {
+            app.active_pie_menu = Some(PieMenuState {
+                kind: PieMenuKind::Pivot,
+                center: mouse_pos.unwrap_or_else(|| rect.center()),
+            });
+            ui.ctx().request_repaint();
+        }
     }
 
     // =========================================================================
     // 4. MOUSE CAMERA NAVIGATION: ORBIT, PAN, ZOOM, DOLLY
     // =========================================================================
-    if !app.editor_state.fly_nav_active && !app.editor_state.modal_transform.active {
+    if !app.editor_state.fly_nav_active && !app.editor_state.modal_transform.active && app.active_pie_menu.is_none() {
         let mmb_down = input.pointer.button_down(PointerButton::Middle);
         let alt_lmb_down = input.modifiers.alt && input.pointer.button_down(PointerButton::Primary);
 
@@ -2466,9 +2491,378 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     }
 
+    // =========================================================================
+    // PIE MENU OVERLAY (Ctrl+Tab, Z, Period)
+    // =========================================================================
+    if let Some(pie_state) = app.active_pie_menu {
+        let keep_open = render_pie_menu_overlay(ui, app, rect, pie_state);
+        if !keep_open {
+            app.active_pie_menu = None;
+            ui.ctx().request_repaint();
+        }
+    }
+
     if let Some(elapsed) = app.showcase_demo_elapsed {
         render_showcase_demo_overlay(&painter, rect, elapsed);
     }
+}
+
+enum PieMenuAction {
+    SetEditMode(EditMode),
+    SetShadingWireframe(bool),
+    OpenMaterialEditor,
+    SetPivotPoint(PivotPoint),
+}
+
+struct PieSlice {
+    angle: f32,
+    icon: &'static str,
+    label: &'static str,
+    subtext: &'static str,
+    action: PieMenuAction,
+    is_active: bool,
+}
+
+fn execute_pie_action(app: &mut Forge3dStudioApp, action: &PieMenuAction) {
+    match action {
+        PieMenuAction::SetEditMode(mode) => {
+            app.set_edit_mode(*mode);
+        }
+        PieMenuAction::SetShadingWireframe(wireframe) => {
+            app.editor_state.show_wireframe = *wireframe;
+            app.status_message = format!("Wireframe: {}", wireframe);
+        }
+        PieMenuAction::OpenMaterialEditor => {
+            app.show_material_editor = true;
+            app.status_message = "Material Editor Opened".to_string();
+        }
+        PieMenuAction::SetPivotPoint(pivot) => {
+            app.editor_state.pivot_point = *pivot;
+            app.status_message = format!("Pivot Point: {:?}", pivot);
+        }
+    }
+}
+
+fn render_pie_menu_overlay(
+    ui: &mut Ui,
+    app: &mut Forge3dStudioApp,
+    viewport: Rect,
+    pie_state: PieMenuState,
+) -> bool {
+    let painter = ui.painter_at(viewport);
+    let center = egui::pos2(
+        pie_state.center.x.clamp(viewport.min.x + 150.0, viewport.max.x - 150.0),
+        pie_state.center.y.clamp(viewport.min.y + 110.0, viewport.max.y - 110.0),
+    );
+    let mouse_pos = ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos())).unwrap_or(center);
+    let delta = mouse_pos - center;
+    let dist = delta.length();
+    let deadzone_radius = 26.0;
+    let in_deadzone = dist < deadzone_radius;
+    let mouse_angle = delta.y.atan2(delta.x);
+    let is_light = app.editor_state.panel_settings.is_light_theme;
+
+    let (title, slices) = match pie_state.kind {
+        PieMenuKind::Mode => (
+            "INTERACTION MODE",
+            vec![
+                PieSlice {
+                    angle: -std::f32::consts::FRAC_PI_2,
+                    icon: "✏",
+                    label: "Edit Mode",
+                    subtext: "Tab",
+                    action: PieMenuAction::SetEditMode(EditMode::Edit),
+                    is_active: app.editor_state.edit_mode == EditMode::Edit,
+                },
+                PieSlice {
+                    angle: std::f32::consts::FRAC_PI_2,
+                    icon: "🧊",
+                    label: "Object Mode",
+                    subtext: "4",
+                    action: PieMenuAction::SetEditMode(EditMode::Object),
+                    is_active: app.editor_state.edit_mode == EditMode::Object,
+                },
+                PieSlice {
+                    angle: std::f32::consts::PI,
+                    icon: "🏺",
+                    label: "Sculpt Mode",
+                    subtext: "6",
+                    action: PieMenuAction::SetEditMode(EditMode::Sculpt),
+                    is_active: app.editor_state.edit_mode == EditMode::Sculpt,
+                },
+            ],
+        ),
+        PieMenuKind::Shading => (
+            "VIEWPORT SHADING",
+            vec![
+                PieSlice {
+                    angle: -std::f32::consts::FRAC_PI_2,
+                    icon: "⚪",
+                    label: "Solid",
+                    subtext: "8",
+                    action: PieMenuAction::SetShadingWireframe(false),
+                    is_active: !app.editor_state.show_wireframe,
+                },
+                PieSlice {
+                    angle: std::f32::consts::FRAC_PI_2,
+                    icon: "🕸",
+                    label: "Wireframe",
+                    subtext: "4",
+                    action: PieMenuAction::SetShadingWireframe(true),
+                    is_active: app.editor_state.show_wireframe,
+                },
+                PieSlice {
+                    angle: 0.0,
+                    icon: "🎨",
+                    label: "Material Preview",
+                    subtext: "6",
+                    action: PieMenuAction::OpenMaterialEditor,
+                    is_active: app.show_material_editor,
+                },
+                PieSlice {
+                    angle: std::f32::consts::PI,
+                    icon: "✨",
+                    label: "Rendered",
+                    subtext: "2",
+                    action: PieMenuAction::SetShadingWireframe(false),
+                    is_active: false,
+                },
+            ],
+        ),
+        PieMenuKind::Pivot => (
+            "PIVOT POINT",
+            vec![
+                PieSlice {
+                    angle: -std::f32::consts::FRAC_PI_2,
+                    icon: "⌖",
+                    label: "Median Point",
+                    subtext: "8",
+                    action: PieMenuAction::SetPivotPoint(PivotPoint::MedianPoint),
+                    is_active: app.editor_state.pivot_point == PivotPoint::MedianPoint,
+                },
+                PieSlice {
+                    angle: 0.0,
+                    icon: "🔘",
+                    label: "Active Element",
+                    subtext: "6",
+                    action: PieMenuAction::SetPivotPoint(PivotPoint::ActiveElement),
+                    is_active: app.editor_state.pivot_point == PivotPoint::ActiveElement,
+                },
+                PieSlice {
+                    angle: std::f32::consts::FRAC_PI_2,
+                    icon: "🎯",
+                    label: "3D Cursor",
+                    subtext: "2",
+                    action: PieMenuAction::SetPivotPoint(PivotPoint::Cursor3D),
+                    is_active: app.editor_state.pivot_point == PivotPoint::Cursor3D,
+                },
+                PieSlice {
+                    angle: std::f32::consts::PI,
+                    icon: "⚬",
+                    label: "Individual Origins",
+                    subtext: "4",
+                    action: PieMenuAction::SetPivotPoint(PivotPoint::IndividualOrigins),
+                    is_active: app.editor_state.pivot_point == PivotPoint::IndividualOrigins,
+                },
+            ],
+        ),
+    };
+
+    let radius = 95.0;
+    let mut hovered_idx = None;
+
+    if !in_deadzone {
+        let mut best_diff = f32::MAX;
+        let mut best_idx = None;
+        for (idx, slice) in slices.iter().enumerate() {
+            let mut diff = (mouse_angle - slice.angle).abs();
+            if diff > std::f32::consts::PI {
+                diff = std::f32::consts::TAU - diff;
+            }
+            if diff < best_diff {
+                best_diff = diff;
+                best_idx = Some(idx);
+            }
+        }
+        hovered_idx = best_idx;
+    }
+
+    for (idx, slice) in slices.iter().enumerate() {
+        let card_pos = center + egui::vec2(slice.angle.cos(), slice.angle.sin()) * radius;
+        let card_rect = Rect::from_center_size(card_pos, egui::vec2(134.0, 32.0));
+        if card_rect.contains(mouse_pos) {
+            hovered_idx = Some(idx);
+            break;
+        }
+    }
+
+    for slice in &slices {
+        let trigger = match slice.subtext {
+            "1" => ui.input(|i| i.key_pressed(Key::Num1)),
+            "2" => ui.input(|i| i.key_pressed(Key::Num2)),
+            "3" => ui.input(|i| i.key_pressed(Key::Num3)),
+            "4" => ui.input(|i| i.key_pressed(Key::Num4)),
+            "6" => ui.input(|i| i.key_pressed(Key::Num6)),
+            "8" => ui.input(|i| i.key_pressed(Key::Num8)),
+            "9" => ui.input(|i| i.key_pressed(Key::Num9)),
+            "Tab" => ui.input(|i| i.key_pressed(Key::Tab)),
+            _ => false,
+        };
+        if trigger {
+            execute_pie_action(app, &slice.action);
+            return false;
+        }
+    }
+
+    let clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
+    if clicked {
+        if let Some(idx) = hovered_idx {
+            execute_pie_action(app, &slices[idx].action);
+            return false;
+        } else if in_deadzone || dist > radius + 100.0 {
+            return false;
+        }
+    }
+
+    if ui.input(|i| i.key_pressed(Key::Escape) || i.pointer.button_clicked(PointerButton::Secondary)) {
+        return false;
+    }
+
+    // 1. Subtle radial outer guide circle
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(
+            1.0,
+            if is_light {
+                Color32::from_black_alpha(20)
+            } else {
+                Color32::from_white_alpha(15)
+            },
+        ),
+    );
+
+    // 2. Center deadzone disc
+    painter.circle_filled(
+        center,
+        deadzone_radius,
+        if is_light {
+            Color32::from_rgba_unmultiplied(235, 238, 245, 230)
+        } else {
+            Color32::from_rgba_unmultiplied(22, 24, 30, 235)
+        },
+    );
+    painter.circle_stroke(
+        center,
+        deadzone_radius,
+        Stroke::new(
+            1.5,
+            if is_light {
+                Color32::from_rgb(180, 190, 210)
+            } else {
+                Color32::from_rgb(50, 58, 72)
+            },
+        ),
+    );
+    painter.circle_filled(center, 3.5, Color32::from_rgb(45, 125, 245));
+
+    // Title centered above the deadzone
+    painter.text(
+        center + egui::vec2(0.0, -10.0),
+        egui::Align2::CENTER_CENTER,
+        title,
+        egui::FontId::proportional(8.0),
+        if is_light {
+            Color32::from_rgb(80, 95, 120)
+        } else {
+            Color32::from_rgb(130, 145, 175)
+        },
+    );
+
+    // 3. Direction line from deadzone to cursor
+    if !in_deadzone {
+        let dir = delta / dist;
+        let line_end = center + dir * dist.min(radius);
+        painter.line_segment(
+            [center + dir * deadzone_radius, line_end],
+            Stroke::new(2.5, Color32::from_rgb(50, 135, 250)),
+        );
+    }
+
+    // 4. Render slices
+    for (idx, slice) in slices.iter().enumerate() {
+        let card_pos = center + egui::vec2(slice.angle.cos(), slice.angle.sin()) * radius;
+        let card_rect = Rect::from_center_size(card_pos, egui::vec2(134.0, 32.0));
+        let is_hovered = hovered_idx == Some(idx);
+
+        let (fill, stroke, text_color, sub_color) = if is_hovered {
+            (
+                Color32::from_rgb(32, 105, 225),
+                Stroke::new(1.8, Color32::from_rgb(130, 195, 255)),
+                Color32::WHITE,
+                Color32::from_rgb(205, 230, 255),
+            )
+        } else if slice.is_active {
+            if is_light {
+                (
+                    Color32::from_rgb(220, 235, 255),
+                    Stroke::new(1.5, Color32::from_rgb(60, 130, 220)),
+                    Color32::from_rgb(15, 35, 80),
+                    Color32::from_rgb(70, 105, 160),
+                )
+            } else {
+                (
+                    Color32::from_rgba_unmultiplied(35, 52, 78, 235),
+                    Stroke::new(1.5, Color32::from_rgb(75, 145, 235)),
+                    Color32::from_rgb(150, 205, 255),
+                    Color32::from_rgb(120, 170, 235),
+                )
+            }
+        } else if is_light {
+            (
+                Color32::from_rgba_unmultiplied(248, 250, 254, 230),
+                Stroke::new(1.0, Color32::from_black_alpha(25)),
+                Color32::from_rgb(35, 40, 50),
+                Color32::from_black_alpha(110),
+            )
+        } else {
+            (
+                Color32::from_rgba_unmultiplied(24, 27, 34, 230),
+                Stroke::new(1.0, Color32::from_white_alpha(32)),
+                Color32::from_rgb(220, 225, 235),
+                Color32::from_white_alpha(100),
+            )
+        };
+
+        if is_hovered {
+            painter.rect_filled(
+                card_rect.expand(2.0),
+                egui::CornerRadius::same(8),
+                Color32::from_rgba_unmultiplied(32, 105, 225, 45),
+            );
+        }
+
+        painter.rect_filled(card_rect, egui::CornerRadius::same(6), fill);
+        painter.rect_stroke(card_rect, egui::CornerRadius::same(6), stroke, egui::StrokeKind::Inside);
+
+        painter.text(
+            card_rect.left_center() + egui::vec2(10.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            format!("{} {}", slice.icon, slice.label),
+            egui::FontId::proportional(12.0),
+            text_color,
+        );
+
+        painter.text(
+            card_rect.right_center() + egui::vec2(-10.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            slice.subtext,
+            egui::FontId::proportional(10.0),
+            sub_color,
+        );
+    }
+
+    true
 }
 
 fn render_showcase_demo_overlay(painter: &egui::Painter, viewport: Rect, elapsed: f32) {
