@@ -20,6 +20,7 @@ use crate::ui::toolbar::render_toolbar;
 use crate::ui::viewport::render_viewport;
 
 const FORGE3D_LOGO_BYTES: &[u8] = include_bytes!("../assets/forge3d-logo.jpg");
+const MASCOT_BYTES: &[u8] = include_bytes!("../assets/mascot.png");
 
 fn load_forge3d_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let decoded = image::load_from_memory(FORGE3D_LOGO_BYTES).ok()?;
@@ -30,6 +31,48 @@ fn load_forge3d_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     let color_image = egui::ColorImage::from_rgba_unmultiplied(size, thumbnail.as_raw());
 
     Some(ctx.load_texture("forge3d-logo", color_image, egui::TextureOptions::LINEAR))
+}
+
+fn load_mascot_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let decoded = image::load_from_memory(MASCOT_BYTES).ok()?;
+    let rgba = decoded.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+
+    Some(ctx.load_texture("forge3d-mascot", color_image, egui::TextureOptions::LINEAR))
+}
+
+fn create_radial_bloom_image() -> egui::ColorImage {
+    let size = 128;
+    let mut pixels = Vec::with_capacity(size * size * 4);
+    let center = size as f32 / 2.0;
+    let radius = center;
+    for y in 0..size {
+        for x in 0..size {
+            let dx = (x as f32 + 0.5) - center;
+            let dy = (y as f32 + 0.5) - center;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let norm = (dist / radius).clamp(0.0, 1.0);
+            let alpha = if norm >= 1.0 {
+                0.0
+            } else {
+                let t = 1.0 - norm;
+                let smooth = t * t * (3.0 - 2.0 * t); // smoothstep with zero derivative at both center and edge
+                (smooth * smooth) * 82.0
+            };
+            let a = alpha.clamp(0.0, 255.0) as u8;
+            pixels.push(255);
+            pixels.push(140);
+            pixels.push(20);
+            pixels.push(a);
+        }
+    }
+    egui::ColorImage::from_rgba_unmultiplied([size, size], &pixels)
+}
+
+fn load_glow_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let color_image = create_radial_bloom_image();
+    Some(ctx.load_texture("mascot-glow", color_image, egui::TextureOptions::LINEAR))
 }
 
 /// Active state for free cursor object dragging in world space.
@@ -68,6 +111,7 @@ pub struct Forge3dStudioApp {
     pub show_material_editor: bool,
     pub show_command_palette: bool,
     pub show_plugin_manager: bool,
+    pub is_in_startup_hub: bool,
     pub extension_manager: forge_scene::ExtensionManager,
     pub command_palette_query: String,
     pub command_palette_selected_index: usize,
@@ -88,6 +132,10 @@ pub struct Forge3dStudioApp {
 
     /// Embedded Forge3D brand mark shown in the top menu bar.
     pub logo_texture: Option<egui::TextureHandle>,
+    /// Embedded Forge3D orange mascot texture for the startup hub.
+    pub mascot_texture: Option<egui::TextureHandle>,
+    /// Smooth radial bloom texture rendered behind the mascot.
+    pub glow_texture: Option<egui::TextureHandle>,
 
     // Offscreen 3D viewport render target
     pub viewport_texture: Option<wgpu::Texture>,
@@ -192,35 +240,80 @@ fn default_extension_manager() -> forge_scene::ExtensionManager {
     mgr
 }
 
+pub fn dark_visuals() -> egui::Visuals {
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = egui::Color32::from_rgb(19, 20, 25);
+    visuals.window_fill = egui::Color32::from_rgb(24, 25, 32);
+    visuals.faint_bg_color = egui::Color32::from_rgb(16, 17, 21);
+    visuals.extreme_bg_color = egui::Color32::from_rgb(12, 13, 16);
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(26, 28, 36);
+    visuals.widgets.noninteractive.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(36, 39, 49));
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(32, 35, 44);
+    visuals.widgets.inactive.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 46, 58));
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(44, 48, 62);
+    visuals.widgets.hovered.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 66, 84));
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(37, 99, 235);
+    visuals.widgets.active.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 165, 250));
+    visuals.selection.bg_fill = egui::Color32::from_rgb(37, 99, 235); // Studio Electric Blue
+    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 165, 250));
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
+    visuals.window_corner_radius = egui::CornerRadius::same(8);
+    visuals.menu_corner_radius = egui::CornerRadius::same(6);
+    visuals
+}
+
+pub fn light_visuals() -> egui::Visuals {
+    let mut visuals = egui::Visuals::light();
+    visuals.panel_fill = egui::Color32::from_rgb(245, 246, 250);
+    visuals.window_fill = egui::Color32::from_rgb(255, 255, 255);
+    visuals.faint_bg_color = egui::Color32::from_rgb(238, 240, 246);
+    visuals.extreme_bg_color = egui::Color32::from_rgb(228, 232, 240);
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(240, 242, 248);
+    visuals.widgets.noninteractive.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(215, 220, 232));
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(235, 238, 246);
+    visuals.widgets.inactive.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(205, 212, 224));
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(224, 230, 242);
+    visuals.widgets.hovered.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 192, 212));
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(37, 99, 235);
+    visuals.widgets.active.bg_stroke =
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 78, 216));
+    visuals.selection.bg_fill = egui::Color32::from_rgb(37, 99, 235);
+    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 78, 216));
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
+    visuals.window_corner_radius = egui::CornerRadius::same(8);
+    visuals.menu_corner_radius = egui::CornerRadius::same(6);
+    visuals
+}
+
+pub fn apply_theme(is_light: bool, ctx: &egui::Context) {
+    if is_light {
+        ctx.set_visuals(light_visuals());
+    } else {
+        ctx.set_visuals(dark_visuals());
+    }
+}
+
 impl Forge3dStudioApp {
     pub fn new(cc: &eframe::CreationContext) -> Self {
-        // Set Cinema 4D / Octane dark studio aesthetic (#121316 base, #2563eb selection)
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = egui::Color32::from_rgb(19, 20, 25);
-        visuals.window_fill = egui::Color32::from_rgb(24, 25, 32);
-        visuals.faint_bg_color = egui::Color32::from_rgb(16, 17, 21);
-        visuals.extreme_bg_color = egui::Color32::from_rgb(12, 13, 16);
-        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(26, 28, 36);
-        visuals.widgets.noninteractive.bg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(36, 39, 49));
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(32, 35, 44);
-        visuals.widgets.inactive.bg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 46, 58));
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(44, 48, 62);
-        visuals.widgets.hovered.bg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 66, 84));
-        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(37, 99, 235);
-        visuals.widgets.active.bg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 165, 250));
-        visuals.selection.bg_fill = egui::Color32::from_rgb(37, 99, 235); // Studio Electric Blue
-        visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 165, 250));
-        visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
-        visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
-        visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
-        visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
-        visuals.window_corner_radius = egui::CornerRadius::same(8);
-        visuals.menu_corner_radius = egui::CornerRadius::same(6);
-        cc.egui_ctx.set_visuals(visuals);
+        let editor_state = EditorState {
+            panel_settings: forge_scene::PanelSettings::load_or_default(),
+            ..Default::default()
+        };
+
+        apply_theme(editor_state.panel_settings.is_light_theme, &cc.egui_ctx);
 
         let mut renderer = None;
         let mut gpu_info = None;
@@ -243,6 +336,13 @@ impl Forge3dStudioApp {
             tracing::warn!("Could not decode the embedded Forge3D logo");
         }
 
+        let mascot_texture = load_mascot_texture(&cc.egui_ctx);
+        if mascot_texture.is_none() {
+            tracing::warn!("Could not decode the embedded Forge3D mascot");
+        }
+
+        let glow_texture = load_glow_texture(&cc.egui_ctx);
+
         let editor_state = EditorState {
             panel_settings: forge_scene::PanelSettings::load_or_default(),
             ..Default::default()
@@ -252,22 +352,21 @@ impl Forge3dStudioApp {
         camera.settings.zoom_sensitivity = editor_state.panel_settings.zoom_sensitivity;
         camera.settings.zoom_to_cursor = editor_state.panel_settings.zoom_to_cursor;
         camera.settings.smooth_zoom = editor_state.panel_settings.smooth_zoom;
-        set_showcase_camera_view(&mut camera);
 
-        let mut app = Self {
-            scene: Scene::create_showcase_scene(),
+        Self {
+            scene: Scene::new("Untitled"),
             selection: SelectionState::new(),
             editor_state,
             camera,
             renderer,
             gpu_info,
-            status_message: "Showcase ready: house, tree, and rock. Open Examples to reload it."
-                .to_string(),
+            status_message: "Ready".to_string(),
             show_about_dialog: false,
             show_gpu_dialog: false,
             show_material_editor: false,
             show_command_palette: false,
             show_plugin_manager: false,
+            is_in_startup_hub: true,
             extension_manager: default_extension_manager(),
             command_palette_query: String::new(),
             command_palette_selected_index: 0,
@@ -278,6 +377,8 @@ impl Forge3dStudioApp {
             edit_overlay_cache: crate::ui::viewport::EditOverlayCache::default(),
             wgpu_render_state: cc.wgpu_render_state.clone(),
             logo_texture,
+            mascot_texture,
+            glow_texture,
             viewport_texture: None,
             viewport_texture_view: None,
             viewport_egui_texture_id: None,
@@ -289,9 +390,7 @@ impl Forge3dStudioApp {
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
             pending_hover_pick: None,
-        };
-        app.start_showcase_demo();
-        app
+        }
     }
 
     /// Creates a headless instance of the app (no GPU/eframe required) for automated integration testing.
@@ -315,6 +414,7 @@ impl Forge3dStudioApp {
             show_material_editor: false,
             show_command_palette: false,
             show_plugin_manager: false,
+            is_in_startup_hub: false,
             extension_manager: default_extension_manager(),
             command_palette_query: String::new(),
             command_palette_selected_index: 0,
@@ -325,6 +425,8 @@ impl Forge3dStudioApp {
             edit_overlay_cache: crate::ui::viewport::EditOverlayCache::default(),
             wgpu_render_state: None,
             logo_texture: None,
+            mascot_texture: None,
+            glow_texture: None,
             viewport_texture: None,
             viewport_texture_view: None,
             viewport_egui_texture_id: None,
@@ -656,7 +758,7 @@ impl Forge3dStudioApp {
             ),
             PrimitiveType::Plane => (
                 "Plane",
-                [0.45, 0.45, 0.45, 1.0],
+                [0.72, 0.74, 0.78, 1.0],
                 forge_geometry::primitives::generate_plane(8.0, 8),
                 Transform::from_translation(cursor),
             ),
@@ -1064,6 +1166,11 @@ impl Forge3dStudioApp {
             total_tris
         );
 
+        self.editor_state.panel_settings.add_recent_project(
+            path_ref.to_string_lossy().to_string(),
+            file_name.to_string(),
+        );
+
         Ok(())
     }
 
@@ -1422,6 +1529,11 @@ impl Forge3dStudioApp {
             if total_objs == 1 { "" } else { "s" },
             total_mats,
             if total_mats == 1 { "" } else { "s" },
+        );
+
+        self.editor_state.panel_settings.add_recent_project(
+            path_ref.to_string_lossy().to_string(),
+            file_name.to_string(),
         );
 
         Ok(())
@@ -2033,8 +2145,138 @@ impl Forge3dStudioApp {
         }
     }
 
+    /// Trims free heap memory back to the Linux OS via glibc malloc_trim.
+    #[inline]
+    pub fn trim_process_memory(&self) {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            extern "C" {
+                fn malloc_trim(pad: usize) -> i32;
+            }
+            malloc_trim(0);
+        }
+    }
+
+    /// Switches from Startup Hub to active editor with a clean default 3D scene (Cube, Camera, Light).
+    pub fn start_new_scene(&mut self) {
+        self.pending_hover_pick = None;
+        self.scene = Scene::create_default_scene();
+        self.selection.deselect();
+        self.history.clear();
+        self.editor_state.workspace = forge_scene::WorkspaceMode::Modeling;
+        self.editor_state.edit_mode = EditMode::Object;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_all_meshes();
+        }
+        self.trim_process_memory();
+        self.status_message = "New scene created".to_string();
+        self.is_in_startup_hub = false;
+    }
+
+    /// Loads a `.forge` project file directly from disk and enters active workspace.
+    pub fn open_project_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.pending_hover_pick = None;
+        let path_ref = path.as_ref();
+        let json = std::fs::read_to_string(path_ref)?;
+        let project = forge_scene::ForgeProject::from_json(&json)?;
+        self.scene = project.scene;
+        self.selection.deselect();
+        self.history.clear();
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_all_meshes();
+        }
+        self.trim_process_memory();
+        let file_name = path_ref
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("project.forge");
+        self.status_message = format!("Loaded project from {}", file_name);
+
+        self.editor_state.panel_settings.add_recent_project(
+            path_ref.to_string_lossy().to_string(),
+            self.scene.name.clone(),
+        );
+        self.is_in_startup_hub = false;
+        Ok(())
+    }
+
+    /// Opens or imports a file based on its extension (.forge, .obj, .gltf, .glb, .stl, .ply).
+    pub fn open_or_import_file(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(), String> {
+        self.pending_hover_pick = None;
+        let path_ref = path.as_ref();
+        let ext = path_ref
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let res = match ext.as_str() {
+            "forge" => self.open_project_from_path(path_ref).map_err(|e| e.to_string()),
+            "obj" => self.import_obj_from_path(path_ref),
+            "gltf" | "glb" => self.import_gltf_from_path(path_ref),
+            "stl" => self.import_stl_from_path(path_ref).map_err(|e| e.to_string()),
+            "ply" => self.import_ply_from_path(path_ref).map_err(|e| e.to_string()),
+            _ => Err(format!("Unsupported file extension: .{ext}")),
+        };
+
+        if res.is_ok() {
+            self.is_in_startup_hub = false;
+        }
+        res
+    }
+
+    /// Loads the architectural showcase villa and enters active workspace.
+    pub fn load_showcase_and_start(&mut self) {
+        self.pending_hover_pick = None;
+        self.load_showcase_scene();
+        self.start_showcase_demo();
+        self.status_message = "Loaded Architectural Showcase".to_string();
+        self.is_in_startup_hub = false;
+    }
+
+    /// Toggles between light and dark visual interface theme and persists preference.
+    pub fn toggle_theme(&mut self, ctx: &egui::Context) {
+        self.editor_state.panel_settings.is_light_theme =
+            !self.editor_state.panel_settings.is_light_theme;
+        apply_theme(self.editor_state.panel_settings.is_light_theme, ctx);
+        let _ = self.editor_state.panel_settings.save();
+        ctx.request_repaint();
+    }
+
     pub fn render_app_ui(&mut self, ui: &mut egui::Ui) {
+        if self.is_in_startup_hub {
+            crate::ui::welcome::render_welcome_hub(self, ui);
+            return;
+        }
+
         let ctx = ui.ctx().clone();
+        let is_light = self.editor_state.panel_settings.is_light_theme;
+        let panel_bg = if is_light {
+            egui::Color32::from_rgb(245, 246, 250)
+        } else {
+            egui::Color32::from_rgb(19, 20, 25)
+        };
+        let panel_border = if is_light {
+            egui::Color32::from_rgb(215, 220, 232)
+        } else {
+            egui::Color32::from_rgb(32, 35, 42)
+        };
+        let side_border = if is_light {
+            egui::Color32::from_rgb(215, 220, 232)
+        } else {
+            egui::Color32::from_rgb(38, 42, 54)
+        };
+        let central_bg = if is_light {
+            egui::Color32::from_rgb(230, 234, 242)
+        } else {
+            egui::Color32::from_rgb(20, 22, 26)
+        };
 
         // 1. Measure frame delta and FPS
         let now = Instant::now();
@@ -2067,8 +2309,8 @@ impl Forge3dStudioApp {
         egui::Panel::top("menu_bar")
             .frame(
                 egui::Frame::new()
-                    .fill(egui::Color32::from_rgb(19, 20, 25))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 35, 42)))
+                    .fill(panel_bg)
+                    .stroke(egui::Stroke::new(1.0, panel_border))
                     .inner_margin(4.0),
             )
             .show(ui, |ui| {
@@ -2076,9 +2318,16 @@ impl Forge3dStudioApp {
             });
 
         // 3. Bottom Status Bar
-        egui::Panel::bottom("status_bar").show(ui, |ui| {
-            render_status_bar(self, ui);
-        });
+        egui::Panel::bottom("status_bar")
+            .frame(
+                egui::Frame::new()
+                    .fill(panel_bg)
+                    .stroke(egui::Stroke::new(1.0, panel_border))
+                    .inner_margin(4.0),
+            )
+            .show(ui, |ui| {
+                render_status_bar(self, ui);
+            });
 
         // 4. Left Toolbar (Natively resizable with clean border separator and auto mode switch)
         if self.editor_state.panel_settings.toolbar_visible {
@@ -2090,8 +2339,8 @@ impl Forge3dStudioApp {
                 .show_separator_line(true)
                 .frame(
                     egui::Frame::new()
-                        .fill(egui::Color32::from_rgb(19, 20, 25))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 42, 54)))
+                        .fill(panel_bg)
+                        .stroke(egui::Stroke::new(1.0, side_border))
                         .inner_margin(4.0),
                 )
                 .show(ui, |ui| {
@@ -2429,8 +2678,8 @@ impl Forge3dStudioApp {
                 .show_separator_line(true)
                 .frame(
                     egui::Frame::new()
-                        .fill(egui::Color32::from_rgb(19, 20, 25))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 42, 54)))
+                        .fill(panel_bg)
+                        .stroke(egui::Stroke::new(1.0, side_border))
                         .inner_margin(4.0),
                 )
                 .show(ui, |ui| {
@@ -2465,14 +2714,18 @@ impl Forge3dStudioApp {
                         egui::Color32::from_rgb(240, 144, 32)
                     } else if h_resp.hovered() {
                         egui::Color32::from_rgb(255, 175, 50)
+                    } else if is_light {
+                        egui::Color32::from_rgb(215, 220, 230)
                     } else {
                         egui::Color32::from_rgb(45, 48, 55)
                     };
                     ui.painter().rect_filled(h_rect, 1.0, h_col);
 
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        render_properties(self, ui);
-                    });
+                    egui::ScrollArea::vertical()
+                        .id_salt("sidebar_properties_scroll")
+                        .show(ui, |ui| {
+                            render_properties(self, ui);
+                        });
                 });
 
             let new_width = panel_resp.response.rect.width();
@@ -2484,7 +2737,7 @@ impl Forge3dStudioApp {
 
         // 6. Central 3D Viewport Panel
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(egui::Color32::from_rgb(20, 22, 26)))
+            .frame(egui::Frame::new().fill(central_bg))
             .show(ui, |ui| {
                 let available_size = ui.available_size();
                 let ppp = ctx.pixels_per_point();
@@ -2976,6 +3229,7 @@ impl Forge3dStudioApp {
                     ui.add_space(10.0);
                     ui.collapsing("Event Log & Sandbox Telemetry", |ui| {
                         egui::ScrollArea::vertical()
+                            .id_salt("telemetry_event_log_scroll")
                             .max_height(100.0)
                             .show(ui, |ui| {
                                 if self.extension_manager.event_logs().is_empty() {
@@ -3092,5 +3346,16 @@ mod tests {
         app.update_showcase_demo(1.5);
         assert_eq!(app.showcase_demo_elapsed, None);
         assert!(app.scene.objects.values().all(|object| object.visible));
+    }
+
+    #[test]
+    fn test_mascot_pixel_alpha() {
+        let decoded = image::load_from_memory(MASCOT_BYTES).expect("decoded mascot");
+        let rgba = decoded.to_rgba8();
+        let (w, h) = (rgba.width(), rgba.height());
+        assert_eq!(w, 474);
+        assert_eq!(h, 346);
+        let corner = rgba.get_pixel(0, 0);
+        assert_eq!(corner[3], 0, "Corner pixel of mascot must be transparent!");
     }
 }

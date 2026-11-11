@@ -30,10 +30,10 @@ fn main() -> eframe::Result<()> {
 
     // 2. Configure native application window and WGPU options
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Forge3D Rust Edition — Alpha 0.1")
+        .with_title("Forge3D Studio")
+        .with_app_id("forge3d-studio")
         .with_inner_size([1280.0, 800.0])
-        .with_min_inner_size([800.0, 600.0])
-        .with_decorations(false);
+        .with_min_inner_size([800.0, 600.0]);
     if let Some(icon) = load_window_icon() {
         viewport = viewport.with_icon(icon);
     } else {

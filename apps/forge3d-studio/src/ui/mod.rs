@@ -6,3 +6,4 @@ pub mod properties;
 pub mod status_bar;
 pub mod toolbar;
 pub mod viewport;
+pub mod welcome;
