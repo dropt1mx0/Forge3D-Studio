@@ -827,6 +827,92 @@ impl EditableMesh {
         self.recalculate_normals();
     }
 
+    /// Duplicates selected vertices, edges, or faces, deselects the originals, and selects the new clones.
+    pub fn duplicate_selected(&mut self, mode: EditSelectionMode) -> Vec<usize> {
+        match mode {
+            EditSelectionMode::Vertex => {
+                let sel_indices: Vec<usize> = self
+                    .vertices
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, v)| if v.selected { Some(i) } else { None })
+                    .collect();
+
+                if sel_indices.is_empty() {
+                    return Vec::new();
+                }
+
+                let mut old_to_new = HashMap::new();
+                let mut new_indices = Vec::with_capacity(sel_indices.len());
+
+                for &old_idx in &sel_indices {
+                    self.vertices[old_idx].selected = false;
+                    let mut cloned_v = self.vertices[old_idx].clone();
+                    cloned_v.selected = true;
+                    let new_idx = self.vertices.len();
+                    self.vertices.push(cloned_v);
+                    old_to_new.insert(old_idx, new_idx);
+                    new_indices.push(new_idx);
+                }
+
+                // Duplicate edges where both vertices were duplicated
+                let mut new_edges = Vec::new();
+                for edge in &mut self.edges {
+                    if let (Some(&n0), Some(&n1)) = (old_to_new.get(&edge.v0), old_to_new.get(&edge.v1)) {
+                        edge.selected = false;
+                        let mut new_edge = EditEdge::new(n0, n1);
+                        new_edge.selected = true;
+                        new_edges.push(new_edge);
+                    }
+                }
+                self.edges.extend(new_edges);
+
+                // Duplicate faces where all vertices were duplicated
+                let mut new_faces = Vec::new();
+                for face in &mut self.faces {
+                    if face.vertices.iter().all(|v| old_to_new.contains_key(v)) {
+                        face.selected = false;
+                        let new_face_verts: Vec<usize> =
+                            face.vertices.iter().map(|v| old_to_new[v]).collect();
+                        let mut new_face = EditFace::new(new_face_verts, face.normal);
+                        new_face.selected = true;
+                        new_faces.push(new_face);
+                    }
+                }
+                self.faces.extend(new_faces);
+
+                new_indices
+            }
+            EditSelectionMode::Edge => {
+                let mut sel_vert_set = HashSet::new();
+                for edge in &self.edges {
+                    if edge.selected {
+                        sel_vert_set.insert(edge.v0);
+                        sel_vert_set.insert(edge.v1);
+                    }
+                }
+                for (i, v) in self.vertices.iter_mut().enumerate() {
+                    v.selected = sel_vert_set.contains(&i);
+                }
+                self.duplicate_selected(EditSelectionMode::Vertex)
+            }
+            EditSelectionMode::Face => {
+                let mut sel_vert_set = HashSet::new();
+                for face in &self.faces {
+                    if face.selected {
+                        for &v in &face.vertices {
+                            sel_vert_set.insert(v);
+                        }
+                    }
+                }
+                for (i, v) in self.vertices.iter_mut().enumerate() {
+                    v.selected = sel_vert_set.contains(&i);
+                }
+                self.duplicate_selected(EditSelectionMode::Vertex)
+            }
+        }
+    }
+
     /// Deletes selected elements.
     pub fn delete_selected(&mut self, mode: EditSelectionMode) {
         match mode {

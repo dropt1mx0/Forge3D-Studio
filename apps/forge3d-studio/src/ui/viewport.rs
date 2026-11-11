@@ -875,10 +875,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // Duplicate: Shift + D (Duplicates and enters Grab mode)
         if input.modifiers.shift && input.key_pressed(Key::D) {
             app.duplicate_selected();
-            let mouse_v = mouse_pos
-                .map(|p| Vec2::new(p.x - rect.min.x, p.y - rect.min.y))
-                .unwrap_or(Vec2::ZERO);
-            app.begin_modal_transform(TransformMode::Translate, mouse_v);
+            if app.editor_state.edit_mode == EditMode::Object {
+                let mouse_v = mouse_pos
+                    .map(|p| Vec2::new(p.x - rect.min.x, p.y - rect.min.y))
+                    .unwrap_or(Vec2::ZERO);
+                app.begin_modal_transform(TransformMode::Translate, mouse_v);
+            }
             ui.ctx().request_repaint();
         }
 

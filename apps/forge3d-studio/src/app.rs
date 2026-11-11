@@ -1650,16 +1650,58 @@ impl Forge3dStudioApp {
     }
 
     pub fn duplicate_selected(&mut self) {
-        if let Some(active_id) = self.selection.active_id
-            && let Some(new_id) = self.scene.duplicate_object(active_id)
-        {
-            if let Some(dup) = self.scene.get_object(new_id) {
-                self.history.push(Action::AddObject {
-                    object: dup.clone(),
-                });
+        if self.editor_state.edit_mode == EditMode::Edit {
+            if let Some((_active_id, edit_mesh)) = &mut self.active_edit_mesh {
+                let edit_sel_mode = match self.editor_state.selection_element {
+                    forge_scene::SelectionElement::Vertex => forge_geometry::EditSelectionMode::Vertex,
+                    forge_scene::SelectionElement::Edge => forge_geometry::EditSelectionMode::Edge,
+                    forge_scene::SelectionElement::Face => forge_geometry::EditSelectionMode::Face,
+                };
+                let new_indices = edit_mesh.duplicate_selected(edit_sel_mode);
+                if !new_indices.is_empty() {
+                    self.sync_edit_mesh_to_scene();
+                    self.status_message = format!("Duplicated {} elements in Edit Mode", new_indices.len());
+                    return;
+                }
             }
-            self.selection.select(new_id);
-            self.status_message = "Duplicated object".to_string();
+        }
+
+        let mut target_ids: Vec<ObjectId> = self.selection.selected_ids.iter().copied().collect();
+        if target_ids.is_empty() {
+            if let Some(aid) = self.selection.active_id {
+                target_ids.push(aid);
+            } else {
+                self.status_message = "No object selected to duplicate".to_string();
+                return;
+            }
+        }
+
+        let mut new_ids = Vec::new();
+        for id in target_ids {
+            if let Some(new_id) = self.scene.duplicate_object(id) {
+                if let Some(dup) = self.scene.get_object(new_id) {
+                    self.history.push(Action::AddObject {
+                        object: dup.clone(),
+                    });
+                }
+                new_ids.push(new_id);
+            }
+        }
+
+        if !new_ids.is_empty() {
+            let active = new_ids.last().copied();
+            self.selection.selected_ids = new_ids.into_iter().collect();
+            self.selection.active_id = active;
+            self.scene.dirty = true;
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_picking();
+            }
+            self.pending_hover_pick = None;
+            self.status_message = format!(
+                "Duplicated {} object{} (Shift+D)",
+                self.selection.selected_ids.len(),
+                if self.selection.selected_ids.len() == 1 { "" } else { "s" }
+            );
         }
     }
 
@@ -4141,5 +4183,44 @@ mod tests {
         assert!(app.scene.get_object(cube_id).unwrap().visible);
         assert!(app.scene.get_object(sphere_id).unwrap().visible);
         assert!(app.status_message.contains("Exited Local View"));
+    }
+
+    #[test]
+    fn test_duplicate_selected_multi_object_and_edit_mode() {
+        let mut app = Forge3dStudioApp::new_headless();
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+
+        // Multi-select Cube + Sphere
+        app.selection.select(cube_id);
+        app.selection.add_to_selection(sphere_id);
+        assert_eq!(app.selection.selected_ids.len(), 2);
+
+        let initial_obj_count = app.scene.objects.len();
+        app.duplicate_selected();
+        assert_eq!(app.scene.objects.len(), initial_obj_count + 2);
+        assert_eq!(app.selection.selected_ids.len(), 2);
+        assert!(!app.selection.selected_ids.contains(&cube_id));
+        assert!(!app.selection.selected_ids.contains(&sphere_id));
+
+        // Test in Edit Mode
+        let dup_id = app.selection.selected_ids.iter().next().copied().unwrap();
+        app.selection.select(dup_id);
+        app.set_edit_mode(EditMode::Edit);
+        let orig_verts = if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+            edit_mesh.vertices[0].selected = true;
+            edit_mesh.vertices[1].selected = true;
+            edit_mesh.vertices.len()
+        } else {
+            0
+        };
+        app.duplicate_selected();
+        if let Some((_, edit_mesh)) = &app.active_edit_mesh {
+            assert_eq!(edit_mesh.vertices.len(), orig_verts + 2);
+            assert!(!edit_mesh.vertices[0].selected);
+            assert!(!edit_mesh.vertices[1].selected);
+            assert!(edit_mesh.vertices[orig_verts].selected);
+            assert!(edit_mesh.vertices[orig_verts + 1].selected);
+        }
     }
 }
