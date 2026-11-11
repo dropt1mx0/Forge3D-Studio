@@ -23,6 +23,7 @@ use forge_scene::{
 use forge3d_studio::Forge3dStudioApp;
 use forge3d_studio::ui::viewport::{EditOverlayCache, render_edit_mode_overlay};
 
+#[cfg(target_os = "linux")]
 unsafe extern "C" {
     fn malloc_trim(pad: usize) -> i32;
 }
@@ -60,6 +61,7 @@ impl ProcMemory {
     }
 
     fn read_trimmed() -> Self {
+        #[cfg(target_os = "linux")]
         unsafe {
             malloc_trim(0);
         }

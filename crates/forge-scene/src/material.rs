@@ -114,9 +114,9 @@ pub struct WorldLighting {
 impl Default for WorldLighting {
     fn default() -> Self {
         Self {
-            sky_color: [0.28, 0.34, 0.44],
-            ground_color: [0.16, 0.13, 0.10],
-            intensity: 0.35,
+            sky_color: [0.65, 0.70, 0.78],
+            ground_color: [0.45, 0.45, 0.48],
+            intensity: 0.85,
         }
     }
 }

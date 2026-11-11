@@ -497,13 +497,23 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         }
 
-        // Selection Shortcuts (A = Select All, Alt+A = Deselect All, Ctrl+I = Invert Selection, B = Box Select)
+        // Selection Shortcuts (A = Select All, Alt+A / Escape = Deselect All, Ctrl+I = Invert Selection, B = Box Select)
         if !input.modifiers.command
             && !input.modifiers.ctrl
             && !input.modifiers.alt
             && !input.modifiers.shift
         {
-            if input.key_pressed(Key::A) {
+            if input.key_pressed(Key::Escape) {
+                if !app.selection.is_empty() {
+                    app.deselect_all();
+                    ui.ctx().request_repaint();
+                } else if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+                    edit_mesh.deselect_all(EditSelectionMode::Vertex);
+                    app.editor_state.active_vertex = None;
+                    app.sync_edit_mesh_to_scene();
+                    ui.ctx().request_repaint();
+                }
+            } else if input.key_pressed(Key::A) {
                 app.select_all();
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::B) {
@@ -988,6 +998,14 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     _ => app.editor_state.active_gizmo_mode,
                 };
 
+                let mut base_scale = 1.0_f32;
+                if let Some(active_id) = app.selection.active_id {
+                    if let Some(obj) = app.scene.get_object(active_id) {
+                        let s = obj.local_transform.scale;
+                        base_scale = s.x.abs().max(s.y.abs()).max(s.z.abs());
+                    }
+                }
+
                 let gizmo_res =
                     if app.editor_state.pointer_state == PointerInteractionState::ObjectDragging {
                         // Cleanly suppress gizmo during active free cursor drag to prevent jitter/conflict
@@ -1016,6 +1034,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             lmb_released,
                             app.editor_state.snap_settings.enabled,
                             app.editor_state.snap_settings.grid_increment,
+                            base_scale,
                         )
                     };
 
@@ -1146,6 +1165,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     lmb_released,
                     app.editor_state.snap_settings.enabled,
                     app.editor_state.snap_settings.grid_increment,
+                    1.0,
                 );
                 gizmo_consumed = gizmo_res.consumed && !is_object_dragging_active;
                 if gizmo_consumed {
@@ -1647,27 +1667,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.ctx().request_repaint();
                 }
                 PointerInteractionState::ViewportOrbiting => {
-                    let moved_dist = if let (Some(press), Some(curr)) =
-                        (app.editor_state.pointer_press_pos, mouse_pos)
-                    {
-                        (Vec2::new(curr.x, curr.y) - press).length()
-                    } else {
-                        0.0
-                    };
-                    // Normal static click on empty space clears selection!
-                    if moved_dist < 4.0 && !input.modifiers.shift {
-                        if app.editor_state.edit_mode == EditMode::Object {
-                            app.selection.deselect();
-                            app.status_message = "Selection cleared".to_string();
-                        } else if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
-                            edit_mesh.deselect_all(EditSelectionMode::Vertex);
-                            app.editor_state.active_vertex = None;
-                            app.sync_edit_mesh_to_scene();
-                        }
-                        ui.ctx().request_repaint();
-                    }
+                    // Clicking or dragging in empty space preserves the active selection and gizmo vectors
                     app.editor_state.pointer_press_pos = None;
                     app.editor_state.pointer_state = PointerInteractionState::Idle;
+                    ui.ctx().request_repaint();
                 }
                 PointerInteractionState::BoxSelecting => {
                     if let Some(start) = app.editor_state.box_select_start.take()
@@ -2443,9 +2446,10 @@ mod tests {
         let elapsed = t0.elapsed();
 
         assert_eq!(cache.build_count, 1);
+        let max_allowed_ms = if cfg!(debug_assertions) { 250 } else { 50 };
         assert!(
-            elapsed.as_millis() < 50,
-            "10k vertices batched overlay build should take < 50ms (took {}ms)",
+            elapsed.as_millis() < max_allowed_ms,
+            "10k vertices batched overlay build should take < {max_allowed_ms}ms (took {}ms)",
             elapsed.as_millis()
         );
 
@@ -2464,9 +2468,10 @@ mod tests {
         );
         let cached_elapsed = t1.elapsed();
         assert_eq!(cache.build_count, 1);
+        let max_cached_ms = if cfg!(debug_assertions) { 25 } else { 5 };
         assert!(
-            cached_elapsed.as_millis() < 5,
-            "Cached frame must take < 5ms (took {}µs)",
+            cached_elapsed.as_millis() < max_cached_ms,
+            "Cached frame must take < {max_cached_ms}ms (took {}µs)",
             cached_elapsed.as_micros()
         );
     }

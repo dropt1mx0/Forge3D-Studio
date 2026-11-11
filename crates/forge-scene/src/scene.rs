@@ -548,7 +548,7 @@ impl Scene {
         // 1. Ground Plane (10x10)
         let plane_mesh = generate_plane(10.0, 10);
         let plane = SceneObject::new("Ground Plane", PrimitiveType::Plane, plane_mesh)
-            .with_color([0.28, 0.30, 0.34, 1.0])
+            .with_color([0.72, 0.74, 0.78, 1.0])
             .with_transform(Transform::from_translation(Vec3::ZERO));
         scene.add_object(plane);
 

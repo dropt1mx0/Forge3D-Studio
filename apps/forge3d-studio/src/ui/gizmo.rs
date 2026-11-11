@@ -104,6 +104,7 @@ pub fn render_and_interact_gizmo(
     lmb_released: bool,
     snap_enabled: bool,
     grid_increment: f32,
+    base_scale: f32,
 ) -> GizmoInteractionResult {
     let Some(center_screen) = world_to_screen_pos(pivot_world, camera_view_proj, viewport_rect)
     else {
@@ -117,9 +118,30 @@ pub fn render_and_interact_gizmo(
         };
     };
 
-    // Calculate dynamic 3D scale so gizmo maintains a comfortable screen size (~90 pixels)
-    let dist_to_cam = (camera_eye - pivot_world).length().max(0.5);
-    let gizmo_3d_len = (dist_to_cam * 0.16).clamp(0.5, 50.0);
+    // Dynamic 3D world-space length that scales in perspective together with the object and camera zoom
+    let base_world_len = (1.15 * base_scale.clamp(0.2, 50.0)).clamp(0.4, 50.0);
+
+    let up_hint = if (camera_eye - pivot_world).normalize_or_zero().dot(Vec3::Y).abs() > 0.9 {
+        Vec3::X
+    } else {
+        Vec3::Y
+    };
+    let test_pos = pivot_world + up_hint * base_world_len;
+    let gizmo_3d_len = if let Some(s_test) = world_to_screen_pos(test_pos, camera_view_proj, viewport_rect) {
+        let current_screen_len = (s_test - center_screen).length();
+        if current_screen_len < 26.0 {
+            // Far distance fallback: maintain at least 26px on screen so user can still easily hit-test and click it
+            base_world_len * (26.0 / current_screen_len.max(0.01))
+        } else if current_screen_len > 340.0 {
+            // Extreme close-up clamp: cap at 340px so handles stay within screen bounds
+            base_world_len * (340.0 / current_screen_len)
+        } else {
+            // 1:1 true 3D world-space scaling with camera zoom
+            base_world_len
+        }
+    } else {
+        base_world_len
+    };
 
     // Orientation basis vectors
     let (axis_x, axis_y, axis_z) = match orientation {
@@ -480,7 +502,7 @@ pub fn render_and_interact_gizmo(
         Color32::from_rgb(65, 130, 245) // Blue
     };
 
-    let thickness = 3.5;
+    let thickness = 2.5;
 
     match mode {
         GizmoMode::Translate => {
@@ -509,7 +531,7 @@ pub fn render_and_interact_gizmo(
                 } else {
                     Color32::from_rgba_unmultiplied(65, 130, 245, 190)
                 };
-                let r = Rect::from_center_size(sxy, EguiVec2::splat(11.0));
+                let r = Rect::from_center_size(sxy, EguiVec2::splat(9.0));
                 painter.rect_filled(r, 2.0, col);
                 painter.rect_stroke(
                     r,
@@ -525,7 +547,7 @@ pub fn render_and_interact_gizmo(
                 } else {
                     Color32::from_rgba_unmultiplied(65, 225, 75, 190)
                 };
-                let r = Rect::from_center_size(sxz, EguiVec2::splat(11.0));
+                let r = Rect::from_center_size(sxz, EguiVec2::splat(9.0));
                 painter.rect_filled(r, 2.0, col);
                 painter.rect_stroke(
                     r,
@@ -541,7 +563,7 @@ pub fn render_and_interact_gizmo(
                 } else {
                     Color32::from_rgba_unmultiplied(235, 65, 65, 190)
                 };
-                let r = Rect::from_center_size(syz, EguiVec2::splat(11.0));
+                let r = Rect::from_center_size(syz, EguiVec2::splat(9.0));
                 painter.rect_filled(r, 2.0, col);
                 painter.rect_stroke(
                     r,
@@ -573,7 +595,7 @@ pub fn render_and_interact_gizmo(
                 Color32::from_gray(220)
             };
             painter.rect_filled(
-                Rect::from_center_size(center_screen, EguiVec2::splat(13.0)),
+                Rect::from_center_size(center_screen, EguiVec2::splat(10.0)),
                 2.0,
                 center_col,
             );
@@ -681,8 +703,8 @@ fn dist_to_projected_ring(
 fn draw_arrowhead(painter: &Painter, start: Pos2, end: Pos2, color: Color32) {
     let dir = (end - start).normalized();
     let perp = EguiVec2::new(-dir.y, dir.x);
-    let arrow_len = 10.0;
-    let arrow_width = 5.0;
+    let arrow_len = 8.5;
+    let arrow_width = 4.2;
 
     let base = end - dir * arrow_len;
     let p1 = base + perp * arrow_width;

@@ -258,17 +258,14 @@ fn test_pointer_release_resets_interaction_state() {
         "Orbit drag must not clear selection on release"
     );
 
-    // Case 2: Static click (< 4.0 px) on empty space clears selection
+    // Case 2: Static click (< 4.0 px) on empty space preserves selection and gizmo
     app.editor_state.pointer_state = PointerInteractionState::ViewportOrbiting;
     app.editor_state.pointer_press_pos = Some(Vec2::new(100.0, 100.0));
     let static_click_pos = Vec2::new(101.0, 101.0);
     let dist_static = (static_click_pos - app.editor_state.pointer_press_pos.unwrap()).length();
     assert!(dist_static < 4.0);
 
-    // Release
-    if dist_static < 4.0 {
-        app.selection.deselect();
-    }
+    // Release (selection is preserved, not cleared)
     app.editor_state.pointer_state = PointerInteractionState::Idle;
     app.editor_state.pointer_press_pos = None;
 
@@ -277,8 +274,8 @@ fn test_pointer_release_resets_interaction_state() {
         PointerInteractionState::Idle
     );
     assert!(
-        app.selection.is_empty(),
-        "Static click on empty space must clear selection"
+        app.selection.is_selected(cube_id),
+        "Click on empty space must preserve selection and keep gizmo active"
     );
 }
 

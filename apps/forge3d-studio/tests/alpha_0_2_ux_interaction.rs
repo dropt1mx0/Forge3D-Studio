@@ -288,6 +288,7 @@ fn test_panel_settings_persistence_and_clamping() {
         zoom_to_cursor: true,
         smooth_zoom: true,
         menu_bar_right_width: 1000.0, // Above max (500.0)
+        recent_projects: Vec::new(),
     };
 
     let clamped = unconstrained.clamped();
