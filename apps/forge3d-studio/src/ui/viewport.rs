@@ -573,7 +573,13 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.editor_state.transform_mode = TransformMode::Rotate;
                 app.begin_modal_transform(TransformMode::Rotate, mouse_vec2);
                 ui.ctx().request_repaint();
-            } else if input.key_pressed(Key::S) {
+            } else if input.modifiers.shift && input.key_pressed(Key::S) {
+                app.active_pie_menu = Some(PieMenuState {
+                    kind: PieMenuKind::SnapCursor,
+                    center: mouse_pos.unwrap_or_else(|| rect.center()),
+                });
+                ui.ctx().request_repaint();
+            } else if !input.modifiers.any() && input.key_pressed(Key::S) {
                 app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Scale;
                 app.editor_state.transform_mode = TransformMode::Scale;
                 app.begin_modal_transform(TransformMode::Scale, mouse_vec2);
@@ -2612,6 +2618,11 @@ enum PieMenuAction {
     SetShadingWireframe(bool),
     OpenMaterialEditor,
     SetPivotPoint(PivotPoint),
+    CursorToSelected,
+    CursorToWorldOrigin,
+    CursorToGrid,
+    SelectionToCursor,
+    SelectionToGrid,
 }
 
 struct PieSlice {
@@ -2639,6 +2650,21 @@ fn execute_pie_action(app: &mut Forge3dStudioApp, action: &PieMenuAction) {
         PieMenuAction::SetPivotPoint(pivot) => {
             app.editor_state.pivot_point = *pivot;
             app.status_message = format!("Pivot Point: {:?}", pivot);
+        }
+        PieMenuAction::CursorToSelected => {
+            app.cursor_to_selected();
+        }
+        PieMenuAction::CursorToWorldOrigin => {
+            app.cursor_to_world_origin();
+        }
+        PieMenuAction::CursorToGrid => {
+            app.cursor_to_grid();
+        }
+        PieMenuAction::SelectionToCursor => {
+            app.selection_to_cursor();
+        }
+        PieMenuAction::SelectionToGrid => {
+            app.selection_to_grid();
         }
     }
 }
@@ -2763,6 +2789,51 @@ fn render_pie_menu_overlay(
                     subtext: "4",
                     action: PieMenuAction::SetPivotPoint(PivotPoint::IndividualOrigins),
                     is_active: app.editor_state.pivot_point == PivotPoint::IndividualOrigins,
+                },
+            ],
+        ),
+        PieMenuKind::SnapCursor => (
+            "SNAP / 3D CURSOR",
+            vec![
+                PieSlice {
+                    angle: -std::f32::consts::FRAC_PI_2,
+                    icon: "🎯",
+                    label: "Cursor to Selected",
+                    subtext: "8",
+                    action: PieMenuAction::CursorToSelected,
+                    is_active: false,
+                },
+                PieSlice {
+                    angle: std::f32::consts::FRAC_PI_2,
+                    icon: "📍",
+                    label: "Selection to Cursor",
+                    subtext: "2",
+                    action: PieMenuAction::SelectionToCursor,
+                    is_active: false,
+                },
+                PieSlice {
+                    angle: std::f32::consts::PI,
+                    icon: "🌐",
+                    label: "Cursor to Origin",
+                    subtext: "4",
+                    action: PieMenuAction::CursorToWorldOrigin,
+                    is_active: app.editor_state.cursor_3d == Vec3::ZERO,
+                },
+                PieSlice {
+                    angle: 0.0,
+                    icon: "📐",
+                    label: "Selection to Grid",
+                    subtext: "6",
+                    action: PieMenuAction::SelectionToGrid,
+                    is_active: false,
+                },
+                PieSlice {
+                    angle: -std::f32::consts::FRAC_PI_4,
+                    icon: "📏",
+                    label: "Cursor to Grid",
+                    subtext: "9",
+                    action: PieMenuAction::CursorToGrid,
+                    is_active: false,
                 },
             ],
         ),

@@ -103,6 +103,7 @@ pub enum PieMenuKind {
     Mode,
     Shading,
     Pivot,
+    SnapCursor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2092,6 +2093,136 @@ impl Forge3dStudioApp {
         }
     }
 
+    pub fn cursor_to_selected(&mut self) {
+        if self.editor_state.edit_mode == EditMode::Edit {
+            if let Some((_, edit_mesh)) = &self.active_edit_mesh {
+                if let Some(center_local) = edit_mesh.selection_center(forge_geometry::EditSelectionMode::Vertex) {
+                    let center_world = if let Some(aid) = self.selection.active_id
+                        && let Some(obj) = self.scene.get_object(aid)
+                    {
+                        obj.local_transform.to_matrix().transform_point3(center_local)
+                    } else {
+                        center_local
+                    };
+                    self.editor_state.cursor_3d = center_world;
+                    self.status_message = format!(
+                        "Cursor to Selected: ({:.2}, {:.2}, {:.2})",
+                        center_world.x, center_world.y, center_world.z
+                    );
+                    return;
+                }
+            }
+        }
+
+        let bbox = self.scene.selected_aabb(&self.selection);
+        if !bbox.is_empty() {
+            self.editor_state.cursor_3d = bbox.center();
+            self.status_message = format!(
+                "Cursor to Selected: ({:.2}, {:.2}, {:.2})",
+                bbox.center().x, bbox.center().y, bbox.center().z
+            );
+        } else if let Some(aid) = self.selection.active_id
+            && let Some(obj) = self.scene.get_object(aid)
+        {
+            self.editor_state.cursor_3d = obj.local_transform.translation;
+            self.status_message = format!(
+                "Cursor to Active: ({:.2}, {:.2}, {:.2})",
+                obj.local_transform.translation.x,
+                obj.local_transform.translation.y,
+                obj.local_transform.translation.z
+            );
+        } else {
+            self.status_message = "No object selected".to_string();
+        }
+    }
+
+    pub fn cursor_to_world_origin(&mut self) {
+        self.editor_state.cursor_3d = Vec3::ZERO;
+        self.status_message = "Cursor to World Origin (0, 0, 0)".to_string();
+    }
+
+    pub fn cursor_to_grid(&mut self) {
+        let step = self.editor_state.snap_settings.grid_increment.max(0.01);
+        self.editor_state.cursor_3d = (self.editor_state.cursor_3d / step).round() * step;
+        self.status_message = format!(
+            "Cursor to Grid: ({:.2}, {:.2}, {:.2})",
+            self.editor_state.cursor_3d.x,
+            self.editor_state.cursor_3d.y,
+            self.editor_state.cursor_3d.z
+        );
+    }
+
+    pub fn selection_to_cursor(&mut self) {
+        let target_cursor = self.editor_state.cursor_3d;
+        let mut transforms = Vec::new();
+
+        if self.selection.selected_ids.is_empty() {
+            if let Some(aid) = self.selection.active_id {
+                if let Some(obj) = self.scene.get_object_mut(aid) {
+                    let old_tf = obj.local_transform;
+                    obj.local_transform.translation = target_cursor;
+                    transforms.push((aid, old_tf, obj.local_transform));
+                }
+            }
+        } else {
+            let bbox = self.scene.selected_aabb(&self.selection);
+            let center = if !bbox.is_empty() {
+                bbox.center()
+            } else if let Some(aid) = self.selection.active_id && let Some(obj) = self.scene.get_object(aid) {
+                obj.local_transform.translation
+            } else {
+                target_cursor
+            };
+            let delta = target_cursor - center;
+
+            for &id in &self.selection.selected_ids {
+                if let Some(obj) = self.scene.get_object_mut(id) {
+                    let old_tf = obj.local_transform;
+                    obj.local_transform.translation += delta;
+                    transforms.push((id, old_tf, obj.local_transform));
+                }
+            }
+        }
+
+        if !transforms.is_empty() {
+            self.history.push(Action::MultiTransform { transforms });
+            self.scene.dirty = true;
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_all_meshes();
+            }
+            self.status_message = "Selection to Cursor".to_string();
+        } else {
+            self.status_message = "No object selected to move".to_string();
+        }
+    }
+
+    pub fn selection_to_grid(&mut self) {
+        let step = self.editor_state.snap_settings.grid_increment.max(0.01);
+        let mut transforms = Vec::new();
+
+        for &id in &self.selection.selected_ids {
+            if let Some(obj) = self.scene.get_object_mut(id) {
+                let old_tf = obj.local_transform;
+                let snapped = (obj.local_transform.translation / step).round() * step;
+                if snapped != obj.local_transform.translation {
+                    obj.local_transform.translation = snapped;
+                    transforms.push((id, old_tf, obj.local_transform));
+                }
+            }
+        }
+
+        if !transforms.is_empty() {
+            self.history.push(Action::MultiTransform { transforms });
+            self.scene.dirty = true;
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_all_meshes();
+            }
+            self.status_message = "Selection to Grid".to_string();
+        } else {
+            self.status_message = "Selection already on Grid".to_string();
+        }
+    }
+
     pub fn undo(&mut self) {
         if let Some(desc) = self.history.undo(&mut self.scene) {
             self.status_message = format!("Undo: {desc}");
@@ -3471,5 +3602,54 @@ mod tests {
         app.editor_state.active_snap_target = Some(Vec3::new(4.0, 5.0, 6.0));
         app.apply_modal_transform();
         assert_eq!(app.editor_state.active_snap_target, None);
+    }
+
+    #[test]
+    fn test_snap_cursor_and_selection_operations() {
+        let mut app = Forge3dStudioApp::new_headless();
+        assert_eq!(app.editor_state.cursor_3d, Vec3::ZERO);
+
+        // Select the Cube object explicitly
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        app.selection.select(cube_id);
+        let obj_pos = app.scene.get_object(cube_id).unwrap().local_transform.translation;
+
+        // 1. Cursor to Selected
+        app.cursor_to_selected();
+        assert!((app.editor_state.cursor_3d - obj_pos).length() < 1e-4);
+
+        // 2. Cursor to World Origin
+        app.cursor_to_world_origin();
+        assert_eq!(app.editor_state.cursor_3d, Vec3::ZERO);
+
+        // 3. Move 3D Cursor and Selection to Cursor
+        app.editor_state.cursor_3d = Vec3::new(5.0, 10.0, 15.0);
+        app.selection_to_cursor();
+        let new_pos = app.scene.get_object(cube_id).unwrap().local_transform.translation;
+        assert!((new_pos - Vec3::new(5.0, 10.0, 15.0)).length() < 1e-4);
+
+        // 4. Cursor to Grid
+        app.editor_state.cursor_3d = Vec3::new(2.4, 3.7, -1.2);
+        app.editor_state.snap_settings.grid_increment = 1.0;
+        app.cursor_to_grid();
+        assert_eq!(app.editor_state.cursor_3d, Vec3::new(2.0, 4.0, -1.0));
+
+        // 5. Selection to Grid
+        app.selection_to_grid();
+        let grid_pos = app.scene.get_object(cube_id).unwrap().local_transform.translation;
+        assert_eq!(grid_pos, Vec3::new(5.0, 10.0, 15.0));
+
+        // 6. Pie Menu Kind SnapCursor state
+        app.active_pie_menu = Some(PieMenuState {
+            kind: PieMenuKind::SnapCursor,
+            center: egui::pos2(200.0, 200.0),
+        });
+        assert_eq!(app.active_pie_menu.unwrap().kind, PieMenuKind::SnapCursor);
     }
 }
