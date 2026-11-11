@@ -13,7 +13,7 @@ use forge_scene::{
 
 use crate::ui::gizmo::GizmoState;
 use crate::ui::menu_bar::render_menu_bar;
-use crate::ui::outliner::render_outliner;
+use crate::ui::outliner::{render_outliner, OutlinerFilterSettings, OutlinerTypeFilter};
 use crate::ui::properties::render_properties;
 use crate::ui::status_bar::render_status_bar;
 use crate::ui::toolbar::render_toolbar;
@@ -184,6 +184,9 @@ pub struct Forge3dStudioApp {
 
     /// Viewport Overlays popover dropdown menu open state.
     pub show_overlays_dropdown: bool,
+
+    /// Blender-style Outliner search, restriction toggles, and filter settings.
+    pub outliner_filter: OutlinerFilterSettings,
 }
 
 /// Tracks a pending asynchronous hover picking request with full context to validate click pre-polling.
@@ -419,6 +422,7 @@ impl Forge3dStudioApp {
             pending_hover_pick: None,
             local_view_saved_visibility: None,
             show_overlays_dropdown: false,
+            outliner_filter: OutlinerFilterSettings::default(),
         }
     }
 
@@ -472,6 +476,7 @@ impl Forge3dStudioApp {
             pending_hover_pick: None,
             local_view_saved_visibility: None,
             show_overlays_dropdown: false,
+            outliner_filter: OutlinerFilterSettings::default(),
         }
     }
 
@@ -2256,6 +2261,106 @@ impl Forge3dStudioApp {
         self.status_message = format!(
             "Viewport Overlays: {}",
             if self.editor_state.show_overlays { "ON" } else { "OFF" }
+        );
+    }
+
+    /// Returns true if an object matches the active Outliner filters (search text, type, selection, visibility).
+    pub fn object_matches_outliner_filter(&self, id: ObjectId) -> bool {
+        let Some(obj) = self.scene.objects.get(&id) else {
+            return false;
+        };
+
+        // 1. Text search query (case-insensitive substring match)
+        let query = self.outliner_filter.search_query.trim().to_lowercase();
+        if !query.is_empty() && !obj.name.to_lowercase().contains(&query) {
+            return false;
+        }
+
+        // 2. Type filter
+        match self.outliner_filter.type_filter {
+            OutlinerTypeFilter::All => {}
+            OutlinerTypeFilter::Meshes => {
+                if obj.primitive_type == PrimitiveType::Camera
+                    || obj.primitive_type == PrimitiveType::Light
+                {
+                    return false;
+                }
+            }
+            OutlinerTypeFilter::Lights => {
+                if obj.primitive_type != PrimitiveType::Light {
+                    return false;
+                }
+            }
+            OutlinerTypeFilter::Cameras => {
+                if obj.primitive_type != PrimitiveType::Camera {
+                    return false;
+                }
+            }
+        }
+
+        // 3. Only selected
+        if self.outliner_filter.only_selected && !self.selection.is_selected(id) {
+            return false;
+        }
+
+        // 4. Only visible
+        if self.outliner_filter.only_visible && !obj.visible {
+            return false;
+        }
+
+        true
+    }
+
+    /// Returns true if an object or any of its descendants match the Outliner filter.
+    pub fn outliner_subtree_has_match(&self, id: ObjectId) -> bool {
+        if self.object_matches_outliner_filter(id) {
+            return true;
+        }
+        if let Some(obj) = self.scene.objects.get(&id) {
+            for child_id in &obj.children {
+                if self.outliner_subtree_has_match(*child_id) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Sets selectability flag for all objects in the scene.
+    pub fn make_all_objects_selectable(&mut self, selectable: bool) {
+        for obj in self.scene.objects.values_mut() {
+            obj.selectable = selectable;
+        }
+        self.status_message = if selectable {
+            "All objects marked selectable".to_string()
+        } else {
+            "All objects marked unselectable".to_string()
+        };
+    }
+
+    /// Sets visibility flag for all objects in the scene.
+    pub fn make_all_objects_visible(&mut self, visible: bool) {
+        for obj in self.scene.objects.values_mut() {
+            obj.visible = visible;
+        }
+        self.status_message = if visible {
+            "All objects visible".to_string()
+        } else {
+            "All objects hidden".to_string()
+        };
+    }
+
+    /// Toggles the selectability column visibility in the Outliner.
+    pub fn toggle_outliner_selectability_column(&mut self) {
+        self.outliner_filter.show_selectability_column =
+            !self.outliner_filter.show_selectability_column;
+        self.status_message = format!(
+            "Outliner Selectability Column: {}",
+            if self.outliner_filter.show_selectability_column {
+                "ON"
+            } else {
+                "OFF"
+            }
         );
     }
 
@@ -4252,5 +4357,82 @@ mod tests {
         app.toggle_overlays();
         assert!(app.editor_state.show_overlays);
         assert!(app.status_message.contains("Viewport Overlays: ON"));
+    }
+
+    #[test]
+    fn test_outliner_filter_and_selectability_toggles() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        // 1. Verify default Outliner filter settings
+        assert!(app.outliner_filter.search_query.is_empty());
+        assert_eq!(app.outliner_filter.type_filter, OutlinerTypeFilter::All);
+        assert!(app.outliner_filter.show_selectability_column);
+        assert!(app.outliner_filter.show_visibility_column);
+        assert!(app.outliner_filter.show_lock_column);
+        assert!(!app.outliner_filter.only_selected);
+        assert!(!app.outliner_filter.only_visible);
+
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        let cam_id = app.scene.objects.values().find(|o| o.name == "Camera").unwrap().id;
+
+        // Default state: all match
+        assert!(app.object_matches_outliner_filter(cube_id));
+        assert!(app.object_matches_outliner_filter(sphere_id));
+        assert!(app.object_matches_outliner_filter(cam_id));
+
+        // 2. Search query filtering
+        app.outliner_filter.search_query = "cub".to_string();
+        assert!(app.object_matches_outliner_filter(cube_id));
+        assert!(!app.object_matches_outliner_filter(sphere_id));
+        assert!(!app.object_matches_outliner_filter(cam_id));
+
+        // Case-insensitivity check
+        app.outliner_filter.search_query = "SPHERE".to_string();
+        assert!(!app.object_matches_outliner_filter(cube_id));
+        assert!(app.object_matches_outliner_filter(sphere_id));
+
+        // 3. Type filtering
+        app.outliner_filter.search_query.clear();
+        app.outliner_filter.type_filter = OutlinerTypeFilter::Cameras;
+        assert!(app.object_matches_outliner_filter(cam_id));
+        assert!(!app.object_matches_outliner_filter(cube_id));
+        assert!(!app.object_matches_outliner_filter(sphere_id));
+
+        app.outliner_filter.type_filter = OutlinerTypeFilter::Meshes;
+        assert!(!app.object_matches_outliner_filter(cam_id));
+        assert!(app.object_matches_outliner_filter(cube_id));
+        assert!(app.object_matches_outliner_filter(sphere_id));
+
+        // 4. Only Selected filtering
+        app.outliner_filter.type_filter = OutlinerTypeFilter::All;
+        app.outliner_filter.only_selected = true;
+        app.selection.select(cube_id);
+        assert!(app.object_matches_outliner_filter(cube_id));
+        assert!(!app.object_matches_outliner_filter(sphere_id));
+        assert!(!app.object_matches_outliner_filter(cam_id));
+
+        // 5. Bulk selectability actions
+        app.outliner_filter.only_selected = false;
+        app.make_all_objects_selectable(false);
+        for obj in app.scene.objects.values() {
+            assert!(!obj.selectable);
+        }
+        assert!(app.status_message.contains("unselectable"));
+
+        app.make_all_objects_selectable(true);
+        for obj in app.scene.objects.values() {
+            assert!(obj.selectable);
+        }
+        assert!(app.status_message.contains("selectable"));
+
+        // 6. Selectability column visibility toggle
+        app.toggle_outliner_selectability_column();
+        assert!(!app.outliner_filter.show_selectability_column);
+        assert!(app.status_message.contains("OFF"));
+
+        app.toggle_outliner_selectability_column();
+        assert!(app.outliner_filter.show_selectability_column);
+        assert!(app.status_message.contains("ON"));
     }
 }

@@ -407,6 +407,49 @@ pub fn get_all_commands() -> Vec<CommandItem> {
             shortcut: "Shift+Alt+Z",
             action_id: "toggle_overlays",
         },
+        // Outliner & Restriction Toggles
+        CommandItem {
+            category: "Outliner",
+            title: "Outliner: Filter Meshes",
+            shortcut: "",
+            action_id: "outliner_filter_meshes",
+        },
+        CommandItem {
+            category: "Outliner",
+            title: "Outliner: Filter Lights",
+            shortcut: "",
+            action_id: "outliner_filter_lights",
+        },
+        CommandItem {
+            category: "Outliner",
+            title: "Outliner: Filter Cameras",
+            shortcut: "",
+            action_id: "outliner_filter_cameras",
+        },
+        CommandItem {
+            category: "Outliner",
+            title: "Outliner: Show All Types",
+            shortcut: "",
+            action_id: "outliner_filter_all",
+        },
+        CommandItem {
+            category: "Outliner",
+            title: "Outliner: Make All Selectable",
+            shortcut: "",
+            action_id: "outliner_all_selectable",
+        },
+        CommandItem {
+            category: "Outliner",
+            title: "Outliner: Make All Unselectable",
+            shortcut: "",
+            action_id: "outliner_all_unselectable",
+        },
+        CommandItem {
+            category: "Outliner",
+            title: "Outliner: Toggle Selectability Column",
+            shortcut: "",
+            action_id: "outliner_toggle_selectability_col",
+        },
         // Edit Operations
         CommandItem {
             category: "Edit",
@@ -782,6 +825,31 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
         }
         "toggle_overlays" => {
             app.toggle_overlays();
+        }
+        "outliner_filter_meshes" => {
+            app.outliner_filter.type_filter = crate::ui::outliner::OutlinerTypeFilter::Meshes;
+            app.status_message = "Outliner: Filtering Meshes".to_string();
+        }
+        "outliner_filter_lights" => {
+            app.outliner_filter.type_filter = crate::ui::outliner::OutlinerTypeFilter::Lights;
+            app.status_message = "Outliner: Filtering Lights".to_string();
+        }
+        "outliner_filter_cameras" => {
+            app.outliner_filter.type_filter = crate::ui::outliner::OutlinerTypeFilter::Cameras;
+            app.status_message = "Outliner: Filtering Cameras".to_string();
+        }
+        "outliner_filter_all" => {
+            app.outliner_filter.type_filter = crate::ui::outliner::OutlinerTypeFilter::All;
+            app.status_message = "Outliner: Showing All Types".to_string();
+        }
+        "outliner_all_selectable" => {
+            app.make_all_objects_selectable(true);
+        }
+        "outliner_all_unselectable" => {
+            app.make_all_objects_selectable(false);
+        }
+        "outliner_toggle_selectability_col" => {
+            app.toggle_outliner_selectability_column();
         }
         "frame_selected" => {
             if let Some(id) = app.selection.active_id
