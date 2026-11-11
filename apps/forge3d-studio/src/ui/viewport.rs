@@ -544,8 +544,13 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.ctx().request_repaint();
         }
 
-        // Framing: 'F' or Home
-        if input.key_pressed(Key::F) {
+        // Framing: 'F' (Object Mode), Alt+Period / Ctrl+Period / Delete (Blender Numpad . compatible), or Home
+        let trigger_frame_selected = (input.key_pressed(Key::F) && app.editor_state.edit_mode == EditMode::Object)
+            || (input.modifiers.alt && input.key_pressed(Key::Period))
+            || (input.modifiers.ctrl && input.key_pressed(Key::Period))
+            || input.key_pressed(Key::Delete);
+
+        if trigger_frame_selected {
             app.frame_selected();
             ui.ctx().request_repaint();
         } else if input.key_pressed(Key::Home) {
@@ -2388,6 +2393,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         ("🔍", "Zoom View (Drag up/down)"),
         ("✋", "Pan View (Drag)"),
         ("🎥", "Toggle Camera View (Numpad 0)"),
+        ("🎯", "Frame Selected (Focus / Numpad .)"),
         (
             match app.camera.projection {
                 CameraProjection::Perspective => "◬",
@@ -2462,6 +2468,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             app.toggle_camera_view();
             ui.ctx().request_repaint();
         } else if idx == 3 && resp.clicked() {
+            app.frame_selected();
+            ui.ctx().request_repaint();
+        } else if idx == 4 && resp.clicked() {
             app.camera.projection = match app.camera.projection {
                 CameraProjection::Perspective => CameraProjection::Orthographic,
                 CameraProjection::Orthographic => CameraProjection::Perspective,

@@ -2390,13 +2390,56 @@ impl Forge3dStudioApp {
     }
 
     pub fn frame_selected(&mut self) {
-        let bbox = self.scene.selected_aabb(&self.selection);
+        if self.editor_state.edit_mode == EditMode::Edit {
+            if let Some((active_id, edit_mesh)) = &self.active_edit_mesh {
+                let aid = *active_id;
+                let tf = self.scene.world_transform(aid);
+                let model_mat = tf.to_matrix();
+                let sel_pts: Vec<forge_math::Vec3> = edit_mesh
+                    .vertices
+                    .iter()
+                    .filter(|v| v.selected)
+                    .map(|v| model_mat.transform_point3(v.position))
+                    .collect();
+                if !sel_pts.is_empty() {
+                    let aabb = forge_math::Aabb::from_points(&sel_pts);
+                    self.camera.frame_box(&aabb);
+                    self.status_message = format!("Framed {} Selected Vertex/Vertices", sel_pts.len());
+                    self.pending_hover_pick = None;
+                    if let Some(r) = &mut self.renderer {
+                        r.invalidate_picking();
+                    }
+                    return;
+                }
+            }
+        }
+
+        let mut bbox = self.scene.selected_aabb(&self.selection);
+        if bbox.is_empty() {
+            if let Some(aid) = self.selection.active_id {
+                let tf = self.scene.world_transform(aid);
+                if let Some(obj) = self.scene.get_object(aid) {
+                    if !obj.mesh.aabb.is_empty() {
+                        let corners = [
+                            tf.transform_point(Vec3::new(obj.mesh.aabb.min.x, obj.mesh.aabb.min.y, obj.mesh.aabb.min.z)),
+                            tf.transform_point(Vec3::new(obj.mesh.aabb.max.x, obj.mesh.aabb.max.y, obj.mesh.aabb.max.z)),
+                        ];
+                        bbox = forge_math::Aabb::from_points(&corners);
+                    } else {
+                        bbox = forge_math::Aabb::from_center_extents(tf.translation, Vec3::splat(1.0));
+                    }
+                }
+            } else {
+                bbox = self.scene.scene_aabb();
+            }
+        }
+
         self.camera.frame_box(&bbox);
         self.pending_hover_pick = None;
         if let Some(r) = &mut self.renderer {
             r.invalidate_picking();
         }
-        self.status_message = "Framed Selected".to_string();
+        self.status_message = "Framed Selected (Focus)".to_string();
     }
 
     pub fn frame_all(&mut self) {
@@ -3951,5 +3994,28 @@ mod tests {
         app.undo();
         let restored_obj = app.scene.get_object(sphere_id).unwrap();
         assert_eq!(restored_obj.mesh.vertices.len(), orig_mesh.vertices.len());
+    }
+
+    #[test]
+    fn test_frame_selected_object_and_edit_mode() {
+        let mut app = Forge3dStudioApp::new_headless();
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        app.selection.select(cube_id);
+
+        let initial_eye = app.camera.eye;
+        app.frame_selected();
+        assert!(app.status_message.contains("Framed Selected"));
+        assert_ne!(app.camera.eye, initial_eye);
+        // Target should be centered near cube position (0, 0.5, 0)
+        assert!((app.camera.target - Vec3::new(0.0, 0.5, 0.0)).length() < 0.2);
+
+        // Test in Edit Mode with selected vertices
+        app.set_edit_mode(EditMode::Edit);
+        if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+            edit_mesh.vertices[0].selected = true;
+            edit_mesh.vertices[1].selected = true;
+        }
+        app.frame_selected();
+        assert!(app.status_message.contains("Framed"));
     }
 }
