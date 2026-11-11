@@ -838,6 +838,7 @@ pub fn render_command_palette(app: &mut Forge3dStudioApp, ctx: &egui::Context) {
             }
 
             egui::ScrollArea::vertical()
+                .id_salt("command_palette_scroll")
                 .max_height(280.0)
                 .show(ui, |ui| {
                     if matching.is_empty() {

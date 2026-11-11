@@ -6,7 +6,7 @@ use forge_geometry::primitives::{
 use forge_math::{Transform, Vec3};
 use forge_render::{CameraProjection, ViewPreset};
 use forge_scene::{
-    Action, EditMode, ForgeProject, LightData, LightKind, PrimitiveType, Scene, SceneObject,
+    Action, EditMode, ForgeProject, LightData, LightKind, PrimitiveType, SceneObject,
     WorkspaceMode,
 };
 
@@ -14,26 +14,17 @@ use crate::app::Forge3dStudioApp;
 
 pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     egui::MenuBar::new().ui(ui, |ui| {
-        if let Some(logo) = &app.logo_texture {
-            ui.add(
-                egui::Image::new((logo.id(), egui::vec2(22.0, 22.0)))
-                    .fit_to_exact_size(egui::vec2(22.0, 22.0)),
-            );
-        }
-        ui.label(
-            egui::RichText::new("Forge3D")
-                .strong()
-                .size(13.0)
-                .color(egui::Color32::from_rgb(59, 130, 246)),
-        );
-        ui.add_space(2.0);
         // ---------------- File Menu ----------------
         ui.menu_button("File", |ui| {
+            if ui.button("Project Hub...").clicked() {
+                app.is_in_startup_hub = true;
+                ui.close();
+            }
+
+            ui.separator();
+
             if ui.button("New Scene").clicked() {
-                app.scene = Scene::create_default_scene();
-                app.selection.deselect();
-                app.history.clear();
-                app.status_message = "Created new scene".to_string();
+                app.start_new_scene();
                 ui.close();
             }
 
@@ -70,6 +61,10 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     Ok(json) => match std::fs::write(default_path, json) {
                         Ok(_) => {
                             app.status_message = format!("Saved project to {default_path}");
+                            app.editor_state.panel_settings.add_recent_project(
+                                default_path.to_string(),
+                                app.scene.name.clone(),
+                            );
                         }
                         Err(e) => {
                             app.status_message = format!("Write error: {e}");
@@ -483,7 +478,7 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     let mesh = generate_plane(8.0, 8);
                     let id = app.scene.add_object(
                         SceneObject::new("Plane", PrimitiveType::Plane, mesh)
-                            .with_color([0.28, 0.30, 0.34, 1.0])
+                            .with_color([0.72, 0.74, 0.78, 1.0])
                             .with_transform(Transform::from_translation(cursor)),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
@@ -1100,6 +1095,18 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 &mut app.show_material_editor,
                 "Show PBR Material & Lighting Inspector",
             );
+            ui.separator();
+            let is_light = app.editor_state.panel_settings.is_light_theme;
+            let theme_label = if is_light {
+                "Theme: Light (Switch to Dark)"
+            } else {
+                "Theme: Dark (Switch to Light)"
+            };
+            if ui.button(theme_label).clicked() {
+                app.toggle_theme(ui.ctx());
+                ui.close();
+            }
+            ui.separator();
             if ui.button("Reset Workspace Layout").clicked() {
                 app.editor_state.panel_settings = forge_scene::PanelSettings::default();
                 let _ = app.editor_state.panel_settings.save();
@@ -1121,62 +1128,9 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         });
 
-        // ---------------- Right-aligned Window Controls & Layout Selector ----------------
+        // ---------------- Right-aligned Layout Mode Selector ----------------
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-
-            // Close button with hover highlight
-            let close_resp = ui.add(
-                egui::Button::new(
-                    egui::RichText::new("✕")
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(180, 190, 210)),
-                )
-                .fill(egui::Color32::TRANSPARENT)
-                .corner_radius(egui::CornerRadius::same(3))
-                .min_size(egui::vec2(24.0, 20.0)),
-            );
-            if close_resp.clicked() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-
-            // Maximize / Restore button
-            let is_maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
-            let max_symbol = if is_maximized { "⧉" } else { "▢" };
-            let max_resp = ui.add(
-                egui::Button::new(
-                    egui::RichText::new(max_symbol)
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(180, 190, 210)),
-                )
-                .fill(egui::Color32::TRANSPARENT)
-                .corner_radius(egui::CornerRadius::same(3))
-                .min_size(egui::vec2(24.0, 20.0)),
-            );
-            if max_resp.clicked() {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
-            }
-
-            // Minimize button
-            let min_resp = ui.add(
-                egui::Button::new(
-                    egui::RichText::new("—")
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(180, 190, 210)),
-                )
-                .fill(egui::Color32::TRANSPARENT)
-                .corner_radius(egui::CornerRadius::same(3))
-                .min_size(egui::vec2(24.0, 20.0)),
-            );
-            if min_resp.clicked() {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-
-            ui.add_space(4.0);
-            ui.separator();
-            ui.add_space(4.0);
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
 
             // Layout Mode Selector
             let current_ws = app.editor_state.workspace;
@@ -1245,29 +1199,6 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         app.set_workspace(WorkspaceMode::Scripting);
                     }
                 });
-
-            // Draggable window title space in the center
-            let remaining_w = ui.available_width();
-            if remaining_w > 10.0 {
-                let (drag_rect, drag_resp) = ui.allocate_exact_size(
-                    egui::vec2(remaining_w, 20.0),
-                    egui::Sense::click_and_drag(),
-                );
-                if drag_resp.drag_started_by(egui::PointerButton::Primary) {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                }
-                if drag_resp.double_clicked() {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
-                }
-                ui.painter().text(
-                    drag_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "Forge3D Studio",
-                    egui::FontId::proportional(11.0),
-                    egui::Color32::from_rgb(110, 118, 135),
-                );
-            }
         });
     });
 

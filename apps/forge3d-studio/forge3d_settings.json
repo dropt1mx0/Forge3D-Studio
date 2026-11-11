@@ -2,7 +2,7 @@
   "toolbar_width": 82.09375,
   "toolbar_visible": true,
   "toolbar_mode": "IconOnly",
-  "sidebar_width": 360.3125,
+  "sidebar_width": 350.0,
   "sidebar_visible": true,
   "outliner_height_ratio": 0.45,
   "timeline_height": 100.0,
@@ -10,5 +10,7 @@
   "zoom_sensitivity": 1.0,
   "zoom_to_cursor": true,
   "smooth_zoom": true,
-  "menu_bar_right_width": 200.0
+  "menu_bar_right_width": 200.0,
+  "is_light_theme": true,
+  "recent_projects": []
 }

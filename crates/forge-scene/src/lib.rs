@@ -16,8 +16,8 @@ pub mod serialization;
 
 pub use editor_state::{
     AxisConstraint, EditMode, EditorState, GizmoMode, ModalTransformState, PanelSettings,
-    PivotPoint, PointerInteractionState, SelectionElement, SnapSettings, ToolbarDisplayMode,
-    TransformMode, TransformOrientation, WorkspaceMode,
+    PivotPoint, PointerInteractionState, RecentProjectItem, SelectionElement, SnapSettings,
+    ToolbarDisplayMode, TransformMode, TransformOrientation, WorkspaceMode,
 };
 pub use extension::{
     CustomOperator, EventHook, ExtensionManager, PluginManifest, PluginPermission, PluginState,

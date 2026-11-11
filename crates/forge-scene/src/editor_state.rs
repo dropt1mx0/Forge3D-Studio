@@ -142,6 +142,14 @@ fn default_menu_bar_right_width() -> f32 {
     200.0
 }
 
+/// Recent project record stored in user configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecentProjectItem {
+    pub path: String,
+    pub name: String,
+    pub timestamp: u64,
+}
+
 /// Persistent workspace panel configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanelSettings {
@@ -161,6 +169,10 @@ pub struct PanelSettings {
     pub smooth_zoom: bool,
     #[serde(default = "default_menu_bar_right_width")]
     pub menu_bar_right_width: f32,
+    #[serde(default)]
+    pub is_light_theme: bool,
+    #[serde(default)]
+    pub recent_projects: Vec<RecentProjectItem>,
 }
 
 impl Default for PanelSettings {
@@ -178,6 +190,8 @@ impl Default for PanelSettings {
             zoom_to_cursor: true,
             smooth_zoom: true,
             menu_bar_right_width: 200.0,
+            is_light_theme: false,
+            recent_projects: Vec::new(),
         }
     }
 }
@@ -204,12 +218,85 @@ impl PanelSettings {
             zoom_to_cursor: self.zoom_to_cursor,
             smooth_zoom: self.smooth_zoom,
             menu_bar_right_width: self.menu_bar_right_width.clamp(80.0, 500.0),
+            is_light_theme: self.is_light_theme,
+            recent_projects: self.recent_projects.clone(),
         }
+    }
+
+    pub fn add_recent_project(&mut self, path: String, name: String) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        self.recent_projects.retain(|p| p.path != path);
+        self.recent_projects.insert(
+            0,
+            RecentProjectItem {
+                path,
+                name,
+                timestamp: now,
+            },
+        );
+        if self.recent_projects.len() > 10 {
+            self.recent_projects.truncate(10);
+        }
+        let _ = self.save();
+    }
+
+    pub fn remove_recent_project(&mut self, path: &str) {
+        self.recent_projects.retain(|p| p.path != path);
+        let _ = self.save();
+    }
+
+    pub fn clear_recent_projects(&mut self) {
+        self.recent_projects.clear();
+        let _ = self.save();
+    }
+
+    /// Resolves the file path for persistent settings.
+    /// Prefers a local file if it exists (for portable runs and tests),
+    /// otherwise defaults to the platform-standard config directory.
+    pub fn settings_path() -> std::path::PathBuf {
+        let local = std::path::PathBuf::from(Self::SETTINGS_FILE);
+        if local.exists() {
+            return local;
+        }
+
+        #[cfg(target_os = "windows")]
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let dir = std::path::PathBuf::from(appdata).join("Forge3D");
+            return dir.join(Self::SETTINGS_FILE);
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+                if !xdg.trim().is_empty() {
+                    return std::path::PathBuf::from(xdg).join("forge3d").join(Self::SETTINGS_FILE);
+                }
+            }
+            if let Ok(home) = std::env::var("HOME") {
+                return std::path::PathBuf::from(home)
+                    .join(".config")
+                    .join("forge3d")
+                    .join(Self::SETTINGS_FILE);
+            }
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        if let Ok(home) = std::env::var("HOME") {
+            let dir = std::path::PathBuf::from(home).join(".config").join("forge3d");
+            return dir.join(Self::SETTINGS_FILE);
+        }
+
+        local
     }
 
     /// Loads settings from disk if available, otherwise returns default settings.
     pub fn load_or_default() -> Self {
-        let Ok(contents) = std::fs::read_to_string(Self::SETTINGS_FILE) else {
+        let path = Self::settings_path();
+        let Ok(contents) = std::fs::read_to_string(path) else {
             return Self::default();
         };
         serde_json::from_str::<Self>(&contents)
@@ -220,7 +307,11 @@ impl PanelSettings {
     /// Saves settings to disk as formatted JSON.
     pub fn save(&self) -> Result<(), std::io::Error> {
         let json = serde_json::to_string_pretty(&self.clamped()).map_err(std::io::Error::other)?;
-        std::fs::write(Self::SETTINGS_FILE, json)
+        let path = Self::settings_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(path, json)
     }
 }
 

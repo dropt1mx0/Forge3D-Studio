@@ -1,14 +1,16 @@
 {
-  "toolbar_width": 82.09375,
+  "toolbar_width": 151.0,
   "toolbar_visible": true,
-  "toolbar_mode": "IconOnly",
-  "sidebar_width": 513.0,
+  "toolbar_mode": "IconAndLabel",
+  "sidebar_width": 368.0,
   "sidebar_visible": true,
   "outliner_height_ratio": 0.70037466,
   "timeline_height": 100.0,
   "timeline_visible": false,
-  "zoom_sensitivity": 1.1,
+  "zoom_sensitivity": 0.8,
   "zoom_to_cursor": true,
   "smooth_zoom": true,
-  "menu_bar_right_width": 200.0
+  "menu_bar_right_width": 200.0,
+  "is_light_theme": false,
+  "recent_projects": []
 }
