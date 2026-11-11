@@ -1714,17 +1714,155 @@ impl Forge3dStudioApp {
         viewport_rect: egui::Rect,
         toggle: bool,
     ) {
+        if self.editor_state.edit_mode == EditMode::Edit {
+            if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+                let aid = self.selection.active_id;
+                let model_mat = aid
+                    .and_then(|id| self.scene.get_object(id))
+                    .map(|obj| obj.local_transform.to_matrix())
+                    .unwrap_or(forge_math::Mat4::IDENTITY);
+
+                let mut modified_count = 0;
+                match self.editor_state.selection_element {
+                    forge_scene::SelectionElement::Vertex => {
+                        for v in &mut edit_mesh.vertices {
+                            let world_p = model_mat.transform_point3(v.position);
+                            if let Some(screen_p) =
+                                crate::ui::gizmo::world_to_screen_pos(world_p, view_proj, viewport_rect)
+                            {
+                                if box_rect.contains(screen_p) {
+                                    if toggle {
+                                        v.selected = !v.selected;
+                                    } else {
+                                        v.selected = true;
+                                    }
+                                    modified_count += 1;
+                                } else if !toggle {
+                                    v.selected = false;
+                                }
+                            }
+                        }
+                    }
+                    forge_scene::SelectionElement::Edge => {
+                        for e in &mut edit_mesh.edges {
+                            if e.v0 < edit_mesh.vertices.len() && e.v1 < edit_mesh.vertices.len() {
+                                let p0 = model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
+                                let p1 = model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
+                                let mid = (p0 + p1) * 0.5;
+                                if let Some(screen_p) =
+                                    crate::ui::gizmo::world_to_screen_pos(mid, view_proj, viewport_rect)
+                                {
+                                    if box_rect.contains(screen_p) {
+                                        if toggle {
+                                            e.selected = !e.selected;
+                                        } else {
+                                            e.selected = true;
+                                        }
+                                        modified_count += 1;
+                                    } else if !toggle {
+                                        e.selected = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    forge_scene::SelectionElement::Face => {
+                        for f in &mut edit_mesh.faces {
+                            let mut face_center = forge_math::Vec3::ZERO;
+                            let mut v_count = 0.0;
+                            for &v_idx in &f.vertices {
+                                if v_idx < edit_mesh.vertices.len() {
+                                    face_center += model_mat.transform_point3(edit_mesh.vertices[v_idx].position);
+                                    v_count += 1.0;
+                                }
+                            }
+                            if v_count > 0.0 {
+                                face_center /= v_count;
+                                if let Some(screen_p) =
+                                    crate::ui::gizmo::world_to_screen_pos(face_center, view_proj, viewport_rect)
+                                {
+                                    if box_rect.contains(screen_p) {
+                                        if toggle {
+                                            f.selected = !f.selected;
+                                        } else {
+                                            f.selected = true;
+                                        }
+                                        modified_count += 1;
+                                    } else if !toggle {
+                                        f.selected = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                self.sync_edit_mesh_to_scene();
+                self.status_message = format!("Box Selected {} element(s)", modified_count);
+                return;
+            }
+        }
+
         let mut hit_ids = std::collections::HashSet::new();
         for (&id, obj) in &self.scene.objects {
-            if !obj.visible {
+            if !obj.visible || !obj.selectable || obj.locked {
                 continue;
             }
             let world_tf = self.scene.world_transform(id);
-            let world_pos = world_tf.translation;
+            let model_mat = world_tf.to_matrix();
+            let mut screen_points = Vec::new();
+
+            // 1. Pivot / Center
             if let Some(screen_p) =
-                crate::ui::gizmo::world_to_screen_pos(world_pos, view_proj, viewport_rect)
-                && box_rect.contains(screen_p)
+                crate::ui::gizmo::world_to_screen_pos(world_tf.translation, view_proj, viewport_rect)
             {
+                screen_points.push(screen_p);
+            }
+
+            // 2. 8 corners of object bounding box
+            let aabb = obj.mesh.aabb;
+            if !aabb.is_empty() {
+                let corners = [
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z)),
+                ];
+                for c in &corners {
+                    if let Some(sp) = crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect) {
+                        screen_points.push(sp);
+                    }
+                }
+            }
+
+            // Check if any point is inside box_rect
+            let mut is_hit = screen_points.iter().any(|p| box_rect.contains(*p));
+
+            // If not directly containing points, check if projected 2D AABB intersects box_rect
+            if !is_hit && screen_points.len() >= 2 {
+                let mut min_x = f32::INFINITY;
+                let mut max_x = f32::NEG_INFINITY;
+                let mut min_y = f32::INFINITY;
+                let mut max_y = f32::NEG_INFINITY;
+                for p in &screen_points {
+                    min_x = min_x.min(p.x);
+                    max_x = max_x.max(p.x);
+                    min_y = min_y.min(p.y);
+                    max_y = max_y.max(p.y);
+                }
+                let screen_aabb = egui::Rect::from_min_max(
+                    egui::pos2(min_x, min_y),
+                    egui::pos2(max_x, max_y),
+                );
+                if screen_aabb.intersects(box_rect) {
+                    is_hit = true;
+                }
+            }
+
+            if is_hit {
                 hit_ids.insert(id);
             }
         }
@@ -3717,5 +3855,44 @@ mod tests {
         // Reset to Studio
         app.editor_state.viewport_matcap = ViewportMatcap::Studio;
         assert_eq!(app.editor_state.viewport_matcap as u32, 0);
+    }
+
+    #[test]
+    fn test_box_select_aabb_and_selectability() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        // Verify Ground Plane is not selectable by default in viewport
+        let ground_id = app.scene.objects.values().find(|o| o.name == "Ground Plane").unwrap().id;
+        assert!(!app.scene.get_object(ground_id).unwrap().selectable);
+
+        // Verify Cube and Sphere are selectable
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        assert!(app.scene.get_object(cube_id).unwrap().selectable);
+        assert!(app.scene.get_object(sphere_id).unwrap().selectable);
+
+        let view_proj = app.camera.view_proj_matrix();
+        let viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
+
+        // Box that encloses the entire screen
+        let large_box = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
+        app.box_select(large_box, view_proj, viewport_rect, false);
+
+        // Should select Cube and Sphere, but NOT Ground Plane
+        assert!(app.selection.selected_ids.contains(&cube_id));
+        assert!(app.selection.selected_ids.contains(&sphere_id));
+        assert!(!app.selection.selected_ids.contains(&ground_id));
+        assert_eq!(app.selection.selected_ids.len(), 2);
+
+        // Test in Edit Mode
+        app.selection.select(cube_id);
+        app.set_edit_mode(EditMode::Edit);
+        assert!(app.active_edit_mesh.is_some());
+
+        // Perform box select on cube vertices
+        app.box_select(large_box, view_proj, viewport_rect, false);
+        let (_, edit_mesh) = app.active_edit_mesh.as_ref().unwrap();
+        let sel_count = edit_mesh.vertices.iter().filter(|v| v.selected).count();
+        assert!(sel_count > 0);
     }
 }

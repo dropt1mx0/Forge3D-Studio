@@ -162,7 +162,7 @@ impl Scene {
         let mut closest_hit: Option<(ObjectId, f32)> = None;
 
         for (&id, obj) in &self.objects {
-            if !obj.visible {
+            if !obj.visible || !obj.selectable {
                 continue;
             }
 
@@ -545,11 +545,12 @@ impl Scene {
     pub fn create_default_scene() -> Self {
         let mut scene = Self::new("Default Scene");
 
-        // 1. Ground Plane (10x10)
+        // 1. Ground Plane (10x10) - unselectable in viewport by default so box select focuses on foreground models
         let plane_mesh = generate_plane(10.0, 10);
         let plane = SceneObject::new("Ground Plane", PrimitiveType::Plane, plane_mesh)
             .with_color([0.72, 0.74, 0.78, 1.0])
-            .with_transform(Transform::from_translation(Vec3::ZERO));
+            .with_transform(Transform::from_translation(Vec3::ZERO))
+            .with_selectable(false);
         scene.add_object(plane);
 
         // 2. Center Cube (1x1x1, resting at y=0.5)

@@ -174,6 +174,16 @@ fn render_object_node(
                 obj.visible = !obj.visible;
             }
 
+            // Selectability toggle icon (Blender-style cursor arrow)
+            let sel_icon = if obj.selectable { "↖" } else { "⊘" };
+            if ui
+                .small_button(sel_icon)
+                .on_hover_text("Toggle Viewport Selectability (Ignore in Box Select / Click)")
+                .clicked()
+            {
+                obj.selectable = !obj.selectable;
+            }
+
             // Lock toggle icon
             let lock_icon = if obj.locked { "[L]" } else { "[-]" };
             if ui

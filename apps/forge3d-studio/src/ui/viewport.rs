@@ -1835,6 +1835,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         }
                     }
                     app.editor_state.pointer_state = PointerInteractionState::Idle;
+                    if app.editor_state.transform_mode == TransformMode::BoxSelect {
+                        app.editor_state.transform_mode = TransformMode::Translate;
+                    }
                 }
                 _ => {
                     app.object_drag_state = None;

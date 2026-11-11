@@ -37,6 +37,15 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.label("Name:");
                 ui.text_edit_singleline(&mut obj.name);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let sel_label = if obj.selectable { "[Selectable]" } else { "[Unselectable]" };
+                    if ui
+                        .selectable_label(obj.selectable, sel_label)
+                        .on_hover_text("Toggle Viewport Selectability (Exclude from Box Select / Click)")
+                        .clicked()
+                    {
+                        obj.selectable = !obj.selectable;
+                    }
+
                     let lock_icon = if obj.locked { "[Locked]" } else { "[Unlocked]" };
                     if ui
                         .selectable_label(obj.locked, lock_icon)

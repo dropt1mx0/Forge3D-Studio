@@ -591,6 +591,7 @@ fn benchmark_full_frame_cpu_vs_gpu_10k_50k_100k() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+        matcap_mode: 0,
         };
 
         // Warmup frame
@@ -783,6 +784,7 @@ fn test_runtime_stress_scenarios() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+        matcap_mode: 0,
         };
         renderer.render_with_edit_mesh(
             &ctx.device,
@@ -880,6 +882,7 @@ fn test_runtime_stress_scenarios() {
                 draw_vertices: false,
                 is_vertex_mode: false,
                 active_vertex: None,
+        matcap_mode: 0,
             },
         );
         assert!(renderer.edit_mesh_buffers.is_none());
@@ -893,6 +896,7 @@ fn test_runtime_stress_scenarios() {
             draw_vertices: !toggle,
             is_vertex_mode: true,
             active_vertex: None,
+        matcap_mode: 0,
         };
         renderer.render_with_edit_mesh(
             &ctx.device,

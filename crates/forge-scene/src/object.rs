@@ -92,6 +92,10 @@ pub struct TransformLocks {
     pub lock_scale: [bool; 3],
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// A 3D object in the scene hierarchy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneObject {
@@ -101,6 +105,8 @@ pub struct SceneObject {
     pub visible: bool,
     #[serde(default)]
     pub locked: bool,
+    #[serde(default = "default_true")]
+    pub selectable: bool,
     #[serde(default)]
     pub locks: TransformLocks,
     pub primitive_type: PrimitiveType,
@@ -130,6 +136,7 @@ impl SceneObject {
             local_transform: Transform::IDENTITY,
             visible: true,
             locked: false,
+            selectable: true,
             locks: TransformLocks::default(),
             primitive_type,
             mesh,
@@ -182,6 +189,12 @@ impl SceneObject {
     /// Builder method to select a renderer material by asset ID.
     pub fn with_material_id(mut self, material_id: impl Into<String>) -> Self {
         self.material_id = Some(material_id.into());
+        self
+    }
+
+    /// Builder method to set viewport selectability.
+    pub fn with_selectable(mut self, selectable: bool) -> Self {
+        self.selectable = selectable;
         self
     }
 

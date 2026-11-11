@@ -871,7 +871,7 @@ impl GpuPickingContext {
                         .retain(|id, _| scene.objects.contains_key(id));
 
                     for (&id, obj) in &scene.objects {
-                        if !obj.visible {
+                        if !obj.visible || !obj.selectable {
                             continue;
                         }
                         let Ok(encoded_id) = encode_object_id(id) else {
@@ -948,7 +948,7 @@ impl GpuPickingContext {
                         .retain(|id, _| scene.objects.contains_key(id));
 
                     for (&id, obj) in &scene.objects {
-                        if !obj.visible {
+                        if !obj.visible || !obj.selectable {
                             continue;
                         }
                         let Ok(encoded_id) = encode_object_id(id) else {

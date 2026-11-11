@@ -81,6 +81,7 @@ fn test_gpu_vertex_handles_primitives_lifecycle() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+            matcap_mode: 0,
         };
 
         // 1. Enter Edit Mode -> initial GPU buffer allocation (vertices, edges, state)
@@ -216,6 +217,7 @@ fn test_gpu_vertex_handles_scale_benchmark() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+            matcap_mode: 0,
         };
 
         // 1. Initial GPU Buffer Allocation & Upload
@@ -365,6 +367,7 @@ fn test_gpu_vertex_handles_selection_and_active_state_sync() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+            matcap_mode: 0,
         },
     );
     assert_eq!(renderer.last_frame_stats.edit_vertex_buffer_reallocs, 1);
@@ -387,6 +390,7 @@ fn test_gpu_vertex_handles_selection_and_active_state_sync() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+            matcap_mode: 0,
         },
     );
 
@@ -420,6 +424,7 @@ fn test_gpu_vertex_handles_selection_and_active_state_sync() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: Some(2),
+            matcap_mode: 0,
         },
     );
 
@@ -447,6 +452,7 @@ fn test_gpu_vertex_handles_selection_and_active_state_sync() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: Some(2),
+            matcap_mode: 0,
         },
     );
     assert_eq!(renderer.last_frame_stats.edit_vertex_buffer_uploads, 0);
@@ -692,6 +698,7 @@ fn test_gpu_vertex_handles_offscreen_pixel_readback() {
             draw_vertices: false,
             is_vertex_mode: true,
             active_vertex: None,
+            matcap_mode: 0,
         },
     );
     let pixels_edges_only = read_pixels();
@@ -713,6 +720,7 @@ fn test_gpu_vertex_handles_offscreen_pixel_readback() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+            matcap_mode: 0,
         },
     );
     let pixels_with_handles = read_pixels();
@@ -747,6 +755,7 @@ fn test_gpu_vertex_handles_offscreen_pixel_readback() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: Some(0),
+            matcap_mode: 0,
         },
     );
     let pixels_with_active = read_pixels();
