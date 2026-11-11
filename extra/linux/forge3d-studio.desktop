@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Forge3D Studio
+Comment=High-performance 3D modeling and rendering studio
+Exec=forge3d-studio %F
+Icon=forge3d-studio
+Terminal=false
+Type=Application
+Categories=Graphics;3DGraphics;Development;
+StartupWMClass=forge3d-studio
+MimeType=application/x-forge3d;model/obj;model/gltf-binary;model/gltf+json;model/stl;
+Keywords=3D;Modeling;CAD;Blender;Sculpting;Mesh;Renderer;Vulkan;
