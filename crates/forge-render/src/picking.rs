@@ -207,8 +207,12 @@ impl StagingBufferPool {
     /// Acquires an idle slot from the pool. Returns `None` if all slots are actively in use.
     pub fn acquire_idle_slot(&mut self) -> Option<usize> {
         self.cleanup_ready_slots();
-        for (i, slot) in self.slots.iter().enumerate() {
+        for (i, slot) in self.slots.iter_mut().enumerate() {
             if slot.status == StagingSlotStatus::Idle {
+                if slot.map_ready.load(Ordering::SeqCst) {
+                    slot.buffer.unmap();
+                    slot.map_ready.store(false, Ordering::SeqCst);
+                }
                 return Some(i);
             }
         }
@@ -225,10 +229,10 @@ impl StagingBufferPool {
         }
     }
 
-    /// Unmaps the buffer if needed and resets the slot back to `Idle`.
+    /// Safely releases a slot, unmapping the buffer if it was mapped, and resetting to Idle.
     pub fn release_slot(&mut self, slot_idx: usize) {
         if let Some(slot) = self.slots.get_mut(slot_idx) {
-            if slot.status == StagingSlotStatus::Mapped {
+            if slot.status == StagingSlotStatus::Mapped || slot.map_ready.load(Ordering::SeqCst) {
                 slot.buffer.unmap();
             }
             slot.status = StagingSlotStatus::Idle;
@@ -1302,7 +1306,13 @@ impl GpuPickingContext {
 
         // Check epoch validity
         if slot.epoch != self.invalidation_epoch {
-            self.staging_pool.release_slot(slot_idx);
+            if slot.status == StagingSlotStatus::Mapped || slot.map_ready.load(Ordering::SeqCst) {
+                slot.buffer.unmap();
+                slot.status = StagingSlotStatus::Idle;
+                slot.map_ready.store(false, Ordering::SeqCst);
+            } else {
+                slot.status = StagingSlotStatus::InvalidatedPending;
+            }
             return None;
         }
 
