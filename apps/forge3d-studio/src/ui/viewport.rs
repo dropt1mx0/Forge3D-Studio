@@ -558,6 +558,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.ctx().request_repaint();
         }
 
+        // X-Ray Mode: Alt + Z
+        if input.modifiers.alt && input.key_pressed(Key::Z) {
+            app.toggle_xray();
+            ui.ctx().request_repaint();
+        }
+
         // Start Modal Transformations (G = Move, R = Rotate, S = Scale)
         let mouse_vec2 = mouse_pos
             .map(|p| Vec2::new(p.x - rect.min.x, p.y - rect.min.y))
@@ -2056,8 +2062,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         ViewportMatcap::Pearl => "Pearl",
     };
 
+    let xray_str = if app.editor_state.show_xray { " | [X-Ray]" } else { "" };
+
     let hud_text = format!(
-        "Live Viewer  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}) | {matcap_str}{ptr_state_str}"
+        "Live Viewer  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}) | {matcap_str}{xray_str}{ptr_state_str}"
     );
     painter.text(
         header_rect.min + EguiVec2::new(12.0, 6.0),
@@ -2384,10 +2392,16 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     }
 
-    // Quick Navigation Buttons (Zoom, Pan, Camera, Ortho/Persp)
+    // Quick Navigation Buttons (Zoom, Pan, Camera, Ortho/Persp, X-Ray)
     let btn_start_y = compass_center.y + compass_radius + 10.0;
     let btn_size = egui::vec2(24.0, 24.0);
     let nav_btn_x = compass_center.x - btn_size.x / 2.0;
+
+    let xray_tooltip = if app.editor_state.show_xray {
+        "Toggle X-Ray Mode (Alt+Z) [Active]"
+    } else {
+        "Toggle X-Ray Mode (Alt+Z)"
+    };
 
     let nav_buttons = [
         ("🔍", "Zoom View (Drag up/down)"),
@@ -2401,6 +2415,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             },
             "Toggle Perspective / Orthographic (Numpad 5)",
         ),
+        ("⛶", xray_tooltip),
     ];
 
     for (idx, (icon, tooltip)) in nav_buttons.iter().enumerate() {
@@ -2410,7 +2425,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         );
         let resp = ui.allocate_rect(btn_rect, Sense::click_and_drag());
         let is_hover = resp.hovered();
-        let bg = if is_hover {
+        let is_active_xray = idx == 5 && app.editor_state.show_xray;
+        let bg = if is_active_xray {
+            Color32::from_rgb(45, 115, 225)
+        } else if is_hover {
             if is_light {
                 Color32::from_rgb(220, 226, 240)
             } else {
@@ -2428,7 +2446,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             bg,
             Stroke::new(
                 1.0,
-                if is_light {
+                if is_active_xray {
+                    Color32::from_rgb(100, 165, 255)
+                } else if is_light {
                     Color32::from_rgb(205, 212, 225)
                 } else {
                     Color32::from_rgb(45, 50, 62)
@@ -2441,7 +2461,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             egui::Align2::CENTER_CENTER,
             *icon,
             egui::FontId::proportional(11.5),
-            if is_hover {
+            if is_active_xray {
+                Color32::WHITE
+            } else if is_hover {
                 if is_light {
                     Color32::BLACK
                 } else {
@@ -2476,6 +2498,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 CameraProjection::Orthographic => CameraProjection::Perspective,
             };
             app.status_message = format!("Projection: {:?}", app.camera.projection);
+            ui.ctx().request_repaint();
+        } else if idx == 5 && resp.clicked() {
+            app.toggle_xray();
             ui.ctx().request_repaint();
         }
     }
@@ -2801,6 +2826,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 enum PieMenuAction {
     SetEditMode(EditMode),
     SetShadingWireframe(bool),
+    ToggleXRay,
     OpenMaterialEditor,
     SetPivotPoint(PivotPoint),
     CursorToSelected,
@@ -2832,6 +2858,9 @@ fn execute_pie_action(app: &mut Forge3dStudioApp, action: &PieMenuAction) {
         PieMenuAction::SetShadingWireframe(wireframe) => {
             app.editor_state.show_wireframe = *wireframe;
             app.status_message = format!("Wireframe: {}", wireframe);
+        }
+        PieMenuAction::ToggleXRay => {
+            app.toggle_xray();
         }
         PieMenuAction::OpenMaterialEditor => {
             app.show_material_editor = true;
@@ -2982,6 +3011,14 @@ fn render_pie_menu_overlay(
                     subtext: "7",
                     action: PieMenuAction::OpenMaterialEditor,
                     is_active: app.show_material_editor,
+                },
+                PieSlice {
+                    angle: std::f32::consts::FRAC_PI_4 * 3.0,
+                    icon: "⛶",
+                    label: "Toggle X-Ray",
+                    subtext: "Alt+Z",
+                    action: PieMenuAction::ToggleXRay,
+                    is_active: app.editor_state.show_xray,
                 },
             ],
         ),

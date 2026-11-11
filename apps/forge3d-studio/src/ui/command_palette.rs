@@ -389,6 +389,12 @@ pub fn get_all_commands() -> Vec<CommandItem> {
             shortcut: "Shift+Z",
             action_id: "toggle_wireframe",
         },
+        CommandItem {
+            category: "View",
+            title: "Toggle X-Ray Mode",
+            shortcut: "Alt+Z",
+            action_id: "toggle_xray",
+        },
         // Edit Operations
         CommandItem {
             category: "Edit",
@@ -755,6 +761,9 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
         "toggle_wireframe" => {
             app.editor_state.show_wireframe = !app.editor_state.show_wireframe;
             app.status_message = format!("Wireframe: {}", app.editor_state.show_wireframe);
+        }
+        "toggle_xray" => {
+            app.toggle_xray();
         }
         "frame_selected" => {
             if let Some(id) = app.selection.active_id

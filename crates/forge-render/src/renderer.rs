@@ -163,13 +163,15 @@ struct GpuMeshEntry {
 }
 
 /// Options controlling Edit Mode wireframe and vertex handles rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EditRenderOptions {
     pub draw_edges: bool,
     pub draw_vertices: bool,
     pub is_vertex_mode: bool,
     pub active_vertex: Option<usize>,
     pub matcap_mode: u32,
+    pub xray: bool,
+    pub xray_alpha: f32,
 }
 
 impl Default for EditRenderOptions {
@@ -180,6 +182,8 @@ impl Default for EditRenderOptions {
             is_vertex_mode: true,
             active_vertex: None,
             matcap_mode: 0,
+            xray: false,
+            xray_alpha: 0.5,
         }
     }
 }
@@ -698,9 +702,13 @@ impl ViewportRenderer {
 
             let world_tf = scene.world_transform(id);
             let is_selected = selection.is_selected(id);
+            let mut obj_color = obj.color;
+            if options.xray {
+                obj_color[3] = (obj_color[3] * options.xray_alpha).clamp(0.05, 1.0);
+            }
             let obj_uniform = ObjectUniform::new(
                 world_tf.to_matrix(),
-                obj.color,
+                obj_color,
                 is_selected,
                 options.matcap_mode,
             );
@@ -1042,7 +1050,11 @@ impl ViewportRenderer {
             }
 
             // Pass B: Render 3D objects with depth test & lighting
-            pass.set_pipeline(&self.pipelines.mesh_pipeline);
+            if options.xray {
+                pass.set_pipeline(&self.pipelines.mesh_xray_pipeline);
+            } else {
+                pass.set_pipeline(&self.pipelines.mesh_pipeline);
+            }
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_bind_group(3, &self.lighting_bind_group, &[]);
 
@@ -1078,7 +1090,11 @@ impl ViewportRenderer {
                 && edit_buffers.index_buffer.count > 0
                 && let Some(entry) = self.mesh_cache.get(&edit_id)
             {
-                pass.set_pipeline(&self.pipelines.edit_edge_pipeline);
+                if options.xray {
+                    pass.set_pipeline(&self.pipelines.edit_edge_xray_pipeline);
+                } else {
+                    pass.set_pipeline(&self.pipelines.edit_edge_pipeline);
+                }
                 pass.set_bind_group(0, &self.camera_bind_group, &[]);
                 pass.set_bind_group(1, &entry.object_bind_group, &[]);
                 pass.set_vertex_buffer(0, edit_buffers.vertex_buffer.buffer.slice(..));
@@ -1098,7 +1114,11 @@ impl ViewportRenderer {
                 && edit_buffers.vert_count > 0
                 && let Some(entry) = self.mesh_cache.get(&edit_id)
             {
-                pass.set_pipeline(&self.pipelines.edit_vertex_pipeline);
+                if options.xray {
+                    pass.set_pipeline(&self.pipelines.edit_vertex_xray_pipeline);
+                } else {
+                    pass.set_pipeline(&self.pipelines.edit_vertex_pipeline);
+                }
                 pass.set_bind_group(0, &self.camera_bind_group, &[]);
                 pass.set_bind_group(1, &entry.object_bind_group, &[]);
                 pass.set_bind_group(2, &self.edit_bind_group, &[]);
@@ -2073,6 +2093,8 @@ mod tests {
                 is_vertex_mode: false,
                 active_vertex: None,
                 matcap_mode: 0,
+                xray: false,
+                xray_alpha: 0.5,
             },
         );
         let pixels_edit_mode =
@@ -2125,6 +2147,8 @@ mod tests {
                 is_vertex_mode: true,
                 active_vertex: None,
                 matcap_mode: 0,
+                xray: false,
+                xray_alpha: 0.5,
             },
         );
 
@@ -2164,6 +2188,8 @@ mod tests {
             is_vertex_mode: true,
             active_vertex: None,
             matcap_mode: 0,
+            xray: false,
+            xray_alpha: 0.5,
         };
 
         // Frame 1: Initial upload
@@ -2245,6 +2271,8 @@ mod tests {
                 is_vertex_mode: true,
                 active_vertex: None,
                 matcap_mode: 0,
+                xray: false,
+                xray_alpha: 0.5,
             },
         );
 
@@ -2267,6 +2295,8 @@ mod tests {
                 is_vertex_mode: true,
                 active_vertex: Some(0),
                 matcap_mode: 0,
+                xray: false,
+                xray_alpha: 0.5,
             },
         );
 
@@ -2329,6 +2359,8 @@ mod tests {
                 is_vertex_mode: true,
                 active_vertex: None,
                 matcap_mode: 0,
+                xray: false,
+                xray_alpha: 0.5,
             },
         );
         let pixels_wireframe_only =
@@ -2352,6 +2384,8 @@ mod tests {
                 is_vertex_mode: true,
                 active_vertex: None,
                 matcap_mode: 0,
+                xray: false,
+                xray_alpha: 0.5,
             },
         );
         let pixels_with_handles =

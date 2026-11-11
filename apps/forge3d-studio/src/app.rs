@@ -2128,6 +2128,14 @@ impl Forge3dStudioApp {
         }
     }
 
+    pub fn toggle_xray(&mut self) {
+        self.editor_state.show_xray = !self.editor_state.show_xray;
+        self.status_message = format!(
+            "X-Ray: {}",
+            if self.editor_state.show_xray { "ON (Alt+Z)" } else { "OFF" }
+        );
+    }
+
     pub fn align_active_camera_to_view(&mut self) {
         if let Some(cam_id) = self.scene.active_camera_id {
             self.scene.align_active_camera_to_view(
@@ -3190,6 +3198,8 @@ impl Forge3dStudioApp {
                             == forge_scene::SelectionElement::Vertex,
                         active_vertex: self.editor_state.active_vertex,
                         matcap_mode: self.editor_state.viewport_matcap as u32,
+                        xray: self.editor_state.show_xray,
+                        xray_alpha: self.editor_state.xray_alpha,
                     };
 
                     renderer.render_with_edit_mesh(
@@ -4017,5 +4027,20 @@ mod tests {
         }
         app.frame_selected();
         assert!(app.status_message.contains("Framed"));
+    }
+
+    #[test]
+    fn test_xray_mode_toggle_and_rendering_options() {
+        let mut app = Forge3dStudioApp::new_headless();
+        assert!(!app.editor_state.show_xray);
+        assert_eq!(app.editor_state.xray_alpha, 0.5);
+
+        app.toggle_xray();
+        assert!(app.editor_state.show_xray);
+        assert!(app.status_message.contains("X-Ray: ON"));
+
+        app.toggle_xray();
+        assert!(!app.editor_state.show_xray);
+        assert!(app.status_message.contains("X-Ray: OFF"));
     }
 }
