@@ -708,6 +708,34 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             app.delete_selected();
             ui.ctx().request_repaint();
         }
+
+        // Toggle Left Toolbar: T
+        if !input.modifiers.any() && input.key_pressed(Key::T) {
+            app.editor_state.panel_settings.toolbar_visible =
+                !app.editor_state.panel_settings.toolbar_visible;
+            let _ = app.editor_state.panel_settings.save();
+            app.status_message = format!(
+                "Toolbar: {}",
+                if app.editor_state.panel_settings.toolbar_visible {
+                    "Shown"
+                } else {
+                    "Hidden"
+                }
+            );
+            ui.ctx().request_repaint();
+        }
+
+        // Toggle Right Sidebar (Outliner & Properties): N
+        if !input.modifiers.any() && input.key_pressed(Key::N) {
+            let new_vis = !app.editor_state.panel_settings.sidebar_visible;
+            app.editor_state.panel_settings.sidebar_visible = new_vis;
+            let _ = app.editor_state.panel_settings.save();
+            app.status_message = format!(
+                "Sidebar: {}",
+                if new_vis { "Shown" } else { "Hidden" }
+            );
+            ui.ctx().request_repaint();
+        }
     }
 
     // =========================================================================
