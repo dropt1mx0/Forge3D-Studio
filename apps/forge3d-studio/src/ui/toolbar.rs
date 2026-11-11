@@ -56,9 +56,9 @@ fn tool_button(
         }
         ToolbarDisplayMode::IconAndLabel => {
             let text = if hotkey.is_empty() {
-                format!("{icon}  {label}")
+                label.to_string()
             } else {
-                format!("{icon}  {label}  ({hotkey})")
+                format!("{label} ({hotkey})")
             };
             let btn = egui::Button::new(egui::RichText::new(text).size(11.0).color(if active {
                 egui::Color32::WHITE
