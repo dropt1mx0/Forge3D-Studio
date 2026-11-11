@@ -850,6 +850,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             });
             ui.ctx().request_repaint();
         }
+
+        // UV Mapping Pie Menu: U (Blender-compatible)
+        if !input.modifiers.any() && input.key_pressed(Key::U) {
+            app.active_pie_menu = Some(PieMenuState {
+                kind: PieMenuKind::UvMapping,
+                center: mouse_pos.unwrap_or_else(|| rect.center()),
+            });
+            ui.ctx().request_repaint();
+        }
     }
 
     // =========================================================================
@@ -2623,6 +2632,10 @@ enum PieMenuAction {
     CursorToGrid,
     SelectionToCursor,
     SelectionToGrid,
+    SmartUvProject,
+    BoxUvProject,
+    SphereUvProject,
+    CylinderUvProject,
 }
 
 struct PieSlice {
@@ -2665,6 +2678,18 @@ fn execute_pie_action(app: &mut Forge3dStudioApp, action: &PieMenuAction) {
         }
         PieMenuAction::SelectionToGrid => {
             app.selection_to_grid();
+        }
+        PieMenuAction::SmartUvProject => {
+            app.smart_project_selected_geometry();
+        }
+        PieMenuAction::BoxUvProject => {
+            app.box_project_selected_geometry(1.0);
+        }
+        PieMenuAction::SphereUvProject => {
+            app.sphere_project_selected_geometry();
+        }
+        PieMenuAction::CylinderUvProject => {
+            app.cylinder_project_selected_geometry(2.0);
         }
     }
 }
@@ -2833,6 +2858,43 @@ fn render_pie_menu_overlay(
                     label: "Cursor to Grid",
                     subtext: "9",
                     action: PieMenuAction::CursorToGrid,
+                    is_active: false,
+                },
+            ],
+        ),
+        PieMenuKind::UvMapping => (
+            "UV MAPPING (UNWRAP)",
+            vec![
+                PieSlice {
+                    angle: -std::f32::consts::FRAC_PI_2,
+                    icon: "🗺",
+                    label: "Smart UV Project",
+                    subtext: "8",
+                    action: PieMenuAction::SmartUvProject,
+                    is_active: false,
+                },
+                PieSlice {
+                    angle: 0.0,
+                    icon: "📦",
+                    label: "Cube / Box Project",
+                    subtext: "6",
+                    action: PieMenuAction::BoxUvProject,
+                    is_active: false,
+                },
+                PieSlice {
+                    angle: std::f32::consts::FRAC_PI_2,
+                    icon: "🌐",
+                    label: "Sphere Project",
+                    subtext: "2",
+                    action: PieMenuAction::SphereUvProject,
+                    is_active: false,
+                },
+                PieSlice {
+                    angle: std::f32::consts::PI,
+                    icon: "🛢",
+                    label: "Cylinder Project",
+                    subtext: "4",
+                    action: PieMenuAction::CylinderUvProject,
                     is_active: false,
                 },
             ],

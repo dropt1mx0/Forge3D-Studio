@@ -104,6 +104,7 @@ pub enum PieMenuKind {
     Shading,
     Pivot,
     SnapCursor,
+    UvMapping,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -3651,5 +3652,42 @@ mod tests {
             center: egui::pos2(200.0, 200.0),
         });
         assert_eq!(app.active_pie_menu.unwrap().kind, PieMenuKind::SnapCursor);
+    }
+
+    #[test]
+    fn test_uv_mapping_pie_menu_and_projections() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        // 1. Verify PieMenuKind::UvMapping state
+        app.active_pie_menu = Some(PieMenuState {
+            kind: PieMenuKind::UvMapping,
+            center: egui::pos2(300.0, 300.0),
+        });
+        assert_eq!(app.active_pie_menu.unwrap().kind, PieMenuKind::UvMapping);
+
+        // 2. Select Cube and test Box UV Projection
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        app.selection.select(cube_id);
+
+        app.box_project_selected_geometry(1.0);
+        assert!(app.status_message.contains("Box UV Projection applied"));
+
+        // 3. Test Smart UV Projection on selected geometry
+        app.smart_project_selected_geometry();
+        assert!(app.status_message.contains("Smart UV Projection applied"));
+
+        // 4. Test in Edit Mode
+        app.set_edit_mode(EditMode::Edit);
+        app.sphere_project_selected_geometry();
+        assert!(app.status_message.contains("Sphere UV Projection complete"));
+
+        app.cylinder_project_selected_geometry(2.0);
+        assert!(app.status_message.contains("Cylinder UV Projection complete"));
     }
 }
