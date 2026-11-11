@@ -315,7 +315,7 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                 // --- Working directory context ---
                 let cwd = std::env::current_dir()
                     .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| "Forge3D-Rust-Edition".to_string());
+                    .unwrap_or_else(|_| "Forge3D-Studio".to_string());
 
                 let display_cwd = if cwd.len() > 64 {
                     format!("...{}", &cwd[cwd.len() - 60..])

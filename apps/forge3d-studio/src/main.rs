@@ -26,7 +26,7 @@ fn main() -> eframe::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    tracing::info!("Starting Forge3D Rust Edition — Alpha 0.1");
+    tracing::info!("Starting Forge3D Studio — Alpha 0.1");
 
     // 2. Configure native application window and WGPU options
     let mut viewport = egui::ViewportBuilder::default()

@@ -1,6 +1,6 @@
-# Forge3D Rust Edition
+# Forge3D Studio
 
-**Forge3D** is an independent, open-source 3D creation application built with Rust and modern graphics standards.
+**Forge3D Studio** is an independent, open-source 3D creation application built with Rust and modern graphics standards.
 
 *Built with Rust. Open by Design.*
 

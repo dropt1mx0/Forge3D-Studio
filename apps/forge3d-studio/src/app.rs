@@ -2839,12 +2839,12 @@ impl Forge3dStudioApp {
 
         // 7. About Modal Dialog
         if self.show_about_dialog {
-            egui::Window::new("About Forge3D Rust Edition")
+            egui::Window::new("About Forge3D Studio")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(&ctx, |ui| {
-                    ui.heading("Forge3D Rust Edition");
+                    ui.heading("Forge3D Studio");
                     ui.label(format!("Version: {}", env!("CARGO_PKG_VERSION")));
                     ui.label("Independent, open-source 3D creation suite built in Rust.");
                     ui.add_space(8.0);
