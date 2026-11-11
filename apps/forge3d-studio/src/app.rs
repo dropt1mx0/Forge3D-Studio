@@ -3352,10 +3352,12 @@ mod tests {
     fn test_mascot_pixel_alpha() {
         let decoded = image::load_from_memory(MASCOT_BYTES).expect("decoded mascot");
         let rgba = decoded.to_rgba8();
-        let (w, h) = (rgba.width(), rgba.height());
-        assert_eq!(w, 474);
-        assert_eq!(h, 346);
-        let corner = rgba.get_pixel(0, 0);
-        assert_eq!(corner[3], 0, "Corner pixel of mascot must be transparent!");
+        // Check transparent corner
+        assert_eq!(rgba.get_pixel(0, 0)[3], 0);
+        // Check opaque core pixel
+        let core = rgba.get_pixel(rgba.width() / 3, rgba.height() / 2);
+        assert_eq!(core[3], 255);
+        // Check vibrant orange core
+        assert!(core[0] > 200 && core[1] > 100);
     }
 }

@@ -267,12 +267,14 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                     rect.top() + rect.height() * 0.58,
                 );
 
-                // Render continuous, hardware-filtered smooth radial bloom (no hard steps or rings)
-                if let Some(glow_tex) = &app.glow_texture {
-                    let glow_size = egui::vec2(220.0, 220.0);
-                    let glow_rect = egui::Rect::from_center_size(glow_center, glow_size);
-                    egui::Image::new((glow_tex.id(), glow_size))
-                        .paint_at(ui, glow_rect);
+                // Render continuous, hardware-filtered smooth radial bloom (no hard steps or rings) in Dark Mode only
+                if !is_light {
+                    if let Some(glow_tex) = &app.glow_texture {
+                        let glow_size = egui::vec2(220.0, 220.0);
+                        let glow_rect = egui::Rect::from_center_size(glow_center, glow_size);
+                        egui::Image::new((glow_tex.id(), glow_size))
+                            .paint_at(ui, glow_rect);
+                    }
                 }
 
                 if let Some(mascot_tex) = &app.mascot_texture {
