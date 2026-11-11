@@ -998,6 +998,15 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             if ui.checkbox(&mut app.editor_state.show_xray, "X-Ray Mode (Alt+Z)").changed() {
                 app.status_message = format!("X-Ray: {}", if app.editor_state.show_xray { "ON" } else { "OFF" });
             }
+            let local_label = if app.is_in_local_view() {
+                "Exit Local View (Numpad /)"
+            } else {
+                "Isolate Selected / Local View (Numpad /)"
+            };
+            if ui.button(local_label).clicked() {
+                app.toggle_local_view();
+                ui.close();
+            }
             ui.checkbox(
                 &mut app.editor_state.use_gpu_wireframe,
                 "GPU Edit Wireframe",

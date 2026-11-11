@@ -178,6 +178,9 @@ pub struct Forge3dStudioApp {
 
     // Pending asynchronous GPU picking request for hover with full context validation
     pub pending_hover_pick: Option<PendingHoverPick>,
+
+    /// Blender-style Local View / Isolate Selected state: saved visibility map when active.
+    pub local_view_saved_visibility: Option<std::collections::HashMap<ObjectId, bool>>,
 }
 
 /// Tracks a pending asynchronous hover picking request with full context to validate click pre-polling.
@@ -411,6 +414,7 @@ impl Forge3dStudioApp {
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
             pending_hover_pick: None,
+            local_view_saved_visibility: None,
         }
     }
 
@@ -462,6 +466,7 @@ impl Forge3dStudioApp {
             gizmo_initial_transforms: std::collections::HashMap::new(),
             object_drag_state: None,
             pending_hover_pick: None,
+            local_view_saved_visibility: None,
         }
     }
 
@@ -2136,6 +2141,69 @@ impl Forge3dStudioApp {
         );
     }
 
+    pub fn is_in_local_view(&self) -> bool {
+        self.local_view_saved_visibility.is_some()
+    }
+
+    pub fn toggle_local_view(&mut self) {
+        if let Some(saved) = self.local_view_saved_visibility.take() {
+            // Exit Local View: restore previous visibility of each object
+            for (&id, obj) in &mut self.scene.objects {
+                if let Some(&was_visible) = saved.get(&id) {
+                    obj.visible = was_visible;
+                }
+            }
+            self.scene.dirty = true;
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_picking();
+            }
+            self.pending_hover_pick = None;
+            self.frame_selected();
+            self.status_message = "Exited Local View (Global View)".to_string();
+        } else {
+            // Enter Local View: isolate selected objects
+            let target_ids: Vec<ObjectId> = if self.editor_state.edit_mode == EditMode::Edit {
+                if let Some((active_id, _)) = self.active_edit_mesh {
+                    vec![active_id]
+                } else {
+                    self.selection.selected_ids.iter().copied().collect()
+                }
+            } else {
+                self.selection.selected_ids.iter().copied().collect()
+            };
+
+            if target_ids.is_empty() {
+                self.status_message =
+                    "Local View: Select at least one object to isolate (Numpad /)".to_string();
+                return;
+            }
+
+            let saved: std::collections::HashMap<ObjectId, bool> = self
+                .scene
+                .objects
+                .iter()
+                .map(|(&id, obj)| (id, obj.visible))
+                .collect();
+
+            for (&id, obj) in &mut self.scene.objects {
+                obj.visible = target_ids.contains(&id);
+            }
+
+            self.scene.dirty = true;
+            if let Some(r) = &mut self.renderer {
+                r.invalidate_picking();
+            }
+            self.pending_hover_pick = None;
+            self.local_view_saved_visibility = Some(saved);
+            self.frame_selected();
+            self.status_message = format!(
+                "Local View: Isolated {} object{} (Press '/' to exit)",
+                target_ids.len(),
+                if target_ids.len() == 1 { "" } else { "s" }
+            );
+        }
+    }
+
     pub fn align_active_camera_to_view(&mut self) {
         if let Some(cam_id) = self.scene.active_camera_id {
             self.scene.align_active_camera_to_view(
@@ -2538,6 +2606,7 @@ impl Forge3dStudioApp {
     /// Switches from Startup Hub to active editor with a clean default 3D scene (Cube, Camera, Light).
     pub fn start_new_scene(&mut self) {
         self.pending_hover_pick = None;
+        self.local_view_saved_visibility = None;
         self.scene = Scene::create_default_scene();
         self.selection.deselect();
         self.history.clear();
@@ -4042,5 +4111,35 @@ mod tests {
         app.toggle_xray();
         assert!(!app.editor_state.show_xray);
         assert!(app.status_message.contains("X-Ray: OFF"));
+    }
+
+    #[test]
+    fn test_local_view_isolation_and_restoration() {
+        let mut app = Forge3dStudioApp::new_headless();
+        assert!(!app.is_in_local_view());
+
+        // Without selection, should warn
+        app.toggle_local_view();
+        assert!(!app.is_in_local_view());
+        assert!(app.status_message.contains("Select at least one object"));
+
+        // Select cube
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        app.selection.select(cube_id);
+
+        // Enter Local View
+        app.toggle_local_view();
+        assert!(app.is_in_local_view());
+        assert!(app.scene.get_object(cube_id).unwrap().visible);
+        assert!(!app.scene.get_object(sphere_id).unwrap().visible);
+        assert!(app.status_message.contains("Local View"));
+
+        // Exit Local View -> previous visibility restored
+        app.toggle_local_view();
+        assert!(!app.is_in_local_view());
+        assert!(app.scene.get_object(cube_id).unwrap().visible);
+        assert!(app.scene.get_object(sphere_id).unwrap().visible);
+        assert!(app.status_message.contains("Exited Local View"));
     }
 }

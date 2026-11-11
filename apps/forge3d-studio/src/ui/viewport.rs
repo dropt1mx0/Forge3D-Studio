@@ -564,6 +564,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.ctx().request_repaint();
         }
 
+        // Local View / Isolate Selected: '/' or '\' (Numpad / compatible)
+        if input.key_pressed(Key::Slash) || input.key_pressed(Key::Backslash) {
+            app.toggle_local_view();
+            ui.ctx().request_repaint();
+        }
+
         // Start Modal Transformations (G = Move, R = Rotate, S = Scale)
         let mouse_vec2 = mouse_pos
             .map(|p| Vec2::new(p.x - rect.min.x, p.y - rect.min.y))
@@ -2063,9 +2069,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     };
 
     let xray_str = if app.editor_state.show_xray { " | [X-Ray]" } else { "" };
+    let local_str = if app.is_in_local_view() { " (Local View)" } else { "" };
 
     let hud_text = format!(
-        "Live Viewer  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}) | {matcap_str}{xray_str}{ptr_state_str}"
+        "Live Viewer{local_str}  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}) | {matcap_str}{xray_str}{ptr_state_str}"
     );
     painter.text(
         header_rect.min + EguiVec2::new(12.0, 6.0),
@@ -2074,6 +2081,23 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         egui::FontId::proportional(12.0),
         Color32::from_rgb(215, 220, 235),
     );
+
+    // Local View HUD Indicator Banner
+    if app.is_in_local_view() {
+        let banner_w = 210.0;
+        let banner_rect = Rect::from_min_size(
+            header_rect.right_top() - EguiVec2::new(banner_w + 140.0, -4.0),
+            egui::vec2(banner_w, 20.0),
+        );
+        painter.rect_filled(banner_rect, 4.0, Color32::from_rgba_unmultiplied(220, 130, 20, 220));
+        painter.text(
+            banner_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "LOCAL VIEW (Press '/' to exit)",
+            egui::FontId::proportional(11.0),
+            Color32::WHITE,
+        );
+    }
 
     // Active Fly Navigation HUD
     if app.editor_state.fly_nav_active {
@@ -2392,7 +2416,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     }
 
-    // Quick Navigation Buttons (Zoom, Pan, Camera, Ortho/Persp, X-Ray)
+    // Quick Navigation Buttons (Zoom, Pan, Camera, Ortho/Persp, X-Ray, Local View)
     let btn_start_y = compass_center.y + compass_radius + 10.0;
     let btn_size = egui::vec2(24.0, 24.0);
     let nav_btn_x = compass_center.x - btn_size.x / 2.0;
@@ -2401,6 +2425,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         "Toggle X-Ray Mode (Alt+Z) [Active]"
     } else {
         "Toggle X-Ray Mode (Alt+Z)"
+    };
+
+    let local_tooltip = if app.is_in_local_view() {
+        "Exit Local View (Numpad / or /) [Active]"
+    } else {
+        "Isolate Selected / Local View (Numpad / or /)"
     };
 
     let nav_buttons = [
@@ -2416,6 +2446,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             "Toggle Perspective / Orthographic (Numpad 5)",
         ),
         ("⛶", xray_tooltip),
+        ("🔲", local_tooltip),
     ];
 
     for (idx, (icon, tooltip)) in nav_buttons.iter().enumerate() {
@@ -2426,8 +2457,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         let resp = ui.allocate_rect(btn_rect, Sense::click_and_drag());
         let is_hover = resp.hovered();
         let is_active_xray = idx == 5 && app.editor_state.show_xray;
+        let is_active_local = idx == 6 && app.is_in_local_view();
         let bg = if is_active_xray {
             Color32::from_rgb(45, 115, 225)
+        } else if is_active_local {
+            Color32::from_rgb(215, 120, 20)
         } else if is_hover {
             if is_light {
                 Color32::from_rgb(220, 226, 240)
@@ -2448,6 +2482,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 1.0,
                 if is_active_xray {
                     Color32::from_rgb(100, 165, 255)
+                } else if is_active_local {
+                    Color32::from_rgb(255, 175, 70)
                 } else if is_light {
                     Color32::from_rgb(205, 212, 225)
                 } else {
@@ -2461,7 +2497,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             egui::Align2::CENTER_CENTER,
             *icon,
             egui::FontId::proportional(11.5),
-            if is_active_xray {
+            if is_active_xray || is_active_local {
                 Color32::WHITE
             } else if is_hover {
                 if is_light {
@@ -2501,6 +2537,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.ctx().request_repaint();
         } else if idx == 5 && resp.clicked() {
             app.toggle_xray();
+            ui.ctx().request_repaint();
+        } else if idx == 6 && resp.clicked() {
+            app.toggle_local_view();
             ui.ctx().request_repaint();
         }
     }
