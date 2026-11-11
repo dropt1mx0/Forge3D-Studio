@@ -558,8 +558,14 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.ctx().request_repaint();
         }
 
+        // Viewport Overlays Master Toggle: Shift + Alt + Z (Blender-compatible)
+        if input.modifiers.shift && input.modifiers.alt && input.key_pressed(Key::Z) {
+            app.toggle_overlays();
+            ui.ctx().request_repaint();
+        }
+
         // X-Ray Mode: Alt + Z
-        if input.modifiers.alt && input.key_pressed(Key::Z) {
+        if input.modifiers.alt && !input.modifiers.shift && input.key_pressed(Key::Z) {
             app.toggle_xray();
             ui.ctx().request_repaint();
         }
@@ -2083,6 +2089,191 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         egui::FontId::proportional(12.0),
         Color32::from_rgb(215, 220, 235),
     );
+
+    // Viewport Overlays Dropdown Button (Blender-style Overlays header control)
+    let overlays_btn_rect = Rect::from_min_size(
+        header_rect.right_top() + EguiVec2::new(8.0, 0.0),
+        egui::vec2(105.0, 26.0),
+    );
+    let overlays_resp = ui.allocate_rect(overlays_btn_rect, Sense::click());
+    let overlays_hover = overlays_resp.hovered();
+    let overlays_active = app.editor_state.show_overlays;
+    let overlays_bg = if app.show_overlays_dropdown {
+        Color32::from_rgb(50, 60, 80)
+    } else if overlays_hover {
+        Color32::from_rgb(36, 42, 56)
+    } else {
+        Color32::from_rgba_unmultiplied(16, 18, 24, 220)
+    };
+    painter.rect_filled(overlays_btn_rect, egui::CornerRadius::same(5), overlays_bg);
+    painter.rect_stroke(
+        overlays_btn_rect,
+        egui::CornerRadius::same(5),
+        Stroke::new(
+            1.0,
+            if overlays_active {
+                Color32::from_rgb(70, 130, 220)
+            } else {
+                Color32::from_rgb(38, 42, 54)
+            },
+        ),
+        egui::StrokeKind::Outside,
+    );
+    painter.text(
+        overlays_btn_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "⛶ Overlays ▾",
+        egui::FontId::proportional(11.5),
+        if overlays_active {
+            Color32::from_rgb(220, 230, 250)
+        } else {
+            Color32::from_rgb(140, 145, 160)
+        },
+    );
+    let overlays_resp = overlays_resp.on_hover_text("Viewport Overlays Dropdown (Shift+Alt+Z)");
+    if overlays_resp.clicked() {
+        app.show_overlays_dropdown = !app.show_overlays_dropdown;
+        ui.ctx().request_repaint();
+    }
+
+    if app.show_overlays_dropdown {
+        let popover_rect = Rect::from_min_size(
+            overlays_btn_rect.left_bottom() + EguiVec2::new(-20.0, 6.0),
+            egui::vec2(220.0, 260.0),
+        );
+        egui::Area::new(ui.make_persistent_id("viewport_overlays_popover"))
+            .fixed_pos(popover_rect.min)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(210.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Viewport Overlays").strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("✕").clicked() {
+                                app.show_overlays_dropdown = false;
+                            }
+                        });
+                    });
+                    ui.separator();
+                    if ui.checkbox(&mut app.editor_state.show_overlays, "Show Overlays (Shift+Alt+Z)").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("Guides").color(Color32::from_rgb(180, 190, 210)));
+                    if ui.checkbox(&mut app.editor_state.show_grid, "Floor Grid").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui.checkbox(&mut app.editor_state.show_axes, "Coordinate Axes").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui.checkbox(&mut app.editor_state.show_cursor_3d, "3D Cursor").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui.checkbox(&mut app.editor_state.show_origins, "Object Origins").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("Geometry & Shading").color(Color32::from_rgb(180, 190, 210)));
+                    if ui.checkbox(&mut app.editor_state.show_wireframe, "Wireframe").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui.checkbox(&mut app.editor_state.show_xray, "X-Ray Mode (Alt+Z)").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("Statistics & Telemetry").color(Color32::from_rgb(180, 190, 210)));
+                    if ui.checkbox(&mut app.editor_state.show_statistics, "Scene Statistics").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                    if ui.checkbox(&mut app.editor_state.show_debug_info, "Debug Telemetry").changed() {
+                        ui.ctx().request_repaint();
+                    }
+                });
+            });
+    }
+
+    // Live Scene Statistics Overlay Strip
+    if app.editor_state.show_overlays && app.editor_state.show_statistics && !app.editor_state.fly_nav_active {
+        let mut total_verts = 0;
+        let mut total_tris = 0;
+        let mut total_objects = 0;
+        let mut visible_objects = 0;
+        for obj in app.scene.objects.values() {
+            total_objects += 1;
+            if obj.visible {
+                visible_objects += 1;
+                total_verts += obj.mesh.vertices.len();
+                total_tris += obj.mesh.indices.len() / 3;
+            }
+        }
+        let sel_count = app.selection.selected_ids.len();
+        let stats_text = format!(
+            "Objects: {}/{} (Selected: {}) | Verts: {} | Tris: {}",
+            visible_objects, total_objects, sel_count, total_verts, total_tris
+        );
+        let stats_rect = Rect::from_min_size(
+            header_rect.left_bottom() + EguiVec2::new(0.0, 6.0),
+            egui::vec2(header_rect.width().min(450.0), 20.0),
+        );
+        painter.rect_filled(stats_rect, 3.0, Color32::from_rgba_unmultiplied(16, 18, 24, 190));
+        painter.text(
+            stats_rect.min + EguiVec2::new(8.0, 3.0),
+            egui::Align2::LEFT_TOP,
+            stats_text,
+            egui::FontId::proportional(11.0),
+            Color32::from_rgb(185, 195, 215),
+        );
+    }
+
+    // 3D Cursor Visual Reticle
+    if app.editor_state.show_overlays && app.editor_state.show_cursor_3d {
+        if let Some(screen_pos) = world_to_screen_pos(app.editor_state.cursor_3d, view_proj, rect) {
+            let r = 12.0;
+            // Red ring with white inner line
+            painter.circle_stroke(screen_pos, r, Stroke::new(1.5, Color32::from_rgb(220, 60, 50)));
+            painter.circle_stroke(screen_pos, r - 2.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160)));
+            // Crosshair ticks
+            painter.line_segment(
+                [screen_pos - EguiVec2::new(r + 5.0, 0.0), screen_pos - EguiVec2::new(r - 2.0, 0.0)],
+                Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
+            );
+            painter.line_segment(
+                [screen_pos + EguiVec2::new(r - 2.0, 0.0), screen_pos + EguiVec2::new(r + 5.0, 0.0)],
+                Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
+            );
+            painter.line_segment(
+                [screen_pos - EguiVec2::new(0.0, r + 5.0), screen_pos - EguiVec2::new(0.0, r - 2.0)],
+                Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
+            );
+            painter.line_segment(
+                [screen_pos + EguiVec2::new(0.0, r - 2.0), screen_pos + EguiVec2::new(0.0, r + 5.0)],
+                Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
+            );
+            // Center dot
+            painter.circle_filled(screen_pos, 2.0, Color32::WHITE);
+        }
+    }
+
+    // Object Origins Dots
+    if app.editor_state.show_overlays && app.editor_state.show_origins {
+        for (&id, obj) in &app.scene.objects {
+            if !obj.visible {
+                continue;
+            }
+            let tf = app.scene.world_transform(id);
+            if let Some(sp) = world_to_screen_pos(tf.translation, view_proj, rect) {
+                let is_sel = app.selection.is_selected(id);
+                let col = if is_sel {
+                    Color32::from_rgb(255, 165, 30)
+                } else {
+                    Color32::from_rgb(200, 150, 40)
+                };
+                painter.circle_filled(sp, 3.0, col);
+                painter.circle_stroke(sp, 3.5, Stroke::new(1.0, Color32::from_rgb(30, 30, 30)));
+            }
+        }
+    }
 
     // Local View HUD Indicator Banner
     if app.is_in_local_view() {

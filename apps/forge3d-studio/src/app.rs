@@ -181,6 +181,9 @@ pub struct Forge3dStudioApp {
 
     /// Blender-style Local View / Isolate Selected state: saved visibility map when active.
     pub local_view_saved_visibility: Option<std::collections::HashMap<ObjectId, bool>>,
+
+    /// Viewport Overlays popover dropdown menu open state.
+    pub show_overlays_dropdown: bool,
 }
 
 /// Tracks a pending asynchronous hover picking request with full context to validate click pre-polling.
@@ -415,6 +418,7 @@ impl Forge3dStudioApp {
             object_drag_state: None,
             pending_hover_pick: None,
             local_view_saved_visibility: None,
+            show_overlays_dropdown: false,
         }
     }
 
@@ -467,6 +471,7 @@ impl Forge3dStudioApp {
             object_drag_state: None,
             pending_hover_pick: None,
             local_view_saved_visibility: None,
+            show_overlays_dropdown: false,
         }
     }
 
@@ -2246,6 +2251,14 @@ impl Forge3dStudioApp {
         }
     }
 
+    pub fn toggle_overlays(&mut self) {
+        self.editor_state.show_overlays = !self.editor_state.show_overlays;
+        self.status_message = format!(
+            "Viewport Overlays: {}",
+            if self.editor_state.show_overlays { "ON" } else { "OFF" }
+        );
+    }
+
     pub fn align_active_camera_to_view(&mut self) {
         if let Some(cam_id) = self.scene.active_camera_id {
             self.scene.align_active_camera_to_view(
@@ -3303,8 +3316,8 @@ impl Forge3dStudioApp {
                     };
 
                     let edit_options = forge_render::EditRenderOptions {
-                        draw_edges: self.editor_state.use_gpu_wireframe,
-                        draw_vertices: self.editor_state.use_gpu_vertex_handles,
+                        draw_edges: self.editor_state.show_overlays && self.editor_state.use_gpu_wireframe,
+                        draw_vertices: self.editor_state.show_overlays && self.editor_state.use_gpu_vertex_handles,
                         is_vertex_mode: self.editor_state.selection_element
                             == forge_scene::SelectionElement::Vertex,
                         active_vertex: self.editor_state.active_vertex,
@@ -3322,7 +3335,7 @@ impl Forge3dStudioApp {
                         &self.scene,
                         &self.selection,
                         &self.camera,
-                        self.editor_state.show_grid,
+                        self.editor_state.show_overlays && self.editor_state.show_grid,
                         edit_obj,
                         edit_options,
                     );
@@ -4222,5 +4235,22 @@ mod tests {
             assert!(edit_mesh.vertices[orig_verts].selected);
             assert!(edit_mesh.vertices[orig_verts + 1].selected);
         }
+    }
+
+    #[test]
+    fn test_viewport_overlays_toggle_and_defaults() {
+        let mut app = Forge3dStudioApp::new_headless();
+        assert!(app.editor_state.show_overlays);
+        assert!(app.editor_state.show_cursor_3d);
+        assert!(app.editor_state.show_statistics);
+        assert!(app.editor_state.show_origins);
+
+        app.toggle_overlays();
+        assert!(!app.editor_state.show_overlays);
+        assert!(app.status_message.contains("Viewport Overlays: OFF"));
+
+        app.toggle_overlays();
+        assert!(app.editor_state.show_overlays);
+        assert!(app.status_message.contains("Viewport Overlays: ON"));
     }
 }

@@ -401,6 +401,12 @@ pub fn get_all_commands() -> Vec<CommandItem> {
             shortcut: "Numpad /",
             action_id: "toggle_local_view",
         },
+        CommandItem {
+            category: "View",
+            title: "Toggle Viewport Overlays",
+            shortcut: "Shift+Alt+Z",
+            action_id: "toggle_overlays",
+        },
         // Edit Operations
         CommandItem {
             category: "Edit",
@@ -773,6 +779,9 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
         }
         "toggle_local_view" => {
             app.toggle_local_view();
+        }
+        "toggle_overlays" => {
+            app.toggle_overlays();
         }
         "frame_selected" => {
             if let Some(id) = app.selection.active_id

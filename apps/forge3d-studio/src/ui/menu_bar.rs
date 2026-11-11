@@ -992,6 +992,9 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 "Show Viewport Debug Telemetry",
             );
             ui.checkbox(&mut app.editor_state.walk_mode, "Walk Mode (Lock Ground Y)");
+            if ui.checkbox(&mut app.editor_state.show_overlays, "Show Viewport Overlays (Shift+Alt+Z)").changed() {
+                app.status_message = format!("Viewport Overlays: {}", if app.editor_state.show_overlays { "ON" } else { "OFF" });
+            }
             ui.checkbox(&mut app.editor_state.show_grid, "Show Ground Grid");
             ui.checkbox(&mut app.editor_state.show_axes, "Show Coordinate Axes");
             ui.checkbox(&mut app.editor_state.show_wireframe, "Show Wireframe");
