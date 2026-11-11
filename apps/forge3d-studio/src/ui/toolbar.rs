@@ -538,11 +538,26 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.label(egui::RichText::new("Utilities").weak().size(11.0));
                 }
 
-                // Snapping toggle
+                // Snapping toggle (LMB: toggle on/off, RMB: switch between Grid and Vertex snap)
                 let snap = app.editor_state.snap_settings.enabled;
-                if tool_button(ui, snap, "Snap", "Snapping", "Shift+Tab", display_mode).clicked() {
+                let snap_kind = if app.editor_state.snap_settings.snap_to_vertex { "Vertex" } else { "Grid" };
+                let snap_title = format!("Snap ({})", snap_kind);
+                let snap_btn = tool_button(ui, snap, "Snap", &snap_title, "Shift+Tab", display_mode);
+                if snap_btn.clicked() {
                     app.editor_state.snap_settings.enabled = !snap;
-                    app.status_message = format!("Snapping: {}", if !snap { "ON" } else { "OFF" });
+                    app.status_message = format!(
+                        "Snapping: {} ({})",
+                        if !snap { "ON" } else { "OFF" },
+                        snap_kind
+                    );
+                }
+                if snap_btn.secondary_clicked() {
+                    app.editor_state.snap_settings.snap_to_vertex = !app.editor_state.snap_settings.snap_to_vertex;
+                    app.editor_state.snap_settings.snap_to_grid = !app.editor_state.snap_settings.snap_to_vertex;
+                    app.status_message = format!(
+                        "Snap Element: {}",
+                        if app.editor_state.snap_settings.snap_to_vertex { "Vertex" } else { "Grid Increment" }
+                    );
                 }
 
                 // Orientation toggle (Global / Local)

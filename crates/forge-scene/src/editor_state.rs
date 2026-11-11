@@ -446,6 +446,8 @@ pub struct EditorState {
     pub active_vertex: Option<usize>,
     #[serde(skip)]
     pub show_debug_info: bool,
+    #[serde(skip)]
+    pub active_snap_target: Option<Vec3>,
 }
 
 impl Default for EditorState {
@@ -480,6 +482,7 @@ impl Default for EditorState {
             pointer_press_pos: None,
             active_vertex: None,
             show_debug_info: false,
+            active_snap_target: None,
         }
     }
 }

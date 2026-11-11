@@ -286,12 +286,55 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             None => translate_delta = view_plane_delta,
                         }
 
-                        if app.editor_state.snap_settings.enabled
-                            && app.editor_state.snap_settings.grid_increment > 0.0
-                        {
-                            let step = app.editor_state.snap_settings.grid_increment;
-                            translate_delta = (translate_delta / step).round() * step;
+                        let mut snap_target_found = None;
+                        let effective_snap = if input.modifiers.ctrl {
+                            !app.editor_state.snap_settings.enabled
+                        } else {
+                            app.editor_state.snap_settings.enabled
+                        };
+
+                        if effective_snap {
+                            if app.editor_state.snap_settings.snap_to_vertex {
+                                let view_proj = app.camera.view_proj_matrix();
+                                let mut best_dist_sq = 28.0_f32.powi(2);
+                                let mut best_target_pos = None;
+
+                                for (&id, obj) in &app.scene.objects {
+                                    if !app.editor_state.modal_transform.initial_transforms.contains_key(&id) && obj.visible {
+                                        let model_mat = obj.local_transform.to_matrix();
+                                        for v in &obj.mesh.vertices {
+                                            let world_pos = model_mat.transform_point3(Vec3::from(v.position));
+                                            if let Some(screen_pos) = world_to_screen_pos(world_pos, view_proj, rect) {
+                                                let d_sq = (screen_pos.x - mouse.x).powi(2) + (screen_pos.y - mouse.y).powi(2);
+                                                if d_sq < best_dist_sq {
+                                                    best_dist_sq = d_sq;
+                                                    best_target_pos = Some(world_pos);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if let Some(target_pos) = best_target_pos {
+                                    snap_target_found = Some(target_pos);
+                                    let mut delta = target_pos - pivot;
+                                    match app.editor_state.modal_transform.constraint {
+                                        Some(AxisConstraint::X) => delta = Vec3::new(delta.x, 0.0, 0.0),
+                                        Some(AxisConstraint::Y) => delta = Vec3::new(0.0, delta.y, 0.0),
+                                        Some(AxisConstraint::Z) => delta = Vec3::new(0.0, 0.0, delta.z),
+                                        Some(AxisConstraint::PlaneXY) => delta = Vec3::new(delta.x, delta.y, 0.0),
+                                        Some(AxisConstraint::PlaneXZ) => delta = Vec3::new(delta.x, 0.0, delta.z),
+                                        Some(AxisConstraint::PlaneYZ) => delta = Vec3::new(0.0, delta.y, delta.z),
+                                        None => {}
+                                    }
+                                    translate_delta = delta;
+                                }
+                            } else if app.editor_state.snap_settings.grid_increment > 0.0 {
+                                let step = app.editor_state.snap_settings.grid_increment;
+                                translate_delta = (translate_delta / step).round() * step;
+                            }
                         }
+                        app.editor_state.active_snap_target = snap_target_found;
                     }
 
                     // Apply to initial transforms
@@ -314,7 +357,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         let cur_angle =
                             (mouse.y - center_screen.y).atan2(mouse.x - center_screen.x);
                         let mut diff = cur_angle - app.editor_state.modal_transform.start_angle_rad;
-                        if app.editor_state.snap_settings.enabled {
+                        let effective_snap = if input.modifiers.ctrl {
+                            !app.editor_state.snap_settings.enabled
+                        } else {
+                            app.editor_state.snap_settings.enabled
+                        };
+                        if effective_snap {
                             let step = 15.0_f32.to_radians();
                             diff = (diff / step).round() * step;
                         }
@@ -357,7 +405,17 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             .modal_transform
                             .start_distance_from_pivot
                             .max(20.0);
-                        (cur_dist / base_dist).clamp(0.01, 100.0)
+                        let mut factor = (cur_dist / base_dist).clamp(0.01, 100.0);
+                        let effective_snap = if input.modifiers.ctrl {
+                            !app.editor_state.snap_settings.enabled
+                        } else {
+                            app.editor_state.snap_settings.enabled
+                        };
+                        if effective_snap {
+                            let step = 0.1_f32;
+                            factor = (factor / step).round() * step;
+                        }
+                        factor.max(0.01)
                     };
 
                     let scale_vec = match app.editor_state.modal_transform.constraint {
@@ -396,9 +454,25 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         && !app.editor_state.modal_transform.active
         && !app.editor_state.fly_nav_active
     {
-        // Mode Switch: Tab (fast toggle) or Ctrl+Tab (Mode Pie Menu)
+        // Mode Switch & Snapping: Tab / Ctrl+Tab / Shift+Tab / Shift+Ctrl+Tab
         if input.key_pressed(Key::Tab) {
-            if input.modifiers.ctrl {
+            if input.modifiers.shift && input.modifiers.ctrl {
+                // Shift + Ctrl + Tab: Cycle Snap Element (Grid vs Vertex)
+                app.editor_state.snap_settings.snap_to_vertex = !app.editor_state.snap_settings.snap_to_vertex;
+                app.editor_state.snap_settings.snap_to_grid = !app.editor_state.snap_settings.snap_to_vertex;
+                app.status_message = format!(
+                    "Snap Element: {}",
+                    if app.editor_state.snap_settings.snap_to_vertex { "Vertex" } else { "Grid Increment" }
+                );
+            } else if input.modifiers.shift {
+                // Shift + Tab: Toggle Snapping (Magnet)
+                app.editor_state.snap_settings.enabled = !app.editor_state.snap_settings.enabled;
+                app.status_message = format!(
+                    "Snapping: {} ({})",
+                    if app.editor_state.snap_settings.enabled { "ON" } else { "OFF" },
+                    if app.editor_state.snap_settings.snap_to_vertex { "Vertex" } else { "Grid" }
+                );
+            } else if input.modifiers.ctrl {
                 app.active_pie_menu = Some(PieMenuState {
                     kind: PieMenuKind::Mode,
                     center: mouse_pos.unwrap_or_else(|| rect.center()),
@@ -1878,10 +1952,18 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             app.editor_state.modal_transform.numeric_input.clone()
         };
 
+        let snap_status_str = if app.editor_state.active_snap_target.is_some() {
+            " | Snap: Vertex"
+        } else if app.editor_state.snap_settings.enabled {
+            " | Snap: Grid"
+        } else {
+            ""
+        };
+
         painter.rect_filled(
             Rect::from_min_size(
                 rect.min + EguiVec2::new(14.0, 36.0),
-                egui::vec2(540.0, 26.0),
+                egui::vec2(580.0, 26.0),
             ),
             4.0,
             Color32::from_rgba_unmultiplied(220, 120, 20, 230),
@@ -1890,11 +1972,29 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             rect.min + EguiVec2::new(20.0, 40.0),
             egui::Align2::LEFT_TOP,
             format!(
-                "[{mode_name}] Axis: {constraint_str} | Value: {num_str} | Enter/LMB: Apply | Esc/RMB: Cancel"
+                "[{mode_name}] Axis: {constraint_str} | Value: {num_str}{snap_status_str} | Enter/LMB: Apply | Esc/RMB: Cancel"
             ),
             egui::FontId::proportional(13.0),
             Color32::WHITE,
         );
+    }
+
+    // Visual Snap Target Indicator (Blender-style Magnet Reticle)
+    if let Some(target_world) = app.editor_state.active_snap_target {
+        if let Some(target_screen) = world_to_screen_pos(target_world, app.camera.view_proj_matrix(), rect) {
+            let orange_accent = Color32::from_rgb(255, 175, 40);
+            painter.circle_stroke(target_screen, 10.0, Stroke::new(2.0, orange_accent));
+            painter.circle_filled(target_screen, 2.5, Color32::from_rgb(255, 235, 120));
+            painter.line_segment([target_screen - egui::vec2(15.0, 0.0), target_screen - egui::vec2(10.0, 0.0)], Stroke::new(1.5, orange_accent));
+            painter.line_segment([target_screen + egui::vec2(10.0, 0.0), target_screen + egui::vec2(15.0, 0.0)], Stroke::new(1.5, orange_accent));
+            painter.line_segment([target_screen - egui::vec2(0.0, 15.0), target_screen - egui::vec2(0.0, 10.0)], Stroke::new(1.5, orange_accent));
+            painter.line_segment([target_screen + egui::vec2(0.0, 10.0), target_screen + egui::vec2(0.0, 15.0)], Stroke::new(1.5, orange_accent));
+
+            let badge_rect = Rect::from_min_size(target_screen + egui::vec2(14.0, -10.0), egui::vec2(78.0, 20.0));
+            painter.rect_filled(badge_rect, egui::CornerRadius::same(4), Color32::from_rgba_unmultiplied(18, 22, 30, 230));
+            painter.rect_stroke(badge_rect, egui::CornerRadius::same(4), Stroke::new(1.0, orange_accent), egui::StrokeKind::Inside);
+            painter.text(badge_rect.center(), egui::Align2::CENTER_CENTER, "Snap: Vertex", egui::FontId::proportional(10.5), Color32::WHITE);
+        }
     }
 
     // Coordinate orientation indicator in bottom-left matching reference screenshot

@@ -1795,6 +1795,7 @@ impl Forge3dStudioApp {
     }
 
     pub fn apply_modal_transform(&mut self) {
+        self.editor_state.active_snap_target = None;
         if !self.editor_state.modal_transform.active {
             return;
         }
@@ -1818,6 +1819,7 @@ impl Forge3dStudioApp {
     }
 
     pub fn cancel_modal_transform(&mut self) {
+        self.editor_state.active_snap_target = None;
         if !self.editor_state.modal_transform.active {
             return;
         }
@@ -3441,5 +3443,33 @@ mod tests {
         app.set_edit_mode(EditMode::Object);
         assert_eq!(app.editor_state.edit_mode, EditMode::Object);
         assert!(app.active_edit_mesh.is_none());
+    }
+
+    #[test]
+    fn test_snapping_system_and_target_lifecycle() {
+        let mut app = Forge3dStudioApp::new_headless();
+        assert!(!app.editor_state.snap_settings.enabled);
+        assert!(!app.editor_state.snap_settings.snap_to_vertex);
+        assert_eq!(app.editor_state.active_snap_target, None);
+
+        // Toggle snapping on
+        app.editor_state.snap_settings.enabled = true;
+        assert!(app.editor_state.snap_settings.enabled);
+
+        // Toggle vertex snapping
+        app.editor_state.snap_settings.snap_to_vertex = true;
+        assert!(app.editor_state.snap_settings.snap_to_vertex);
+
+        // Set active snap target and verify cancel clears it
+        app.editor_state.active_snap_target = Some(Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(app.editor_state.active_snap_target, Some(Vec3::new(1.0, 2.0, 3.0)));
+
+        app.cancel_modal_transform();
+        assert_eq!(app.editor_state.active_snap_target, None);
+
+        // Also verify apply_modal_transform clears it
+        app.editor_state.active_snap_target = Some(Vec3::new(4.0, 5.0, 6.0));
+        app.apply_modal_transform();
+        assert_eq!(app.editor_state.active_snap_target, None);
     }
 }
