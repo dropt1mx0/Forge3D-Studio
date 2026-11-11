@@ -126,6 +126,17 @@ pub enum ToolbarDisplayMode {
     IconAndLabel,
 }
 
+/// Viewport MatCap shading mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ViewportMatcap {
+    #[default]
+    Studio = 0,
+    Clay = 1,
+    Chrome = 2,
+    Normal = 3,
+    Pearl = 4,
+}
+
 fn default_zoom_sensitivity() -> f32 {
     1.0
 }
@@ -419,6 +430,7 @@ pub struct EditorState {
     pub show_grid: bool,
     pub show_axes: bool,
     pub show_wireframe: bool,
+    pub viewport_matcap: ViewportMatcap,
     pub use_gpu_wireframe: bool,
     pub use_gpu_vertex_handles: bool,
     pub use_gpu_picking: bool,
@@ -466,6 +478,7 @@ impl Default for EditorState {
             show_grid: true,
             show_axes: true,
             show_wireframe: false,
+            viewport_matcap: ViewportMatcap::Studio,
             use_gpu_wireframe: true,
             use_gpu_vertex_handles: true,
             use_gpu_picking: true,

@@ -3005,6 +3005,7 @@ impl Forge3dStudioApp {
                         is_vertex_mode: self.editor_state.selection_element
                             == forge_scene::SelectionElement::Vertex,
                         active_vertex: self.editor_state.active_vertex,
+                        matcap_mode: self.editor_state.viewport_matcap as u32,
                     };
 
                     renderer.render_with_edit_mesh(
@@ -3689,5 +3690,32 @@ mod tests {
 
         app.cylinder_project_selected_geometry(2.0);
         assert!(app.status_message.contains("Cylinder UV Projection complete"));
+    }
+
+    #[test]
+    fn test_viewport_matcap_shading_lifecycle() {
+        use forge_scene::ViewportMatcap;
+        let mut app = Forge3dStudioApp::new_headless();
+        assert_eq!(app.editor_state.viewport_matcap, ViewportMatcap::Studio);
+
+        // Switch to Clay matcap
+        app.editor_state.viewport_matcap = ViewportMatcap::Clay;
+        assert_eq!(app.editor_state.viewport_matcap as u32, 1);
+
+        // Switch to Chrome matcap
+        app.editor_state.viewport_matcap = ViewportMatcap::Chrome;
+        assert_eq!(app.editor_state.viewport_matcap as u32, 2);
+
+        // Switch to Normal matcap
+        app.editor_state.viewport_matcap = ViewportMatcap::Normal;
+        assert_eq!(app.editor_state.viewport_matcap as u32, 3);
+
+        // Switch to Pearl matcap
+        app.editor_state.viewport_matcap = ViewportMatcap::Pearl;
+        assert_eq!(app.editor_state.viewport_matcap as u32, 4);
+
+        // Reset to Studio
+        app.editor_state.viewport_matcap = ViewportMatcap::Studio;
+        assert_eq!(app.editor_state.viewport_matcap as u32, 0);
     }
 }

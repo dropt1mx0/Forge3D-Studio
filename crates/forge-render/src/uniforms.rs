@@ -26,17 +26,19 @@ pub struct ObjectUniform {
     pub normal_model: [[f32; 4]; 4],
     pub color: [f32; 4],
     pub is_selected: u32,
-    pub _padding: [u32; 3], // Padding to maintain 16-byte struct size
+    pub matcap_mode: u32,
+    pub _padding: [u32; 2], // Padding to maintain 16-byte struct size
 }
 
 impl ObjectUniform {
-    pub fn new(model: Mat4, color: [f32; 4], is_selected: bool) -> Self {
+    pub fn new(model: Mat4, color: [f32; 4], is_selected: bool, matcap_mode: u32) -> Self {
         Self {
             model: model.to_cols_array_2d(),
             normal_model: model.inverse().transpose().to_cols_array_2d(),
             color,
             is_selected: if is_selected { 1 } else { 0 },
-            _padding: [0, 0, 0],
+            matcap_mode,
+            _padding: [0, 0],
         }
     }
 }

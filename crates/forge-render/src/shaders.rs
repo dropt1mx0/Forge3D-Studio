@@ -10,9 +10,9 @@ struct ObjectUniform {
     normal_model: mat4x4<f32>,
     color: vec4<f32>,
     is_selected: u32,
+    matcap_mode: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 };
 
 struct MaterialUniform {
@@ -230,6 +230,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             * light.color_range.rgb * attenuation * visibility;
     }
     var lit = ambient + direct + emissive;
+
+    if (object.matcap_mode == 1u) {
+        let rim = pow(1.0 - max(dot(view_dir, normal), 0.0), 2.5);
+        let diffuse = max(dot(normal, vec3<f32>(0.577, 0.577, 0.577)), 0.0) * 0.65 + 0.35;
+        lit = vec3<f32>(0.76, 0.36, 0.22) * diffuse + vec3<f32>(0.95, 0.75, 0.55) * rim * 0.45;
+    } else if (object.matcap_mode == 2u) {
+        let view_n = normalize((camera.view_proj * vec4<f32>(normal, 0.0)).xyz);
+        let refl = view_n.xy * 0.5 + 0.5;
+        let ring = sin(refl.x * 20.0) * 0.08 + sin(refl.y * 20.0) * 0.08;
+        lit = vec3<f32>(0.2, 0.25, 0.3) + vec3<f32>(refl.y * 0.7 + ring);
+    } else if (object.matcap_mode == 3u) {
+        lit = normal * 0.5 + 0.5;
+    } else if (object.matcap_mode == 4u) {
+        let n_dot_v = max(dot(view_dir, normal), 0.0);
+        let pearl = mix(vec3<f32>(0.92, 0.94, 0.98), vec3<f32>(0.68, 0.72, 0.82), 1.0 - n_dot_v);
+        let spec = pow(max(dot(reflect(-view_dir, normal), vec3<f32>(0.577, 0.577, 0.577)), 0.0), 32.0);
+        lit = pearl + spec * 0.4;
+    }
 
     // Selection highlight feedback
     if (object.is_selected == 1u) {

@@ -169,6 +169,7 @@ pub struct EditRenderOptions {
     pub draw_vertices: bool,
     pub is_vertex_mode: bool,
     pub active_vertex: Option<usize>,
+    pub matcap_mode: u32,
 }
 
 impl Default for EditRenderOptions {
@@ -178,6 +179,7 @@ impl Default for EditRenderOptions {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+            matcap_mode: 0,
         }
     }
 }
@@ -696,7 +698,12 @@ impl ViewportRenderer {
 
             let world_tf = scene.world_transform(id);
             let is_selected = selection.is_selected(id);
-            let obj_uniform = ObjectUniform::new(world_tf.to_matrix(), obj.color, is_selected);
+            let obj_uniform = ObjectUniform::new(
+                world_tf.to_matrix(),
+                obj.color,
+                is_selected,
+                options.matcap_mode,
+            );
 
             if let Some(entry) = self.mesh_cache.get_mut(&id) {
                 // If mesh geometry or modifiers changed, re-evaluate and re-upload buffers
@@ -2065,6 +2072,7 @@ mod tests {
                 draw_vertices: false,
                 is_vertex_mode: false,
                 active_vertex: None,
+                matcap_mode: 0,
             },
         );
         let pixels_edit_mode =
@@ -2116,6 +2124,7 @@ mod tests {
                 draw_vertices: true,
                 is_vertex_mode: true,
                 active_vertex: None,
+                matcap_mode: 0,
             },
         );
 
@@ -2154,6 +2163,7 @@ mod tests {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
+            matcap_mode: 0,
         };
 
         // Frame 1: Initial upload
@@ -2234,6 +2244,7 @@ mod tests {
                 draw_vertices: true,
                 is_vertex_mode: true,
                 active_vertex: None,
+                matcap_mode: 0,
             },
         );
 
@@ -2255,6 +2266,7 @@ mod tests {
                 draw_vertices: true,
                 is_vertex_mode: true,
                 active_vertex: Some(0),
+                matcap_mode: 0,
             },
         );
 
@@ -2316,6 +2328,7 @@ mod tests {
                 draw_vertices: false,
                 is_vertex_mode: true,
                 active_vertex: None,
+                matcap_mode: 0,
             },
         );
         let pixels_wireframe_only =
@@ -2338,6 +2351,7 @@ mod tests {
                 draw_vertices: true,
                 is_vertex_mode: true,
                 active_vertex: None,
+                matcap_mode: 0,
             },
         );
         let pixels_with_handles =

@@ -6,7 +6,7 @@ use forge_math::{Quat, Vec2, Vec3};
 use forge_render::{CameraProjection, PickResult, ViewPreset, screen_to_texture_coords};
 use forge_scene::{
     Action, AxisConstraint, EditMode, LightData, LightKind, PivotPoint, PointerInteractionState,
-    PrimitiveType, SceneObject, TransformMode,
+    PrimitiveType, SceneObject, TransformMode, ViewportMatcap,
 };
 
 use crate::app::{Forge3dStudioApp, PieMenuKind, PieMenuState};
@@ -1884,8 +1884,16 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         egui::StrokeKind::Outside,
     );
 
+    let matcap_str = match app.editor_state.viewport_matcap {
+        ViewportMatcap::Studio => "Studio",
+        ViewportMatcap::Clay => "Clay",
+        ViewportMatcap::Chrome => "Chrome",
+        ViewportMatcap::Normal => "Normal",
+        ViewportMatcap::Pearl => "Pearl",
+    };
+
     let hud_text = format!(
-        "Live Viewer  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}){ptr_state_str}"
+        "Live Viewer  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}) | {matcap_str}{ptr_state_str}"
     );
     painter.text(
         header_rect.min + EguiVec2::new(12.0, 6.0),
@@ -2636,6 +2644,7 @@ enum PieMenuAction {
     BoxUvProject,
     SphereUvProject,
     CylinderUvProject,
+    SetMatcap(ViewportMatcap),
 }
 
 struct PieSlice {
@@ -2691,6 +2700,10 @@ fn execute_pie_action(app: &mut Forge3dStudioApp, action: &PieMenuAction) {
         PieMenuAction::CylinderUvProject => {
             app.cylinder_project_selected_geometry(2.0);
         }
+        PieMenuAction::SetMatcap(matcap) => {
+            app.editor_state.viewport_matcap = *matcap;
+            app.status_message = format!("Viewport Shading: {:?}", matcap);
+        }
     }
 }
 
@@ -2744,39 +2757,63 @@ fn render_pie_menu_overlay(
             ],
         ),
         PieMenuKind::Shading => (
-            "VIEWPORT SHADING",
+            "VIEWPORT SHADING & MATCAP",
             vec![
                 PieSlice {
                     angle: -std::f32::consts::FRAC_PI_2,
                     icon: "⚪",
-                    label: "Solid",
+                    label: "Studio (PBR)",
                     subtext: "8",
-                    action: PieMenuAction::SetShadingWireframe(false),
-                    is_active: !app.editor_state.show_wireframe,
+                    action: PieMenuAction::SetMatcap(ViewportMatcap::Studio),
+                    is_active: app.editor_state.viewport_matcap == ViewportMatcap::Studio && !app.editor_state.show_wireframe,
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_2,
                     icon: "🕸",
                     label: "Wireframe",
                     subtext: "4",
-                    action: PieMenuAction::SetShadingWireframe(true),
+                    action: PieMenuAction::SetShadingWireframe(!app.editor_state.show_wireframe),
                     is_active: app.editor_state.show_wireframe,
                 },
                 PieSlice {
                     angle: 0.0,
-                    icon: "🎨",
-                    label: "Material Preview",
+                    icon: "🏺",
+                    label: "Matcap Clay",
                     subtext: "6",
-                    action: PieMenuAction::OpenMaterialEditor,
-                    is_active: app.show_material_editor,
+                    action: PieMenuAction::SetMatcap(ViewportMatcap::Clay),
+                    is_active: app.editor_state.viewport_matcap == ViewportMatcap::Clay,
                 },
                 PieSlice {
                     angle: std::f32::consts::PI,
-                    icon: "✨",
-                    label: "Rendered",
+                    icon: "🪞",
+                    label: "Matcap Chrome",
                     subtext: "2",
-                    action: PieMenuAction::SetShadingWireframe(false),
-                    is_active: false,
+                    action: PieMenuAction::SetMatcap(ViewportMatcap::Chrome),
+                    is_active: app.editor_state.viewport_matcap == ViewportMatcap::Chrome,
+                },
+                PieSlice {
+                    angle: -std::f32::consts::FRAC_PI_4,
+                    icon: "🌈",
+                    label: "Matcap Normal",
+                    subtext: "9",
+                    action: PieMenuAction::SetMatcap(ViewportMatcap::Normal),
+                    is_active: app.editor_state.viewport_matcap == ViewportMatcap::Normal,
+                },
+                PieSlice {
+                    angle: std::f32::consts::FRAC_PI_4,
+                    icon: "✨",
+                    label: "Matcap Pearl",
+                    subtext: "3",
+                    action: PieMenuAction::SetMatcap(ViewportMatcap::Pearl),
+                    is_active: app.editor_state.viewport_matcap == ViewportMatcap::Pearl,
+                },
+                PieSlice {
+                    angle: -std::f32::consts::FRAC_PI_4 * 3.0,
+                    icon: "🎨",
+                    label: "Material Preview",
+                    subtext: "7",
+                    action: PieMenuAction::OpenMaterialEditor,
+                    is_active: app.show_material_editor,
                 },
             ],
         ),
