@@ -25,18 +25,30 @@ fn tool_button(
         format!("{label} ({hotkey})")
     };
 
+    let is_dark = ui.visuals().dark_mode;
+    let inactive_fg = if is_dark {
+        egui::Color32::from_rgb(205, 212, 228)
+    } else {
+        egui::Color32::from_rgb(45, 52, 68)
+    };
+    let inactive_bg = if is_dark {
+        egui::Color32::from_rgb(26, 28, 36)
+    } else {
+        egui::Color32::from_rgb(235, 238, 246)
+    };
+
     match display_mode {
         ToolbarDisplayMode::IconOnly => {
             let btn = egui::Button::new(egui::RichText::new(icon).size(11.0).color(if active {
                 egui::Color32::WHITE
             } else {
-                egui::Color32::from_rgb(205, 212, 228)
+                inactive_fg
             }))
             .selected(active)
             .fill(if active {
                 egui::Color32::from_rgb(37, 99, 235)
             } else {
-                egui::Color32::from_rgb(26, 28, 36)
+                inactive_bg
             })
             .corner_radius(egui::CornerRadius::same(4));
             ui.add_sized([ui.available_width().max(32.0), 22.0], btn)
@@ -51,13 +63,13 @@ fn tool_button(
             let btn = egui::Button::new(egui::RichText::new(text).size(11.0).color(if active {
                 egui::Color32::WHITE
             } else {
-                egui::Color32::from_rgb(205, 212, 228)
+                inactive_fg
             }))
             .selected(active)
             .fill(if active {
                 egui::Color32::from_rgb(37, 99, 235)
             } else {
-                egui::Color32::from_rgb(26, 28, 36)
+                inactive_bg
             })
             .corner_radius(egui::CornerRadius::same(4));
             ui.add_sized([ui.available_width(), 22.0], btn)
@@ -68,8 +80,10 @@ fn tool_button(
 
 pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     let display_mode = app.editor_state.panel_settings.toolbar_mode;
+    let is_dark = ui.visuals().dark_mode;
 
     egui::ScrollArea::vertical()
+        .id_salt("left_toolbar_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(2.0, 3.0);
@@ -96,19 +110,43 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     .strong()
                     .size(11.5)
                     .color(if mode_is_sculpt {
-                        egui::Color32::from_rgb(147, 197, 253)
+                        if is_dark {
+                            egui::Color32::from_rgb(147, 197, 253)
+                        } else {
+                            egui::Color32::from_rgb(29, 78, 216)
+                        }
                     } else if mode_is_edit {
-                        egui::Color32::from_rgb(255, 175, 50)
+                        if is_dark {
+                            egui::Color32::from_rgb(255, 175, 50)
+                        } else {
+                            egui::Color32::from_rgb(180, 83, 9)
+                        }
                     } else {
-                        egui::Color32::from_rgb(205, 215, 235)
+                        if is_dark {
+                            egui::Color32::from_rgb(205, 215, 235)
+                        } else {
+                            egui::Color32::from_rgb(40, 48, 64)
+                        }
                     }),
                 )
                 .fill(if mode_is_sculpt {
-                    egui::Color32::from_rgb(30, 45, 65)
+                    if is_dark {
+                        egui::Color32::from_rgb(30, 45, 65)
+                    } else {
+                        egui::Color32::from_rgb(219, 234, 254)
+                    }
                 } else if mode_is_edit {
-                    egui::Color32::from_rgb(45, 35, 20)
+                    if is_dark {
+                        egui::Color32::from_rgb(45, 35, 20)
+                    } else {
+                        egui::Color32::from_rgb(254, 243, 199)
+                    }
                 } else {
-                    egui::Color32::from_rgb(26, 28, 36)
+                    if is_dark {
+                        egui::Color32::from_rgb(26, 28, 36)
+                    } else {
+                        egui::Color32::from_rgb(235, 238, 246)
+                    }
                 })
                 .stroke(egui::Stroke::new(
                     1.0,
@@ -117,7 +155,11 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     } else if mode_is_edit {
                         egui::Color32::from_rgb(240, 144, 32)
                     } else {
-                        egui::Color32::from_rgb(45, 50, 65)
+                        if is_dark {
+                            egui::Color32::from_rgb(45, 50, 65)
+                        } else {
+                            egui::Color32::from_rgb(205, 212, 226)
+                        }
                     },
                 ))
                 .corner_radius(egui::CornerRadius::same(4));
@@ -475,7 +517,7 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         let mesh = generate_plane(8.0, 8);
                         let id = app.scene.add_object(
                             SceneObject::new("Plane", PrimitiveType::Plane, mesh)
-                                .with_color([0.28, 0.30, 0.34, 1.0])
+                                .with_color([0.72, 0.74, 0.78, 1.0])
                                 .with_transform(Transform::from_translation(cursor)),
                         );
                         if let Some(obj) = app.scene.get_object(id) {

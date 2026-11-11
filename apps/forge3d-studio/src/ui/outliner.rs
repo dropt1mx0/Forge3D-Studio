@@ -8,7 +8,9 @@ use crate::app::Forge3dStudioApp;
 
 pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     // Top Tabs: File | Edit | View | Objects | Tags | Bookmarks
-    egui::ScrollArea::horizontal().show(ui, |ui| {
+    egui::ScrollArea::horizontal()
+        .id_salt("outliner_tabs_scroll")
+        .show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
             let tab_col = egui::Color32::from_rgb(160, 168, 185);
@@ -34,7 +36,9 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     let mut to_activate_cam: Option<ObjectId> = None;
     let mut to_frame: Option<ObjectId> = None;
 
-    egui::ScrollArea::vertical().show(ui, |ui| {
+    egui::ScrollArea::vertical()
+        .id_salt("outliner_tree_scroll")
+        .show(ui, |ui| {
         if app.scene.objects.is_empty() {
             ui.label(
                 egui::RichText::new("Empty scene. Add objects from Create menu or toolbar.")
@@ -207,7 +211,7 @@ fn render_object_node(
             let text_color = if is_selected {
                 egui::Color32::WHITE
             } else {
-                egui::Color32::from_rgb(205, 212, 228)
+                ui.visuals().text_color()
             };
 
             let row_btn = if is_selected {
