@@ -1892,6 +1892,278 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     draw_axis(Vec3::Y, Color32::from_rgb(65, 225, 75), "Y"); // Y - Green
     draw_axis(Vec3::Z, Color32::from_rgb(65, 130, 245), "Z"); // Z - Blue
 
+    // =========================================================================
+    // 3D VIEWPORT NAVIGATION COMPASS & GIZMO (Blender-compatible)
+    // =========================================================================
+    let compass_center = rect.right_top() + EguiVec2::new(-50.0, 52.0);
+    let compass_radius = 38.0;
+    let compass_rect = Rect::from_center_size(
+        compass_center,
+        egui::vec2(compass_radius * 2.0, compass_radius * 2.0),
+    );
+
+    let compass_resp = ui.allocate_rect(compass_rect, Sense::click_and_drag());
+    let is_light = app.editor_state.panel_settings.is_light_theme;
+    let bg_color = if is_light {
+        if compass_resp.hovered() {
+            Color32::from_rgba_unmultiplied(235, 240, 250, 200)
+        } else {
+            Color32::from_rgba_unmultiplied(240, 243, 250, 140)
+        }
+    } else if compass_resp.hovered() {
+        Color32::from_rgba_unmultiplied(35, 38, 48, 220)
+    } else {
+        Color32::from_rgba_unmultiplied(22, 24, 30, 160)
+    };
+    painter.circle_filled(compass_center, compass_radius, bg_color);
+    painter.circle_stroke(
+        compass_center,
+        compass_radius,
+        Stroke::new(
+            1.0,
+            if is_light {
+                Color32::from_rgb(205, 212, 225)
+            } else {
+                Color32::from_rgb(50, 55, 70)
+            },
+        ),
+    );
+
+    struct AxisTip {
+        label: &'static str,
+        world_dir: Vec3,
+        screen_pos: Pos2,
+        depth_z: f32,
+        color: Color32,
+        preset: ViewPreset,
+        is_positive: bool,
+    }
+
+    let mut axes = [
+        AxisTip {
+            label: "X",
+            world_dir: Vec3::X,
+            screen_pos: Pos2::ZERO,
+            depth_z: 0.0,
+            color: Color32::from_rgb(235, 65, 65),
+            preset: ViewPreset::Right,
+            is_positive: true,
+        },
+        AxisTip {
+            label: "-X",
+            world_dir: -Vec3::X,
+            screen_pos: Pos2::ZERO,
+            depth_z: 0.0,
+            color: Color32::from_rgb(140, 60, 60),
+            preset: ViewPreset::Left,
+            is_positive: false,
+        },
+        AxisTip {
+            label: "Y",
+            world_dir: Vec3::Y,
+            screen_pos: Pos2::ZERO,
+            depth_z: 0.0,
+            color: Color32::from_rgb(65, 215, 75),
+            preset: ViewPreset::Top,
+            is_positive: true,
+        },
+        AxisTip {
+            label: "-Y",
+            world_dir: -Vec3::Y,
+            screen_pos: Pos2::ZERO,
+            depth_z: 0.0,
+            color: Color32::from_rgb(50, 130, 60),
+            preset: ViewPreset::Bottom,
+            is_positive: false,
+        },
+        AxisTip {
+            label: "Z",
+            world_dir: Vec3::Z,
+            screen_pos: Pos2::ZERO,
+            depth_z: 0.0,
+            color: Color32::from_rgb(65, 130, 245),
+            preset: ViewPreset::Front,
+            is_positive: true,
+        },
+        AxisTip {
+            label: "-Z",
+            world_dir: -Vec3::Z,
+            screen_pos: Pos2::ZERO,
+            depth_z: 0.0,
+            color: Color32::from_rgb(50, 85, 150),
+            preset: ViewPreset::Back,
+            is_positive: false,
+        },
+    ];
+
+    let arm_len = 25.0;
+    for axis in &mut axes {
+        let v = view_mat.transform_vector3(axis.world_dir);
+        axis.screen_pos = compass_center + EguiVec2::new(v.x * arm_len, -v.y * arm_len);
+        axis.depth_z = v.z;
+    }
+
+    axes.sort_by(|a, b| {
+        a.depth_z
+            .partial_cmp(&b.depth_z)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let pointer_pos = input.pointer.hover_pos();
+    let mut clicked_preset = None;
+
+    if compass_resp.dragged() {
+        let delta = input.pointer.delta();
+        if delta.length_sq() > 0.0 {
+            app.camera.orbit(delta.x * 0.008, delta.y * 0.008);
+            ui.ctx().request_repaint();
+        }
+    }
+
+    if compass_resp.clicked() {
+        if let Some(pos) = pointer_pos {
+            for axis in axes.iter().rev() {
+                if pos.distance(axis.screen_pos) <= 10.0 {
+                    clicked_preset = Some(axis.preset);
+                    break;
+                }
+            }
+        }
+    }
+
+    if let Some(preset) = clicked_preset {
+        app.camera.set_view_preset(preset);
+        app.status_message = format!("View: {:?}", preset);
+        ui.ctx().request_repaint();
+    }
+
+    for axis in &axes {
+        if axis.is_positive {
+            painter.line_segment(
+                [compass_center, axis.screen_pos],
+                Stroke::new(2.0, axis.color.linear_multiply(0.85)),
+            );
+        }
+
+        let radius = if axis.is_positive { 8.0 } else { 4.5 };
+        let is_hovered = pointer_pos
+            .map(|p| p.distance(axis.screen_pos) <= radius + 2.0)
+            .unwrap_or(false);
+        let bubble_color = if is_hovered {
+            Color32::WHITE
+        } else {
+            axis.color
+        };
+
+        painter.circle_filled(axis.screen_pos, radius, bubble_color);
+        if axis.is_positive {
+            let text_color = if is_hovered {
+                Color32::BLACK
+            } else {
+                Color32::WHITE
+            };
+            painter.text(
+                axis.screen_pos,
+                egui::Align2::CENTER_CENTER,
+                axis.label,
+                egui::FontId::proportional(10.0),
+                text_color,
+            );
+        }
+    }
+
+    // Quick Navigation Buttons (Zoom, Pan, Camera, Ortho/Persp)
+    let btn_start_y = compass_center.y + compass_radius + 10.0;
+    let btn_size = egui::vec2(24.0, 24.0);
+    let nav_btn_x = compass_center.x - btn_size.x / 2.0;
+
+    let nav_buttons = [
+        ("🔍", "Zoom View (Drag up/down)"),
+        ("✋", "Pan View (Drag)"),
+        ("🎥", "Toggle Camera View (Numpad 0)"),
+        (
+            match app.camera.projection {
+                CameraProjection::Perspective => "◬",
+                CameraProjection::Orthographic => "⊞",
+            },
+            "Toggle Perspective / Orthographic (Numpad 5)",
+        ),
+    ];
+
+    for (idx, (icon, tooltip)) in nav_buttons.iter().enumerate() {
+        let btn_rect = Rect::from_min_size(
+            egui::pos2(nav_btn_x, btn_start_y + idx as f32 * 27.0),
+            btn_size,
+        );
+        let resp = ui.allocate_rect(btn_rect, Sense::click_and_drag());
+        let is_hover = resp.hovered();
+        let bg = if is_hover {
+            if is_light {
+                Color32::from_rgb(220, 226, 240)
+            } else {
+                Color32::from_rgb(45, 50, 65)
+            }
+        } else if is_light {
+            Color32::from_rgb(240, 243, 250)
+        } else {
+            Color32::from_rgb(26, 28, 36)
+        };
+
+        painter.rect(
+            btn_rect,
+            egui::CornerRadius::same(5),
+            bg,
+            Stroke::new(
+                1.0,
+                if is_light {
+                    Color32::from_rgb(205, 212, 225)
+                } else {
+                    Color32::from_rgb(45, 50, 62)
+                },
+            ),
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            btn_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            *icon,
+            egui::FontId::proportional(11.5),
+            if is_hover {
+                if is_light {
+                    Color32::BLACK
+                } else {
+                    Color32::WHITE
+                }
+            } else if is_light {
+                Color32::from_rgb(60, 68, 85)
+            } else {
+                Color32::from_rgb(180, 185, 200)
+            },
+        );
+
+        let resp = resp.on_hover_text(*tooltip);
+
+        if idx == 0 && resp.dragged() {
+            let dy = input.pointer.delta().y;
+            app.camera.zoom(1.0 - dy * 0.02);
+            ui.ctx().request_repaint();
+        } else if idx == 1 && resp.dragged() {
+            let delta = input.pointer.delta();
+            app.camera.pan(delta.x, delta.y);
+            ui.ctx().request_repaint();
+        } else if idx == 2 && resp.clicked() {
+            app.toggle_camera_view();
+            ui.ctx().request_repaint();
+        } else if idx == 3 && resp.clicked() {
+            app.camera.projection = match app.camera.projection {
+                CameraProjection::Perspective => CameraProjection::Orthographic,
+                CameraProjection::Orthographic => CameraProjection::Perspective,
+            };
+            app.status_message = format!("Projection: {:?}", app.camera.projection);
+            ui.ctx().request_repaint();
+        }
+    }
+
     // Floating Debug Telemetry Panel
     if app.editor_state.show_debug_info {
         let debug_rect = Rect::from_min_size(
