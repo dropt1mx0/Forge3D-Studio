@@ -526,13 +526,21 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
             if app.editor_state.edit_mode != EditMode::Edit {
                 app.toggle_edit_mode();
             }
-            app.extrude_selected_geometry(0.5);
+            let center = forge_math::Vec2::new(400.0, 300.0);
+            if !app.begin_interactive_edit_tool(crate::app::InteractiveEditToolType::Extrude, center)
+            {
+                app.extrude_selected_geometry(0.5);
+            }
         }
         "mesh_inset" => {
             if app.editor_state.edit_mode != EditMode::Edit {
                 app.toggle_edit_mode();
             }
-            app.inset_selected_geometry(0.15);
+            let center = forge_math::Vec2::new(400.0, 300.0);
+            if !app.begin_interactive_edit_tool(crate::app::InteractiveEditToolType::Inset, center)
+            {
+                app.inset_selected_geometry(0.15);
+            }
         }
         "mesh_bevel" => {
             if app.editor_state.edit_mode != EditMode::Edit {
@@ -544,7 +552,11 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
             if app.editor_state.edit_mode != EditMode::Edit {
                 app.toggle_edit_mode();
             }
-            app.loop_cut_selected_geometry(0.5);
+            let center = forge_math::Vec2::new(400.0, 300.0);
+            if !app.begin_interactive_edit_tool(crate::app::InteractiveEditToolType::LoopCut, center)
+            {
+                app.loop_cut_selected_geometry(0.5);
+            }
         }
         "mesh_dissolve" => {
             if app.editor_state.edit_mode != EditMode::Edit {

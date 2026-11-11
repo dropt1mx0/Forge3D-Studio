@@ -293,11 +293,19 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     }
 
                     if tool_button(ui, false, "Ext", "Extrude", "E", display_mode).clicked() {
-                        app.extrude_selected_geometry(0.5);
+                        let center = forge_math::Vec2::new(400.0, 300.0);
+                        app.begin_interactive_edit_tool(
+                            crate::app::InteractiveEditToolType::Extrude,
+                            center,
+                        );
                     }
 
                     if tool_button(ui, false, "Ins", "Inset", "I", display_mode).clicked() {
-                        app.inset_selected_geometry(0.15);
+                        let center = forge_math::Vec2::new(400.0, 300.0);
+                        app.begin_interactive_edit_tool(
+                            crate::app::InteractiveEditToolType::Inset,
+                            center,
+                        );
                     }
 
                     if tool_button(ui, false, "Sub", "Subdivide", "", display_mode).clicked() {
@@ -318,7 +326,11 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                     if tool_button(ui, false, "Loop", "Loop Cut", "Ctrl+R", display_mode).clicked()
                     {
-                        app.loop_cut_selected_geometry(0.5);
+                        let center = forge_math::Vec2::new(400.0, 300.0);
+                        app.begin_interactive_edit_tool(
+                            crate::app::InteractiveEditToolType::LoopCut,
+                            center,
+                        );
                     }
 
                     if tool_button(ui, false, "Dis", "Dissolve", "Ctrl+X", display_mode).clicked() {

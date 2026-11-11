@@ -581,6 +581,23 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             .map(|p| Vec2::new(p.x - rect.min.x, p.y - rect.min.y))
             .unwrap_or(Vec2::new(rect.width() * 0.5, rect.height() * 0.5));
 
+        // Active Interactive Modeling Tool execution (Extrude, Inset, Loop Cut)
+        if app.interactive_edit_tool.is_some() {
+            let shift = input.modifiers.shift;
+            let ctrl = input.modifiers.ctrl || input.modifiers.command;
+            app.update_interactive_edit_tool(mouse_vec2, shift, ctrl);
+            ui.ctx().request_repaint();
+
+            if input.pointer.primary_clicked() || input.key_pressed(Key::Enter) {
+                app.confirm_interactive_edit_tool();
+                ui.ctx().request_repaint();
+            } else if input.pointer.secondary_clicked() || input.key_pressed(Key::Escape) {
+                app.cancel_interactive_edit_tool();
+                ui.ctx().request_repaint();
+            }
+            return;
+        }
+
         if !input.modifiers.command
             && !input.modifiers.ctrl
             && !input.modifiers.alt
@@ -652,7 +669,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.status_message = "Tool: Move (W)".to_string();
             } else if input.key_pressed(Key::E) {
                 if app.editor_state.edit_mode == EditMode::Edit {
-                    app.extrude_selected_geometry(0.5);
+                    app.begin_interactive_edit_tool(
+                        crate::app::InteractiveEditToolType::Extrude,
+                        mouse_vec2,
+                    );
+                    ui.ctx().request_repaint();
                 } else {
                     app.editor_state.transform_mode = TransformMode::Rotate;
                     app.status_message = "Tool: Rotate (E)".to_string();
@@ -680,7 +701,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.editor_state.selection_element = forge_scene::SelectionElement::Face;
                 app.status_message = "Selection: Face (3)".to_string();
             } else if input.key_pressed(Key::I) {
-                app.inset_selected_geometry(0.15);
+                app.begin_interactive_edit_tool(
+                    crate::app::InteractiveEditToolType::Inset,
+                    mouse_vec2,
+                );
+                ui.ctx().request_repaint();
             } else if input.key_pressed(Key::M) {
                 app.merge_selected_geometry();
             } else if input.key_pressed(Key::F) {
@@ -690,7 +715,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.bevel_selected_geometry(0.1);
             } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::R)
             {
-                app.loop_cut_selected_geometry(0.5);
+                app.begin_interactive_edit_tool(
+                    crate::app::InteractiveEditToolType::LoopCut,
+                    mouse_vec2,
+                );
+                ui.ctx().request_repaint();
             } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::X)
             {
                 app.dissolve_selected_geometry();
@@ -1507,6 +1536,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     // =========================================================================
     if !app.editor_state.fly_nav_active
         && !app.editor_state.modal_transform.active
+        && app.interactive_edit_tool.is_none()
         && !modal_consumed_click
         && !input.modifiers.alt
     {
@@ -2289,6 +2319,55 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             "LOCAL VIEW (Press '/' to exit)",
             egui::FontId::proportional(11.0),
             Color32::WHITE,
+        );
+    }
+
+    // Interactive Modeling Tool HUD Banner (Extrude, Inset, Loop Cut)
+    if let Some(tool) = &app.interactive_edit_tool {
+        let (title, detail) = match tool.tool_type {
+            crate::app::InteractiveEditToolType::Extrude => (
+                format!("EXTRUDE: {:+.2} m", tool.current_value),
+                "Move mouse | Shift: Fine | Ctrl: Snap | LMB/Enter: Confirm | RMB/Esc: Cancel",
+            ),
+            crate::app::InteractiveEditToolType::Inset => (
+                format!("INSET: {:.2} m", tool.current_value),
+                "Move mouse | Shift: Fine | Ctrl: Snap | LMB/Enter: Confirm | RMB/Esc: Cancel",
+            ),
+            crate::app::InteractiveEditToolType::LoopCut => (
+                format!("LOOP CUT: {:.0}%", tool.current_value * 100.0),
+                "Slide mouse | Shift: Fine | Ctrl: Snap | LMB/Enter: Confirm | RMB/Esc: Cancel",
+            ),
+        };
+
+        let banner_w = 440.0;
+        let banner_rect = Rect::from_min_size(
+            egui::pos2(rect.center().x - banner_w * 0.5, rect.max.y - 52.0),
+            egui::vec2(banner_w, 38.0),
+        );
+        painter.rect_filled(
+            banner_rect,
+            egui::CornerRadius::same(6),
+            Color32::from_rgba_unmultiplied(20, 32, 50, 240),
+        );
+        painter.rect_stroke(
+            banner_rect,
+            egui::CornerRadius::same(6),
+            Stroke::new(1.5, Color32::from_rgb(70, 160, 255)),
+            egui::StrokeKind::Outside,
+        );
+        painter.text(
+            banner_rect.center() - EguiVec2::new(0.0, 7.0),
+            egui::Align2::CENTER_CENTER,
+            title,
+            egui::FontId::proportional(13.0),
+            Color32::from_rgb(255, 230, 120),
+        );
+        painter.text(
+            banner_rect.center() + EguiVec2::new(0.0, 8.0),
+            egui::Align2::CENTER_CENTER,
+            detail,
+            egui::FontId::proportional(11.0),
+            Color32::from_rgb(180, 205, 230),
         );
     }
 

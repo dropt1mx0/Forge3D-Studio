@@ -187,6 +187,28 @@ pub struct Forge3dStudioApp {
 
     /// Blender-style Outliner search, restriction toggles, and filter settings.
     pub outliner_filter: OutlinerFilterSettings,
+
+    /// Active interactive modeling tool state in Edit Mode (Extrude, Inset, Loop Cut).
+    pub interactive_edit_tool: Option<InteractiveEditToolState>,
+}
+
+/// Interactive Edit Mode tool types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractiveEditToolType {
+    Extrude,
+    Inset,
+    LoopCut,
+}
+
+/// Active interactive modeling tool state (modal execution with mouse sliding).
+#[derive(Debug, Clone)]
+pub struct InteractiveEditToolState {
+    pub tool_type: InteractiveEditToolType,
+    pub start_pointer_pos: Vec2,
+    pub initial_mesh: std::sync::Arc<forge_geometry::Mesh>,
+    pub initial_edit_mesh: EditableMesh,
+    pub target_edge_idx: usize,
+    pub current_value: f32,
 }
 
 /// Tracks a pending asynchronous hover picking request with full context to validate click pre-polling.
@@ -423,6 +445,7 @@ impl Forge3dStudioApp {
             local_view_saved_visibility: None,
             show_overlays_dropdown: false,
             outliner_filter: OutlinerFilterSettings::default(),
+            interactive_edit_tool: None,
         }
     }
 
@@ -477,6 +500,7 @@ impl Forge3dStudioApp {
             local_view_saved_visibility: None,
             show_overlays_dropdown: false,
             outliner_filter: OutlinerFilterSettings::default(),
+            interactive_edit_tool: None,
         }
     }
 
@@ -506,7 +530,9 @@ impl Forge3dStudioApp {
                     self.status_message = "Edit Mode".to_string();
                 } else if let Some(active_id) = self.selection.active_id {
                     if let Some(obj) = self.scene.get_object(active_id) {
-                        let edit_mesh = EditableMesh::from_mesh(&obj.mesh);
+                        let mut edit_mesh = EditableMesh::from_mesh(&obj.mesh);
+                        edit_mesh.weld_colocated_vertices(1e-4);
+                        edit_mesh.tris_to_quads();
                         self.active_edit_mesh = Some((active_id, edit_mesh));
                         self.edit_overlay_cache.reset();
                         self.editor_state.edit_mode = EditMode::Edit;
@@ -651,55 +677,109 @@ impl Forge3dStudioApp {
     }
 
     pub fn extrude_selected_geometry(&mut self, distance: f32) {
-        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+        if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            let obj_id = *obj_id;
+            let old_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
             let res = edit_mesh.extrude_faces(distance);
             if !res.is_empty() {
+                let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
                 self.sync_edit_mesh_to_scene();
+                self.history.push(Action::modify_mesh(
+                    obj_id,
+                    old_mesh,
+                    new_mesh,
+                    format!("Extrude {} face(s)", res.len()),
+                ));
                 self.status_message = format!("Extruded {} face(s)", res.len());
             }
         }
     }
 
     pub fn inset_selected_geometry(&mut self, amount: f32) {
-        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+        if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            let obj_id = *obj_id;
+            let old_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
             let res = edit_mesh.inset_faces(amount);
             if !res.is_empty() {
+                let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
                 self.sync_edit_mesh_to_scene();
+                self.history.push(Action::modify_mesh(
+                    obj_id,
+                    old_mesh,
+                    new_mesh,
+                    format!("Inset {} face(s)", res.len()),
+                ));
                 self.status_message = format!("Inset {} face(s)", res.len());
             }
         }
     }
 
     pub fn subdivide_selected_geometry(&mut self) {
-        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+        if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            let obj_id = *obj_id;
+            let old_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
             edit_mesh.subdivide();
+            let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
             self.sync_edit_mesh_to_scene();
+            self.history.push(Action::modify_mesh(
+                obj_id,
+                old_mesh,
+                new_mesh,
+                "Subdivide Faces".to_string(),
+            ));
             self.status_message = "Subdivided selected faces".to_string();
         }
     }
 
     pub fn merge_selected_geometry(&mut self) {
-        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+        if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            let obj_id = *obj_id;
+            let old_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
             edit_mesh.merge_selected_at_center();
+            let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
             self.sync_edit_mesh_to_scene();
+            self.history.push(Action::modify_mesh(
+                obj_id,
+                old_mesh,
+                new_mesh,
+                "Merge Selected Vertices".to_string(),
+            ));
             self.status_message = "Merged selected vertices at center".to_string();
         }
     }
 
     pub fn fill_selected_geometry(&mut self) {
-        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh
-            && let Some(idx) = edit_mesh.fill_face_from_selection()
-        {
-            self.sync_edit_mesh_to_scene();
-            self.status_message = format!("Created Face #{}", idx);
+        if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            let obj_id = *obj_id;
+            let old_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+            if let Some(idx) = edit_mesh.fill_face_from_selection() {
+                let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+                self.sync_edit_mesh_to_scene();
+                self.history.push(Action::modify_mesh(
+                    obj_id,
+                    old_mesh,
+                    new_mesh,
+                    format!("Create Face #{}", idx),
+                ));
+                self.status_message = format!("Created Face #{}", idx);
+            }
         }
     }
 
     pub fn bevel_selected_geometry(&mut self, width: f32) {
-        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+        if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            let obj_id = *obj_id;
+            let old_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
             match edit_mesh.bevel_selected_edges(width) {
                 Ok(faces) if !faces.is_empty() => {
+                    let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
                     self.sync_edit_mesh_to_scene();
+                    self.history.push(Action::modify_mesh(
+                        obj_id,
+                        old_mesh,
+                        new_mesh,
+                        format!("Bevel {} edge(s)", faces.len()),
+                    ));
                     self.status_message = format!("Beveled {} edge(s)", faces.len());
                 }
                 Ok(_) => {
@@ -713,12 +793,20 @@ impl Forge3dStudioApp {
     }
 
     pub fn loop_cut_selected_geometry(&mut self, factor: f32) {
-        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+        if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            let obj_id = *obj_id;
             let target_edge_idx = edit_mesh.edges.iter().position(|e| e.selected).unwrap_or(0);
-
+            let old_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
             match edit_mesh.loop_cut(target_edge_idx, factor) {
                 Ok(faces) if !faces.is_empty() => {
+                    let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
                     self.sync_edit_mesh_to_scene();
+                    self.history.push(Action::modify_mesh(
+                        obj_id,
+                        old_mesh,
+                        new_mesh,
+                        format!("Loop Cut {} face(s)", faces.len()),
+                    ));
                     self.status_message = format!("Loop Cut: created {} new face(s)", faces.len());
                 }
                 Ok(_) => {
@@ -728,6 +816,184 @@ impl Forge3dStudioApp {
                     self.status_message = format!("Loop Cut: {e}");
                 }
             }
+        }
+    }
+
+    /// Begins interactive modal execution for an Edit Mode modeling tool (Extrude, Inset, Loop Cut).
+    pub fn begin_interactive_edit_tool(
+        &mut self,
+        tool: InteractiveEditToolType,
+        mouse_pos: Vec2,
+    ) -> bool {
+        let Some((_obj_id, edit_mesh)) = &self.active_edit_mesh else {
+            self.status_message = "No active mesh in Edit Mode".to_string();
+            return false;
+        };
+
+        match tool {
+            InteractiveEditToolType::Extrude => {
+                if edit_mesh.selected_faces().is_empty() {
+                    self.status_message =
+                        "Select at least one face to extrude (Press 3 for Face selection)"
+                            .to_string();
+                    return false;
+                }
+            }
+            InteractiveEditToolType::Inset => {
+                if edit_mesh.selected_faces().is_empty() {
+                    self.status_message =
+                        "Select at least one face to inset (Press 3 for Face selection)".to_string();
+                    return false;
+                }
+            }
+            InteractiveEditToolType::LoopCut => {
+                if edit_mesh.edges.is_empty() {
+                    self.status_message = "No edges available for Loop Cut".to_string();
+                    return false;
+                }
+            }
+        }
+
+        let initial_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+        let initial_edit_mesh = edit_mesh.clone();
+        let target_edge_idx = edit_mesh.edges.iter().position(|e| e.selected).unwrap_or(0);
+
+        let initial_val = match tool {
+            InteractiveEditToolType::Extrude => 0.0,
+            InteractiveEditToolType::Inset => 0.05,
+            InteractiveEditToolType::LoopCut => 0.5,
+        };
+
+        self.interactive_edit_tool = Some(InteractiveEditToolState {
+            tool_type: tool,
+            start_pointer_pos: mouse_pos,
+            initial_mesh,
+            initial_edit_mesh,
+            target_edge_idx,
+            current_value: initial_val,
+        });
+
+        self.status_message = match tool {
+            InteractiveEditToolType::Extrude => {
+                "Interactive Extrude: Move mouse to extrude | LMB: Confirm | Esc: Cancel".to_string()
+            }
+            InteractiveEditToolType::Inset => {
+                "Interactive Inset: Move mouse to inset | LMB: Confirm | Esc: Cancel".to_string()
+            }
+            InteractiveEditToolType::LoopCut => {
+                "Interactive Loop Cut: Slide mouse to position | LMB: Confirm | Esc: Cancel"
+                    .to_string()
+            }
+        };
+
+        true
+    }
+
+    /// Updates the active interactive modeling tool with current mouse coordinates and modifier keys.
+    pub fn update_interactive_edit_tool(
+        &mut self,
+        curr_pos: Vec2,
+        shift_held: bool,
+        ctrl_held: bool,
+    ) {
+        let Some(tool_state) = self.interactive_edit_tool.as_mut() else {
+            return;
+        };
+
+        let start_pos = tool_state.start_pointer_pos;
+        let delta_y = start_pos.y - curr_pos.y;
+        let delta_x = curr_pos.x - start_pos.x;
+
+        match tool_state.tool_type {
+            InteractiveEditToolType::Extrude => {
+                let rate = if shift_held { 0.002 } else { 0.01 };
+                let mut val = delta_y * rate;
+                if ctrl_held {
+                    val = (val * 10.0).round() / 10.0;
+                }
+                tool_state.current_value = val;
+            }
+            InteractiveEditToolType::Inset => {
+                let rate = if shift_held { 0.001 } else { 0.005 };
+                let mut val = (delta_y * rate).clamp(0.001, 0.95);
+                if ctrl_held {
+                    val = (val * 20.0).round() / 20.0;
+                }
+                tool_state.current_value = val;
+            }
+            InteractiveEditToolType::LoopCut => {
+                let rate = if shift_held { 0.0006 } else { 0.003 };
+                let mut val = (0.5 + delta_x * rate).clamp(0.02, 0.98);
+                if ctrl_held {
+                    val = (val * 10.0).round() / 10.0;
+                }
+                tool_state.current_value = val;
+            }
+        }
+
+        let val = tool_state.current_value;
+        let tool_type = tool_state.tool_type;
+        let target_edge = tool_state.target_edge_idx;
+        let cloned_init = tool_state.initial_edit_mesh.clone();
+
+        if let Some((_obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            *edit_mesh = cloned_init;
+            match tool_type {
+                InteractiveEditToolType::Extrude => {
+                    edit_mesh.extrude_faces(val);
+                }
+                InteractiveEditToolType::Inset => {
+                    edit_mesh.inset_faces(val);
+                }
+                InteractiveEditToolType::LoopCut => {
+                    let _ = edit_mesh.loop_cut(target_edge, val);
+                }
+            }
+            self.sync_edit_mesh_to_scene();
+        }
+    }
+
+    /// Confirms the active interactive tool, applying the transformation and pushing it to the undo stack.
+    pub fn confirm_interactive_edit_tool(&mut self) {
+        let Some(tool_state) = self.interactive_edit_tool.take() else {
+            return;
+        };
+
+        if let Some((obj_id, edit_mesh)) = &self.active_edit_mesh {
+            let obj_id = *obj_id;
+            let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+            let name = match tool_state.tool_type {
+                InteractiveEditToolType::Extrude => {
+                    format!("Extrude {:+.2} m", tool_state.current_value)
+                }
+                InteractiveEditToolType::Inset => {
+                    format!("Inset {:.2} m", tool_state.current_value)
+                }
+                InteractiveEditToolType::LoopCut => {
+                    format!("Loop Cut {:.0}%", tool_state.current_value * 100.0)
+                }
+            };
+
+            self.history.push(Action::modify_mesh(
+                obj_id,
+                tool_state.initial_mesh,
+                new_mesh,
+                name.clone(),
+            ));
+            self.status_message = format!("Confirmed {name}");
+        }
+    }
+
+    /// Cancels the active interactive tool, reverting mesh geometry to its state prior to starting the tool.
+    pub fn cancel_interactive_edit_tool(&mut self) {
+        let Some(tool_state) = self.interactive_edit_tool.take() else {
+            return;
+        };
+
+        if let Some((_obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            *edit_mesh = tool_state.initial_edit_mesh;
+            self.sync_edit_mesh_to_scene();
+            self.status_message = format!("{:?} cancelled", tool_state.tool_type);
         }
     }
 
@@ -2608,6 +2874,16 @@ impl Forge3dStudioApp {
             if let Some(r) = &mut self.renderer {
                 r.invalidate_all_meshes();
             }
+            if let Some((active_id, _)) = &self.active_edit_mesh {
+                let aid = *active_id;
+                if let Some(obj) = self.scene.get_object(aid) {
+                    let mut new_em = EditableMesh::from_mesh(&obj.mesh);
+                    new_em.weld_colocated_vertices(1e-4);
+                    new_em.tris_to_quads();
+                    self.active_edit_mesh = Some((aid, new_em));
+                    self.edit_overlay_cache.reset();
+                }
+            }
         } else {
             self.status_message = "Nothing to undo".to_string();
         }
@@ -2619,6 +2895,16 @@ impl Forge3dStudioApp {
             self.pending_hover_pick = None;
             if let Some(r) = &mut self.renderer {
                 r.invalidate_all_meshes();
+            }
+            if let Some((active_id, _)) = &self.active_edit_mesh {
+                let aid = *active_id;
+                if let Some(obj) = self.scene.get_object(aid) {
+                    let mut new_em = EditableMesh::from_mesh(&obj.mesh);
+                    new_em.weld_colocated_vertices(1e-4);
+                    new_em.tris_to_quads();
+                    self.active_edit_mesh = Some((aid, new_em));
+                    self.edit_overlay_cache.reset();
+                }
             }
         } else {
             self.status_message = "Nothing to redo".to_string();
@@ -4434,5 +4720,112 @@ mod tests {
         app.toggle_outliner_selectability_column();
         assert!(app.outliner_filter.show_selectability_column);
         assert!(app.status_message.contains("ON"));
+    }
+
+    #[test]
+    fn test_interactive_edit_mode_extrude_inset_loop_cut_and_undo() {
+        let mut app = Forge3dStudioApp::new_headless();
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        app.selection.select(cube_id);
+
+        // Enter Edit Mode
+        app.set_edit_mode(EditMode::Edit);
+        assert!(app.active_edit_mesh.is_some());
+
+        let orig_indices_count = app.scene.get_object(cube_id).unwrap().mesh.indices.len();
+
+        // Select Face #0
+        let orig_faces_count = if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+            edit_mesh.faces[0].selected = true;
+            edit_mesh.faces.len()
+        } else {
+            0
+        };
+
+        // 1. Interactive Extrude
+        let started = app.begin_interactive_edit_tool(
+            InteractiveEditToolType::Extrude,
+            Vec2::new(100.0, 100.0),
+        );
+        assert!(started);
+        assert!(app.interactive_edit_tool.is_some());
+
+        // Simulate dragging upward (y = 50.0 -> delta_y = +50.0 -> distance = 0.50m)
+        app.update_interactive_edit_tool(Vec2::new(100.0, 50.0), false, false);
+        assert_eq!(
+            app.interactive_edit_tool.as_ref().unwrap().current_value,
+            0.5
+        );
+        if let Some((_, edit_mesh)) = &app.active_edit_mesh {
+            assert!(edit_mesh.faces.len() > orig_faces_count);
+        }
+
+        // Confirm extrusion
+        app.confirm_interactive_edit_tool();
+        assert!(app.interactive_edit_tool.is_none());
+        assert!(app.history.can_undo());
+        let post_extrude_indices = app.scene.get_object(cube_id).unwrap().mesh.indices.len();
+        assert!(post_extrude_indices > orig_indices_count);
+
+        // Undo extrude
+        app.undo();
+        assert_eq!(
+            app.scene.get_object(cube_id).unwrap().mesh.indices.len(),
+            orig_indices_count
+        );
+
+        // Redo extrude
+        app.redo();
+        assert_eq!(
+            app.scene.get_object(cube_id).unwrap().mesh.indices.len(),
+            post_extrude_indices
+        );
+
+        // 2. Interactive Inset and Cancel
+        if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+            edit_mesh.faces[0].selected = true;
+        }
+        let pre_inset_indices = app.scene.get_object(cube_id).unwrap().mesh.indices.len();
+        let started_inset =
+            app.begin_interactive_edit_tool(InteractiveEditToolType::Inset, Vec2::new(200.0, 200.0));
+        assert!(started_inset);
+
+        // Drag mouse
+        app.update_interactive_edit_tool(Vec2::new(200.0, 160.0), false, false);
+        // Cancel should revert exactly to pre-inset state
+        app.cancel_interactive_edit_tool();
+        assert!(app.interactive_edit_tool.is_none());
+        assert_eq!(
+            app.scene.get_object(cube_id).unwrap().mesh.indices.len(),
+            pre_inset_indices
+        );
+
+        // 3. Interactive Loop Cut
+        let pre_loop_indices = app.scene.get_object(cube_id).unwrap().mesh.indices.len();
+        if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+            edit_mesh.edges[0].selected = true;
+        }
+        let started_loop = app.begin_interactive_edit_tool(
+            InteractiveEditToolType::LoopCut,
+            Vec2::new(300.0, 300.0),
+        );
+        assert!(started_loop);
+
+        // Slide along X
+        app.update_interactive_edit_tool(Vec2::new(350.0, 300.0), false, false);
+        let factor = app.interactive_edit_tool.as_ref().unwrap().current_value;
+        assert!(factor > 0.5);
+
+        // Confirm
+        app.confirm_interactive_edit_tool();
+        assert!(app.interactive_edit_tool.is_none());
+        assert!(app.scene.get_object(cube_id).unwrap().mesh.indices.len() > pre_loop_indices);
+
+        // Undo loop cut
+        app.undo();
+        assert_eq!(
+            app.scene.get_object(cube_id).unwrap().mesh.indices.len(),
+            pre_loop_indices
+        );
     }
 }
