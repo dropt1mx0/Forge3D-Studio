@@ -687,6 +687,78 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         }
 
+        // Sculpt Mode Brush & Parameter Shortcuts (1..9 = Brushes, [ / ] = Radius, F / Shift+F = Radius/Strength, X = Symmetry)
+        if app.editor_state.edit_mode == EditMode::Sculpt && !emulate {
+            if input.key_pressed(Key::Num1) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Draw;
+                app.status_message = "Sculpt Brush: Draw (1)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Num2) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Clay;
+                app.status_message = "Sculpt Brush: Clay (2)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Num3) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Smooth;
+                app.status_message = "Sculpt Brush: Smooth (3)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Num4) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Flatten;
+                app.status_message = "Sculpt Brush: Flatten (4)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Num5) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Inflate;
+                app.status_message = "Sculpt Brush: Inflate (5)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Num6) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Deflate;
+                app.status_message = "Sculpt Brush: Deflate (6)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Num7) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Grab;
+                app.status_message = "Sculpt Brush: Grab (7)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Num8) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Pinch;
+                app.status_message = "Sculpt Brush: Pinch (8)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Num9) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Crease;
+                app.status_message = "Sculpt Brush: Crease (9)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::X) && !input.modifiers.any() {
+                app.sculpt_settings.symmetry_x = !app.sculpt_settings.symmetry_x;
+                app.status_message = format!(
+                    "Sculpt Symmetry X: {}",
+                    if app.sculpt_settings.symmetry_x { "ON" } else { "OFF" }
+                );
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::OpenBracket) {
+                app.sculpt_settings.radius = (app.sculpt_settings.radius - 0.05).max(0.05);
+                app.status_message = format!("Sculpt Radius: {:.2} ([)", app.sculpt_settings.radius);
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::CloseBracket) {
+                app.sculpt_settings.radius = (app.sculpt_settings.radius + 0.05).min(3.0);
+                app.status_message = format!("Sculpt Radius: {:.2} (])", app.sculpt_settings.radius);
+                ui.ctx().request_repaint();
+            } else if input.modifiers.shift && input.key_pressed(Key::F) {
+                app.sculpt_settings.strength = if app.sculpt_settings.strength < 0.95 {
+                    (app.sculpt_settings.strength + 0.2).min(1.0)
+                } else {
+                    0.2
+                };
+                app.status_message = format!("Sculpt Strength: {:.2} (Shift+F)", app.sculpt_settings.strength);
+                ui.ctx().request_repaint();
+            } else if !input.modifiers.any() && input.key_pressed(Key::F) {
+                app.sculpt_settings.radius = if app.sculpt_settings.radius < 1.8 {
+                    (app.sculpt_settings.radius + 0.25).min(2.0)
+                } else {
+                    0.25
+                };
+                app.status_message = format!("Sculpt Radius: {:.2} (F)", app.sculpt_settings.radius);
+                ui.ctx().request_repaint();
+            }
+        }
+
         // Undo / Redo Shortcuts (Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y)
         if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::Z) {
             if input.modifiers.shift {
@@ -1746,6 +1818,17 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         }
 
+        // Snapshot initial mesh before sculpt stroke for Undo
+        if app.editor_state.edit_mode == EditMode::Sculpt
+            && lmb_pressed
+            && is_pointer_in_viewport
+            && app.sculpt_stroke_initial_mesh.is_none()
+        {
+            if let Some((_, edit_mesh)) = &app.active_edit_mesh {
+                app.sculpt_stroke_initial_mesh = Some(std::sync::Arc::new(edit_mesh.to_render_mesh()));
+            }
+        }
+
         // Live Sculpting Interaction
         if app.editor_state.edit_mode == EditMode::Sculpt
             && lmb_down
@@ -1789,8 +1872,81 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         }
 
+        // Sculpt Brush Cursor Reticle Overlay
+        if app.editor_state.edit_mode == EditMode::Sculpt && is_pointer_in_viewport {
+            if let Some(pos) = mouse_pos {
+                let local_pos = pos - rect.min;
+                let screen_pos = Vec2::new(local_pos.x, local_pos.y);
+                let viewport_size = Vec2::new(rect.width(), rect.height());
+                let ray = app.camera.screen_to_ray(screen_pos, viewport_size);
+
+                let mut hit_info = None;
+                if let Some((active_id, edit_mesh)) = &app.active_edit_mesh {
+                    let temp_mesh = edit_mesh.to_render_mesh();
+                    let tf = app.scene.world_transform(*active_id);
+                    if let Some(hit_dist) = temp_mesh.raycast(&ray, &tf) {
+                        let hit_world_pt = ray.origin + ray.direction * hit_dist;
+                        let hit_local_pt = tf.inverse().transform_point(hit_world_pt);
+                        hit_info = Some((hit_world_pt, hit_local_pt, tf));
+                    }
+                }
+
+                let cam_dist = if let Some((hit_world, _, _)) = hit_info {
+                    (app.camera.eye - hit_world).length().max(0.5)
+                } else if let Some(aid) = app.selection.active_id {
+                    let tf = app.scene.world_transform(aid);
+                    (app.camera.eye - tf.translation).length().max(0.5)
+                } else {
+                    (app.camera.eye - app.camera.target).length().max(0.5)
+                };
+
+                let fov_rad = app.camera.fov_y_deg.to_radians();
+                let screen_h = rect.height();
+                let radius_px = ((app.sculpt_settings.radius / (cam_dist * (fov_rad * 0.5).tan())) * (screen_h * 0.5)).clamp(8.0, 400.0);
+
+                let ring_color = if lmb_down {
+                    Color32::from_rgb(255, 120, 20)
+                } else {
+                    Color32::from_rgba_unmultiplied(255, 175, 50, 190)
+                };
+                painter.circle_stroke(pos, radius_px, Stroke::new(1.8, ring_color));
+                painter.circle_filled(pos, 2.5, Color32::from_rgb(255, 220, 80));
+
+                if app.sculpt_settings.symmetry_x {
+                    if let Some((_, hit_local, tf)) = hit_info {
+                        let symm_local = Vec3::new(-hit_local.x, hit_local.y, hit_local.z);
+                        let symm_world = tf.transform_point(symm_local);
+                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect) {
+                            painter.circle_stroke(
+                                symm_screen,
+                                radius_px,
+                                Stroke::new(1.3, Color32::from_rgba_unmultiplied(100, 200, 255, 180)),
+                            );
+                            painter.circle_filled(symm_screen, 2.0, Color32::from_rgb(120, 220, 255));
+                        }
+                    }
+                }
+            }
+        }
+
         // C. Pointer Release Handling
         if lmb_released {
+            if app.editor_state.edit_mode == EditMode::Sculpt {
+                if let Some(old_mesh) = app.sculpt_stroke_initial_mesh.take() {
+                    if let Some((active_id, edit_mesh)) = &app.active_edit_mesh {
+                        let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+                        if *old_mesh != *new_mesh {
+                            app.history.push(Action::ModifyMesh {
+                                id: *active_id,
+                                old_mesh,
+                                new_mesh,
+                                name: format!("Sculpt {}", app.sculpt_settings.brush.name()),
+                            });
+                            app.scene.dirty = true;
+                        }
+                    }
+                }
+            }
             match app.editor_state.pointer_state {
                 PointerInteractionState::ObjectDragging => {
                     if let Some(drag) = app.object_drag_state.take()

@@ -133,6 +133,7 @@ pub struct Forge3dStudioApp {
     pub command_palette_query: String,
     pub command_palette_selected_index: usize,
     pub sculpt_settings: forge_geometry::SculptSettings,
+    pub sculpt_stroke_initial_mesh: Option<std::sync::Arc<forge_geometry::Mesh>>,
 
     // Undo / Redo Command History
     pub history: HistoryStack,
@@ -390,6 +391,7 @@ impl Forge3dStudioApp {
             command_palette_query: String::new(),
             command_palette_selected_index: 0,
             sculpt_settings: forge_geometry::SculptSettings::default(),
+            sculpt_stroke_initial_mesh: None,
             history: HistoryStack::new(),
             gizmo_state: GizmoState::new(),
             active_edit_mesh: None,
@@ -440,6 +442,7 @@ impl Forge3dStudioApp {
             command_palette_query: String::new(),
             command_palette_selected_index: 0,
             sculpt_settings: forge_geometry::SculptSettings::default(),
+            sculpt_stroke_initial_mesh: None,
             history: HistoryStack::new(),
             gizmo_state: GizmoState::new(),
             active_edit_mesh: None,
@@ -3894,5 +3897,59 @@ mod tests {
         let (_, edit_mesh) = app.active_edit_mesh.as_ref().unwrap();
         let sel_count = edit_mesh.vertices.iter().filter(|v| v.selected).count();
         assert!(sel_count > 0);
+    }
+
+    #[test]
+    fn test_sculpt_mode_lifecycle_and_undo_stack() {
+        use forge_geometry::{SculptBrush, SculptSettings};
+
+        let mut app = Forge3dStudioApp::new_headless();
+        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        app.selection.select(sphere_id);
+
+        // Enter Sculpt Mode
+        app.set_edit_mode(EditMode::Sculpt);
+        assert_eq!(app.editor_state.edit_mode, EditMode::Sculpt);
+        assert!(app.active_edit_mesh.is_some());
+
+        // Test configuring brush and symmetry
+        app.sculpt_settings = SculptSettings {
+            brush: SculptBrush::Inflate,
+            radius: 1.0,
+            strength: 0.8,
+            symmetry_x: true,
+            ..Default::default()
+        };
+        assert_eq!(app.sculpt_settings.brush, SculptBrush::Inflate);
+        assert!(app.sculpt_settings.symmetry_x);
+
+        // Perform stroke
+        let (active_id, edit_mesh) = app.active_edit_mesh.as_mut().unwrap();
+        let orig_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+        let affected = forge_geometry::apply_sculpt_stroke(
+            edit_mesh,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::Y,
+            Vec3::ZERO,
+            &app.sculpt_settings,
+        );
+        assert!(affected > 0);
+
+        let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+        assert_ne!(*orig_mesh, *new_mesh);
+
+        // Record Undo action
+        app.history.push(Action::ModifyMesh {
+            id: *active_id,
+            old_mesh: orig_mesh.clone(),
+            new_mesh: new_mesh.clone(),
+            name: "Sculpt Inflate".to_string(),
+        });
+        assert!(app.history.can_undo());
+
+        // Test Undo restores original mesh
+        app.undo();
+        let restored_obj = app.scene.get_object(sphere_id).unwrap();
+        assert_eq!(restored_obj.mesh.vertices.len(), orig_mesh.vertices.len());
     }
 }
