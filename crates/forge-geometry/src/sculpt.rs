@@ -49,6 +49,7 @@ pub struct SculptSettings {
     pub symmetry_x: bool,
     pub symmetry_y: bool,
     pub symmetry_z: bool,
+    pub voxel_size: f32,
 }
 
 impl Default for SculptSettings {
@@ -60,6 +61,7 @@ impl Default for SculptSettings {
             symmetry_x: false,
             symmetry_y: false,
             symmetry_z: false,
+            voxel_size: 0.1,
         }
     }
 }

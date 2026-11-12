@@ -286,6 +286,12 @@ pub fn get_all_commands() -> Vec<CommandItem> {
             action_id: "ws_sculpting",
         },
         CommandItem {
+            category: "Sculpt",
+            title: "Voxel Remesh Active Mesh",
+            shortcut: "Ctrl+R",
+            action_id: "sculpt_voxel_remesh",
+        },
+        CommandItem {
             category: "Workspace",
             title: "Switch to UV Editing Workspace",
             shortcut: "",
@@ -818,6 +824,9 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
         }
         "ws_sculpting" => {
             app.set_workspace(WorkspaceMode::Sculpting);
+        }
+        "sculpt_voxel_remesh" => {
+            app.voxel_remesh_active(app.sculpt_settings.voxel_size);
         }
         "ws_uv" => {
             app.set_workspace(WorkspaceMode::UvEditing);

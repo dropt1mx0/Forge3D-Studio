@@ -443,6 +443,23 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         ui.checkbox(&mut app.sculpt_settings.symmetry_x, "Symm X");
                         ui.checkbox(&mut app.sculpt_settings.symmetry_y, "Symm Y");
                         ui.checkbox(&mut app.sculpt_settings.symmetry_z, "Symm Z");
+
+                        ui.add_space(2.0);
+                        ui.label(egui::RichText::new("Remesh").weak().size(11.0));
+                        ui.horizontal(|ui| {
+                            ui.label("Vox:");
+                            ui.add(egui::Slider::new(
+                                &mut app.sculpt_settings.voxel_size,
+                                0.02..=0.5,
+                            ));
+                        });
+                        if ui.button("⬚ Remesh (Ctrl+R)").clicked() {
+                            app.voxel_remesh_active(app.sculpt_settings.voxel_size);
+                        }
+                    } else {
+                        if tool_button(ui, false, "Rmsh", "Voxel Remesh", "Ctrl+R", display_mode).clicked() {
+                            app.voxel_remesh_active(app.sculpt_settings.voxel_size);
+                        }
                     }
 
                     ui.add_space(4.0);

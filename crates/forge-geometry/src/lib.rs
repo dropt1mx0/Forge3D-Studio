@@ -7,6 +7,7 @@
 pub mod edit_mesh;
 pub mod mesh;
 pub mod primitives;
+pub mod remesh;
 pub mod sculpt;
 pub mod topology;
 pub mod uv;
@@ -21,6 +22,7 @@ pub use primitives::{
     generate_circle, generate_cone, generate_cube, generate_cylinder, generate_grid_lines,
     generate_icosphere, generate_plane, generate_torus, generate_uv_sphere,
 };
+pub use remesh::voxel_remesh;
 pub use sculpt::{SculptBrush, SculptSettings, apply_sculpt_stroke, sculpt_falloff};
 pub use topology::{
     EdgeHandle, EdgeSelectionPath, FaceHandle, HalfEdge, HalfEdgeEdge, HalfEdgeFace,

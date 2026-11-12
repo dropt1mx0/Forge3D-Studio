@@ -767,6 +767,67 @@ impl Forge3dStudioApp {
         }
     }
 
+    /// Performs uniform Voxel Remeshing on the active object's geometry.
+    /// Pushes an undo step (`Action::ModifyMesh`) for full non-destructive rollback.
+    pub fn voxel_remesh_active(&mut self, voxel_size: f32) {
+        let Some(active_id) = self.selection.active_id else {
+            self.status_message = "Voxel Remesh: No active object selected".into();
+            return;
+        };
+
+        // If in Edit Mode, commit first
+        if self.editor_state.edit_mode == EditMode::Edit {
+            self.commit_edit_mesh_to_scene();
+        }
+
+        let (old_mesh, new_mesh, obj_name, vert_count, tri_count) = {
+            let Some(obj) = self.scene.get_object_mut(active_id) else {
+                return;
+            };
+
+            let old_mesh = std::sync::Arc::new(obj.mesh.clone());
+            let remeshed = forge_geometry::voxel_remesh(&obj.mesh, voxel_size);
+            let new_mesh = std::sync::Arc::new(remeshed.clone());
+
+            obj.set_mesh(remeshed);
+            (
+                old_mesh,
+                new_mesh.clone(),
+                obj.name.clone(),
+                obj.mesh.vertices.len(),
+                obj.mesh.indices.len() / 3,
+            )
+        };
+
+        self.scene.dirty = true;
+
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&active_id);
+        }
+
+        // If in Edit or Sculpt Mode, update active_edit_mesh
+        if self.editor_state.edit_mode == EditMode::Edit || self.editor_state.edit_mode == EditMode::Sculpt {
+            let edit_mesh = forge_geometry::EditableMesh::from_mesh(&new_mesh);
+            self.active_edit_mesh = Some((active_id, edit_mesh));
+            self.edit_overlay_cache.reset();
+        }
+
+        self.history.push(Action::ModifyMesh {
+            id: active_id,
+            old_mesh,
+            new_mesh,
+            name: format!("Voxel Remesh ({:.2})", voxel_size),
+        });
+
+        self.status_message = format!(
+            "Voxel Remeshed '{}' with size {:.2} ({} vertices, {} triangles)",
+            obj_name,
+            voxel_size,
+            vert_count,
+            tri_count
+        );
+    }
+
     /// Fast sync of edit mesh to scene object during interactive operations without pushing undo step.
     pub fn sync_edit_mesh_to_scene(&mut self) {
         if let Some((id, edit_mesh)) = &self.active_edit_mesh {
@@ -5576,5 +5637,41 @@ mod tests {
         let (_, edit_mesh) = app.active_edit_mesh.as_ref().unwrap();
         let selected_count_after = edit_mesh.vertices.iter().filter(|v| v.selected).count();
         assert_eq!(selected_count_after, 0);
+    }
+
+    #[test]
+    fn test_voxel_remesh_lifecycle_and_undo() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        app.selection.select(cube_id);
+
+        let initial_vert_count = app.scene.get_object(cube_id).unwrap().mesh.vertices.len();
+
+        // 1. Remesh in Object Mode
+        app.voxel_remesh_active(0.35);
+
+        let remeshed_vert_count = app.scene.get_object(cube_id).unwrap().mesh.vertices.len();
+        assert!(remeshed_vert_count > 0);
+        assert_ne!(remeshed_vert_count, initial_vert_count);
+
+        // 2. Undo returns to initial mesh
+        app.undo();
+        let undone_vert_count = app.scene.get_object(cube_id).unwrap().mesh.vertices.len();
+        assert_eq!(undone_vert_count, initial_vert_count);
+
+        // 3. Redo returns to remeshed mesh
+        app.redo();
+        let redone_vert_count = app.scene.get_object(cube_id).unwrap().mesh.vertices.len();
+        assert_eq!(redone_vert_count, remeshed_vert_count);
+
+        // 4. Test in Sculpt Mode updates active_edit_mesh
+        app.set_edit_mode(EditMode::Sculpt);
+        assert!(app.active_edit_mesh.is_some());
+
+        app.voxel_remesh_active(0.4);
+        let (active_mesh_id, ref edit_mesh) = *app.active_edit_mesh.as_ref().unwrap();
+        assert_eq!(active_mesh_id, cube_id);
+        assert_eq!(edit_mesh.vertices.len(), app.scene.get_object(cube_id).unwrap().mesh.vertices.len());
     }
 }

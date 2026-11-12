@@ -861,6 +861,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 };
                 app.status_message = format!("Sculpt Radius: {:.2} (F)", app.sculpt_settings.radius);
                 ui.ctx().request_repaint();
+            } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::R) {
+                app.voxel_remesh_active(app.sculpt_settings.voxel_size);
+                ui.ctx().request_repaint();
             }
         }
 
