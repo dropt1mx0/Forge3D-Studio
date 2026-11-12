@@ -286,6 +286,12 @@ pub fn get_all_commands() -> Vec<CommandItem> {
             action_id: "ws_shading",
         },
         CommandItem {
+            category: "Shading",
+            title: "Open Shader Node Editor",
+            shortcut: "",
+            action_id: "open_shader_editor",
+        },
+        CommandItem {
             category: "Workspace",
             title: "Switch to Animation Workspace",
             shortcut: "",
@@ -794,6 +800,10 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
         }
         "ws_shading" => {
             app.set_workspace(WorkspaceMode::Shading);
+        }
+        "open_shader_editor" => {
+            app.open_shader_editor_for_selected();
+            app.status_message = "Opened Shader Node Editor".into();
         }
         "ws_animation" => {
             app.set_workspace(WorkspaceMode::Animation);

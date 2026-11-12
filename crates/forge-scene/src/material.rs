@@ -27,6 +27,8 @@ pub struct PbrMaterial {
     pub uv_scale: [f32; 2],
     #[serde(default)]
     pub textures: PbrTextureSet,
+    #[serde(default)]
+    pub shader_graph: Option<crate::shader_graph::ShaderGraph>,
 }
 
 impl Default for PbrMaterial {
@@ -41,6 +43,7 @@ impl Default for PbrMaterial {
             emissive_factor: [0.0; 3],
             uv_scale: [1.0; 2],
             textures: PbrTextureSet::default(),
+            shader_graph: None,
         }
     }
 }

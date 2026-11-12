@@ -22,6 +22,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         let mut set_active_camera: Option<ObjectId> = None;
         let mut view_camera: Option<ObjectId> = None;
         let mut align_camera: Option<ObjectId> = None;
+        let mut open_shader_editor = false;
 
         let mut add_modifier_type = None;
         let mut remove_mod_idx = None;
@@ -807,6 +808,14 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.label("Color:");
                 ui.color_edit_button_rgba_unmultiplied(&mut obj.color);
             });
+            ui.add_space(4.0);
+            if ui
+                .button("◫ Open Shader Node Editor")
+                .on_hover_text("Open interactive node-based shader graph & WGSL generator")
+                .clicked()
+            {
+                open_shader_editor = true;
+            }
 
             ui.add_space(8.0);
             ui.separator();
@@ -819,6 +828,9 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             ui.label(format!("Triangles: {}", eval.indices.len() / 3));
         }
 
+        if open_shader_editor {
+            app.open_shader_editor_for_selected();
+        }
         if copy_tf && let Some(obj) = app.scene.get_object(selected_id) {
             app.editor_state.transform_clipboard = Some(obj.local_transform);
             app.status_message = "Copied transform to clipboard".to_string();

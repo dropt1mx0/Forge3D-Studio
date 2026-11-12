@@ -124,6 +124,9 @@ pub struct Forge3dStudioApp {
     pub show_about_dialog: bool,
     pub show_gpu_dialog: bool,
     pub show_material_editor: bool,
+    pub show_shader_editor: bool,
+    pub active_shader_graph: forge_scene::ShaderGraph,
+    pub shader_editor_state: crate::ui::shader_editor::ShaderEditorState,
     pub show_command_palette: bool,
     pub show_quick_add_menu: Option<egui::Pos2>,
     pub active_pie_menu: Option<PieMenuState>,
@@ -416,6 +419,9 @@ impl Forge3dStudioApp {
             show_about_dialog: false,
             show_gpu_dialog: false,
             show_material_editor: false,
+            show_shader_editor: false,
+            active_shader_graph: forge_scene::ShaderGraph::default(),
+            shader_editor_state: crate::ui::shader_editor::ShaderEditorState::default(),
             show_command_palette: false,
             show_quick_add_menu: None,
             active_pie_menu: None,
@@ -472,6 +478,9 @@ impl Forge3dStudioApp {
             show_about_dialog: false,
             show_gpu_dialog: false,
             show_material_editor: false,
+            show_shader_editor: false,
+            active_shader_graph: forge_scene::ShaderGraph::default(),
+            shader_editor_state: crate::ui::shader_editor::ShaderEditorState::default(),
             show_command_palette: false,
             show_quick_add_menu: None,
             active_pie_menu: None,
@@ -613,6 +622,7 @@ impl Forge3dStudioApp {
                 self.editor_state.panel_settings.sidebar_visible = true;
                 self.editor_state.panel_settings.timeline_visible = false;
                 self.show_material_editor = true;
+                self.open_shader_editor_for_selected();
             }
             forge_scene::WorkspaceMode::Animation => {
                 self.editor_state.panel_settings.toolbar_visible = true;
@@ -640,6 +650,75 @@ impl Forge3dStudioApp {
             }
         }
         self.status_message = format!("Switched to {:?} Workspace", workspace);
+    }
+
+    /// Opens the Shader Node Editor for the currently selected object's material.
+    pub fn open_shader_editor_for_selected(&mut self) {
+        if let Some(active_id) = self.selection.active_id {
+            if let Some(obj) = self.scene.get_object(active_id) {
+                if let Some(mat_id) = &obj.material_id {
+                    if let Some(mat) = self.scene.materials.get(mat_id) {
+                        if let Some(graph) = &mat.shader_graph {
+                            self.active_shader_graph = graph.clone();
+                        } else {
+                            let mut graph = forge_scene::ShaderGraph::standard_pbr_graph(&mat.name);
+                            if let Some(bsdf) = graph
+                                .nodes
+                                .iter_mut()
+                                .find(|n| matches!(n.kind, forge_scene::NodeKind::PrincipledBsdf))
+                            {
+                                if let Some(inp) = bsdf.inputs.iter_mut().find(|i| i.id == "base_color") {
+                                    inp.default_value = forge_scene::SocketDefaultValue::Color(mat.base_color_factor);
+                                }
+                                if let Some(inp) = bsdf.inputs.iter_mut().find(|i| i.id == "metallic") {
+                                    inp.default_value = forge_scene::SocketDefaultValue::Float(mat.metallic_factor);
+                                }
+                                if let Some(inp) = bsdf.inputs.iter_mut().find(|i| i.id == "roughness") {
+                                    inp.default_value = forge_scene::SocketDefaultValue::Float(mat.roughness_factor);
+                                }
+                            }
+                            self.active_shader_graph = graph;
+                        }
+                    }
+                }
+            }
+        }
+        self.show_shader_editor = true;
+        self.shader_editor_state.wgsl_dirty = true;
+    }
+
+    /// Evaluates the active shader graph and updates the active object's material
+    /// (and active material in scene) so changes reflect immediately in the viewport.
+    pub fn sync_active_shader_graph_to_material(&mut self) {
+        let pbr = self.active_shader_graph.evaluate_to_pbr_material();
+        if let Some(active_id) = self.selection.active_id {
+            let existing_mat_id = self
+                .scene
+                .get_object(active_id)
+                .and_then(|obj| obj.material_id.clone());
+
+            let mat_id = match existing_mat_id {
+                Some(id) => id,
+                None => {
+                    let new_id = format!("material_{}", active_id);
+                    if let Some(obj) = self.scene.get_object_mut(active_id) {
+                        obj.material_id = Some(new_id.clone());
+                    }
+                    new_id
+                }
+            };
+
+            let mut updated_pbr = pbr.clone();
+            updated_pbr.shader_graph = Some(self.active_shader_graph.clone());
+            if let Some(existing) = self.scene.materials.get(&mat_id) {
+                updated_pbr.textures = existing.textures.clone();
+            }
+            self.scene.materials.insert(mat_id, updated_pbr);
+            if let Some(obj) = self.scene.get_object_mut(active_id) {
+                obj.color = pbr.base_color_factor;
+            }
+            self.scene.dirty = true;
+        }
     }
 
     /// Commits changes in `active_edit_mesh` back to the scene object and marks scene dirty.
@@ -4042,6 +4121,13 @@ impl Forge3dStudioApp {
             self.show_material_editor = open;
         }
 
+        // 9b. Interactive Shader Node Editor (WGSL)
+        if self.show_shader_editor {
+            let mut open = self.show_shader_editor;
+            crate::ui::shader_editor::render_shader_editor(self, &ctx, &mut open);
+            self.show_shader_editor = open;
+        }
+
         // 9. Command Palette Modal Dialog (F3 / Space / Ctrl+K)
         crate::ui::command_palette::render_command_palette(self, &ctx);
 
@@ -4987,5 +5073,61 @@ mod tests {
             app.scene.get_object(capsule_id).unwrap().local_transform.translation,
             capsule_initial_pos
         );
+    }
+
+    #[test]
+    fn test_shader_editor_lifecycle_and_material_sync() {
+        let mut app = Forge3dStudioApp::new_headless();
+        assert!(!app.show_shader_editor);
+
+        // 1. Select the default Cube
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .map(|o| o.id)
+            .expect("Cube should exist");
+        app.selection.select(cube_id);
+        assert_eq!(app.selection.active_id, Some(cube_id));
+
+        // 2. Open Shader Node Editor
+        app.open_shader_editor_for_selected();
+        assert!(app.show_shader_editor);
+        assert!(!app.active_shader_graph.nodes.is_empty());
+
+        // 3. Modify Principled BSDF inputs in graph
+        let bsdf_node = app
+            .active_shader_graph
+            .nodes
+            .iter_mut()
+            .find(|n| matches!(n.kind, forge_scene::NodeKind::PrincipledBsdf))
+            .expect("Principled BSDF node should exist");
+
+        if let Some(metal) = bsdf_node.inputs.iter_mut().find(|i| i.id == "metallic") {
+            metal.default_value = forge_scene::SocketDefaultValue::Float(0.9);
+        }
+        if let Some(rough) = bsdf_node.inputs.iter_mut().find(|i| i.id == "roughness") {
+            rough.default_value = forge_scene::SocketDefaultValue::Float(0.12);
+        }
+
+        // 4. Synchronize graph with viewport material
+        app.sync_active_shader_graph_to_material();
+
+        let obj = app.scene.get_object(cube_id).unwrap();
+        let mat_id = obj.material_id.as_ref().expect("Material ID should be assigned");
+        let mat = app.scene.materials.get(mat_id).expect("Material should be in scene");
+
+        assert_eq!(mat.metallic_factor, 0.9);
+        assert_eq!(mat.roughness_factor, 0.12);
+        assert!(mat.shader_graph.is_some());
+        assert!(app.scene.dirty);
+
+        // 5. Verify WGSL compilation
+        let wgsl = app.active_shader_graph.compile_to_wgsl();
+        assert!(wgsl.contains("struct MaterialUniform"));
+        assert!(wgsl.contains("distribution_ggx"));
+        assert!(wgsl.contains("fresnel_schlick"));
+        assert!(wgsl.contains("fn fs_main("));
     }
 }

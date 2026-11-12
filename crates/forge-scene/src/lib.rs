@@ -13,6 +13,7 @@ pub mod object;
 pub mod scene;
 pub mod selection;
 pub mod serialization;
+pub mod shader_graph;
 
 pub use editor_state::{
     AxisConstraint, EditMode, EditorState, GizmoMode, ModalTransformState, PanelSettings,
@@ -32,3 +33,7 @@ pub use object::{
 pub use scene::{BROWN_FLOOR_TILES_MATERIAL_ID, Scene};
 pub use selection::SelectionState;
 pub use serialization::ForgeProject;
+pub use shader_graph::{
+    Connection, InputSocket, MathOp, NodeKind, NodeSocketRef, OutputSocket, ShaderGraph,
+    ShaderNode, SocketDefaultValue, SocketType, VectorMathOp,
+};

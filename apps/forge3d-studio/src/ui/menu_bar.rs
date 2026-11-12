@@ -1110,6 +1110,10 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 &mut app.show_material_editor,
                 "Show PBR Material & Lighting Inspector",
             );
+            ui.checkbox(
+                &mut app.show_shader_editor,
+                "Show Shader Node Editor (WGSL)",
+            );
             ui.separator();
             let is_light = app.editor_state.panel_settings.is_light_theme;
             let theme_label = if is_light {
