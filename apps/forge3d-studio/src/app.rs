@@ -298,59 +298,61 @@ fn default_extension_manager() -> forge_scene::ExtensionManager {
 
 pub fn dark_visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = egui::Color32::from_rgb(19, 20, 25);
-    visuals.window_fill = egui::Color32::from_rgb(24, 25, 32);
-    visuals.faint_bg_color = egui::Color32::from_rgb(16, 17, 21);
-    visuals.extreme_bg_color = egui::Color32::from_rgb(12, 13, 16);
-    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(26, 28, 36);
+    // Blender-style neutral grey palette
+    visuals.panel_fill = egui::Color32::from_rgb(42, 42, 42);
+    visuals.window_fill = egui::Color32::from_rgb(48, 48, 48);
+    visuals.faint_bg_color = egui::Color32::from_rgb(36, 36, 36);
+    visuals.extreme_bg_color = egui::Color32::from_rgb(28, 28, 28);
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(50, 50, 50);
     visuals.widgets.noninteractive.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(36, 39, 49));
-    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(32, 35, 44);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(62, 62, 62));
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(60, 60, 60);
     visuals.widgets.inactive.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(42, 46, 58));
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(44, 48, 62);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(72, 72, 72));
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(75, 75, 75);
     visuals.widgets.hovered.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 66, 84));
-    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(37, 99, 235);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 90, 90));
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(74, 137, 220);
     visuals.widgets.active.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 165, 250));
-    visuals.selection.bg_fill = egui::Color32::from_rgb(37, 99, 235); // Studio Electric Blue
-    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(96, 165, 250));
-    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
-    visuals.window_corner_radius = egui::CornerRadius::same(8);
-    visuals.menu_corner_radius = egui::CornerRadius::same(6);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 160, 235));
+    visuals.selection.bg_fill = egui::Color32::from_rgb(74, 137, 220);
+    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 160, 235));
+    // Sharp corners like Blender
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(2);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(2);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(2);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(2);
+    visuals.window_corner_radius = egui::CornerRadius::same(4);
+    visuals.menu_corner_radius = egui::CornerRadius::same(3);
     visuals
 }
 
 pub fn light_visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::light();
-    visuals.panel_fill = egui::Color32::from_rgb(245, 246, 250);
-    visuals.window_fill = egui::Color32::from_rgb(255, 255, 255);
-    visuals.faint_bg_color = egui::Color32::from_rgb(238, 240, 246);
-    visuals.extreme_bg_color = egui::Color32::from_rgb(228, 232, 240);
-    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(240, 242, 248);
+    visuals.panel_fill = egui::Color32::from_rgb(238, 238, 238);
+    visuals.window_fill = egui::Color32::from_rgb(245, 245, 245);
+    visuals.faint_bg_color = egui::Color32::from_rgb(232, 232, 232);
+    visuals.extreme_bg_color = egui::Color32::from_rgb(220, 220, 220);
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(228, 228, 228);
     visuals.widgets.noninteractive.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(215, 220, 232));
-    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(235, 238, 246);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200));
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(218, 218, 218);
     visuals.widgets.inactive.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(205, 212, 224));
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(224, 230, 242);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(190, 190, 190));
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(205, 205, 205);
     visuals.widgets.hovered.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 192, 212));
-    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(37, 99, 235);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(170, 170, 170));
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(74, 137, 220);
     visuals.widgets.active.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 78, 216));
-    visuals.selection.bg_fill = egui::Color32::from_rgb(37, 99, 235);
-    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 78, 216));
-    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
-    visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
-    visuals.window_corner_radius = egui::CornerRadius::same(8);
-    visuals.menu_corner_radius = egui::CornerRadius::same(6);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 110, 195));
+    visuals.selection.bg_fill = egui::Color32::from_rgb(74, 137, 220);
+    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(55, 110, 195));
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(2);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(2);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(2);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(2);
+    visuals.window_corner_radius = egui::CornerRadius::same(4);
+    visuals.menu_corner_radius = egui::CornerRadius::same(3);
     visuals
 }
 
@@ -3912,24 +3914,24 @@ impl Forge3dStudioApp {
         let ctx = ui.ctx().clone();
         let is_light = self.editor_state.panel_settings.is_light_theme;
         let panel_bg = if is_light {
-            egui::Color32::from_rgb(245, 246, 250)
+            egui::Color32::from_rgb(238, 238, 238)
         } else {
-            egui::Color32::from_rgb(19, 20, 25)
+            egui::Color32::from_rgb(42, 42, 42)
         };
         let panel_border = if is_light {
-            egui::Color32::from_rgb(215, 220, 232)
+            egui::Color32::from_rgb(200, 200, 200)
         } else {
-            egui::Color32::from_rgb(32, 35, 42)
+            egui::Color32::from_rgb(55, 55, 55)
         };
         let side_border = if is_light {
-            egui::Color32::from_rgb(215, 220, 232)
+            egui::Color32::from_rgb(200, 200, 200)
         } else {
-            egui::Color32::from_rgb(38, 42, 54)
+            egui::Color32::from_rgb(58, 58, 58)
         };
         let central_bg = if is_light {
-            egui::Color32::from_rgb(230, 234, 242)
+            egui::Color32::from_rgb(228, 228, 228)
         } else {
-            egui::Color32::from_rgb(20, 22, 26)
+            egui::Color32::from_rgb(51, 51, 51)
         };
 
         // 1. Measure frame delta and FPS
@@ -4043,11 +4045,11 @@ impl Forge3dStudioApp {
                         let _ = self.editor_state.panel_settings.save();
                     }
                     let col = if response.dragged() {
-                        egui::Color32::from_rgb(240, 144, 32)
+                        egui::Color32::from_rgb(74, 137, 220)
                     } else if response.hovered() {
-                        egui::Color32::from_rgb(255, 175, 50)
+                        egui::Color32::from_rgb(100, 160, 235)
                     } else {
-                        egui::Color32::from_rgb(38, 42, 50)
+                        egui::Color32::from_rgb(55, 55, 55)
                     };
                     ui.painter().rect_filled(splitter_rect, 1.0, col);
 
@@ -4105,7 +4107,7 @@ impl Forge3dStudioApp {
                         }
 
                         ui.separator();
-                        ui.checkbox(&mut self.scene.animation.timeline.is_looping, "🔁 Loop");
+                        ui.checkbox(&mut self.scene.animation.timeline.is_looping, "Loop");
 
                         ui.separator();
                         ui.label("Start:");
@@ -4171,8 +4173,8 @@ impl Forge3dStudioApp {
                     // Background track
                     ui.painter().rect_filled(
                         bar_rect,
-                        egui::CornerRadius::same(3),
-                        egui::Color32::from_rgb(26, 28, 36),
+                        egui::CornerRadius::same(2),
+                        egui::Color32::from_rgb(35, 35, 35),
                     );
 
                     // Tick lines and ruler marks
@@ -4198,7 +4200,7 @@ impl Forge3dStudioApp {
                         );
                     }
 
-                    // Active progress fill (Orange / Red)
+                    // Active progress fill (Blender Blue Accent)
                     let filled_w = bar_rect.width() * progress;
                     let filled_rect = egui::Rect::from_min_size(
                         bar_rect.min,
@@ -4206,8 +4208,8 @@ impl Forge3dStudioApp {
                     );
                     ui.painter().rect_filled(
                         filled_rect,
-                        egui::CornerRadius::same(3),
-                        egui::Color32::from_rgb(220, 60, 60).linear_multiply(0.35),
+                        egui::CornerRadius::same(2),
+                        egui::Color32::from_rgb(74, 137, 220).linear_multiply(0.35),
                     );
 
                     // Draw keyframe diamonds for active object
@@ -4237,7 +4239,7 @@ impl Forge3dStudioApp {
                             egui::pos2(needle_x, bar_rect.min.y),
                             egui::pos2(needle_x, bar_rect.max.y),
                         ],
-                        egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 70, 70)),
+                        egui::Stroke::new(2.0, egui::Color32::from_rgb(74, 137, 220)),
                     );
 
                     // Playhead handle

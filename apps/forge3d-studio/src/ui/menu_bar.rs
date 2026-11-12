@@ -1414,9 +1414,10 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 .add(
                     egui::Button::new(
                         egui::RichText::new("Live Viewer")
-                            .color(egui::Color32::from_rgb(180, 220, 255)),
+                            .color(egui::Color32::from_rgb(170, 200, 235)),
                     )
-                    .fill(egui::Color32::from_rgb(28, 38, 56)),
+                    .fill(egui::Color32::from_rgb(50, 58, 70))
+                    .corner_radius(egui::CornerRadius::same(2)),
                 )
                 .on_hover_text("Cinema 4D / Octane Live Viewport Renderer")
                 .clicked()

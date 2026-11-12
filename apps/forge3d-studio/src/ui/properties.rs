@@ -83,14 +83,14 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             .size(11.0)
                             .color(egui::Color32::WHITE),
                     )
-                    .fill(egui::Color32::from_rgb(37, 99, 235))
-                    .corner_radius(egui::CornerRadius::same(5)),
+                    .fill(egui::Color32::from_rgb(74, 137, 220))
+                    .corner_radius(egui::CornerRadius::same(2)),
                 );
                 let _ = ui.small_button("Basic");
                 let _ = ui.add(
                     egui::Button::new("Coord")
-                        .fill(egui::Color32::from_rgb(34, 38, 50))
-                        .corner_radius(egui::CornerRadius::same(5)),
+                        .fill(egui::Color32::from_rgb(55, 55, 55))
+                        .corner_radius(egui::CornerRadius::same(2)),
                 );
                 let _ = ui.small_button("Object");
             });
@@ -105,9 +105,9 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             // 3-Column Studio Coordinate Card (Position | Size | Rotation)
             egui::Frame::canvas(ui.style())
-                .fill(egui::Color32::from_rgb(20, 22, 28))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(38, 42, 54)))
-                .corner_radius(egui::CornerRadius::same(8))
+                .fill(egui::Color32::from_rgb(35, 35, 35))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(58, 58, 58)))
+                .corner_radius(egui::CornerRadius::same(3))
                 .inner_margin(8.0)
                 .show(ui, |ui| {
                     ui.columns(3, |cols| {
@@ -118,7 +118,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 egui::RichText::new("Position")
                                     .strong()
                                     .size(11.5)
-                                    .color(egui::Color32::from_rgb(180, 190, 210)),
+                                    .color(egui::Color32::from_rgb(190, 190, 190)),
                             );
                             ui.add_space(2.0);
 
@@ -172,7 +172,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 egui::RichText::new("Size")
                                     .strong()
                                     .size(11.5)
-                                    .color(egui::Color32::from_rgb(180, 190, 210)),
+                                    .color(egui::Color32::from_rgb(190, 190, 190)),
                             );
                             ui.add_space(2.0);
 
@@ -244,7 +244,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 egui::RichText::new("Rotation")
                                     .strong()
                                     .size(11.5)
-                                    .color(egui::Color32::from_rgb(180, 190, 210)),
+                                    .color(egui::Color32::from_rgb(190, 190, 190)),
                             );
                             ui.add_space(2.0);
 
@@ -602,7 +602,7 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             // Modifiers Section
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("🔧 Modifiers").strong());
+                ui.label(egui::RichText::new("Modifiers").strong());
                 egui::ComboBox::from_id_salt("add_modifier_combo")
                     .selected_text("+ Add Modifier")
                     .show_ui(ui, |ui| {

@@ -41,8 +41,8 @@ pub fn render_status_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 )
             } else {
                 (
-                    egui::Color32::from_rgb(24, 26, 32),
-                    egui::Color32::from_rgb(46, 50, 62),
+                    egui::Color32::from_rgb(42, 42, 42),
+                    egui::Color32::from_rgb(65, 65, 65),
                     egui::Color32::from_rgb(220, 100, 100),
                 )
             }
@@ -50,7 +50,7 @@ pub fn render_status_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         ui.painter().rect(
             exit_rect,
-            egui::CornerRadius::same(4),
+            egui::CornerRadius::same(2),
             exit_bg,
             egui::Stroke::new(1.0, exit_border),
             egui::StrokeKind::Inside,
@@ -71,7 +71,7 @@ pub fn render_status_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
 
         exit_resp.context_menu(|ui| {
-            if ui.button("🏠 Project Hub...").clicked() {
+            if ui.button("Project Hub...").clicked() {
                 action_project_hub = true;
                 ui.close();
             }

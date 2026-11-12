@@ -51,7 +51,7 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
-                let tab_col = egui::Color32::from_rgb(160, 168, 185);
+                let tab_col = egui::Color32::from_rgb(160, 160, 160);
                 ui.label(egui::RichText::new("File").size(11.0).color(tab_col));
                 ui.label(egui::RichText::new("Edit").size(11.0).color(tab_col));
                 ui.label(egui::RichText::new("View").size(11.0).color(tab_col));
@@ -59,7 +59,7 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     egui::RichText::new("Objects")
                         .size(11.0)
                         .strong()
-                        .color(egui::Color32::from_rgb(220, 230, 255)),
+                        .color(egui::Color32::from_rgb(210, 210, 210)),
                 );
                 ui.label(egui::RichText::new("Tags").size(11.0).color(tab_col));
                 ui.label(egui::RichText::new("Bookmarks").size(11.0).color(tab_col));
@@ -98,14 +98,14 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             egui::Button::new(
                 egui::RichText::new("Filter ▾")
                     .size(11.0)
-                    .color(egui::Color32::from_rgb(130, 200, 255))
+                    .color(egui::Color32::from_rgb(120, 180, 240))
                     .strong(),
             )
-            .fill(egui::Color32::from_rgb(30, 50, 80))
-            .corner_radius(egui::CornerRadius::same(4))
+            .fill(egui::Color32::from_rgb(50, 60, 75))
+            .corner_radius(egui::CornerRadius::same(2))
         } else {
             egui::Button::new(egui::RichText::new("Filter ▾").size(11.0))
-                .corner_radius(egui::CornerRadius::same(4))
+                .corner_radius(egui::CornerRadius::same(2))
         };
 
         let filter_resp = ui
@@ -142,7 +142,7 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                     ui.label(
                         egui::RichText::new("Restriction Toggles")
-                            .color(egui::Color32::from_rgb(180, 195, 215))
+                            .color(egui::Color32::from_rgb(175, 175, 175))
                             .size(11.0)
                             .strong(),
                     );
@@ -165,7 +165,7 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.separator();
                     ui.label(
                         egui::RichText::new("Filter by Type")
-                            .color(egui::Color32::from_rgb(180, 195, 215))
+                            .color(egui::Color32::from_rgb(175, 175, 175))
                             .size(11.0)
                             .strong(),
                     );
@@ -195,7 +195,7 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.separator();
                     ui.label(
                         egui::RichText::new("Display Options")
-                            .color(egui::Color32::from_rgb(180, 195, 215))
+                            .color(egui::Color32::from_rgb(175, 175, 175))
                             .size(11.0)
                             .strong(),
                     );
@@ -205,7 +205,7 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     ui.separator();
                     ui.label(
                         egui::RichText::new("Bulk Actions")
-                            .color(egui::Color32::from_rgb(180, 195, 215))
+                            .color(egui::Color32::from_rgb(175, 175, 175))
                             .size(11.0)
                             .strong(),
                     );
@@ -476,14 +476,14 @@ fn render_object_node(
                         .color(text_color)
                         .strong(),
                 )
-                .fill(egui::Color32::from_rgb(37, 99, 235))
-                .corner_radius(egui::CornerRadius::same(5))
+                .fill(egui::Color32::from_rgb(74, 137, 220))
+                .corner_radius(egui::CornerRadius::same(2))
             } else {
                 egui::Button::new(
                     egui::RichText::new(format!("{expand_icon}{label_text}")).color(text_color),
                 )
                 .fill(egui::Color32::TRANSPARENT)
-                .corner_radius(egui::CornerRadius::same(5))
+                .corner_radius(egui::CornerRadius::same(2))
             };
 
             let row = ui.add(row_btn);

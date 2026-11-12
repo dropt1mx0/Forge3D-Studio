@@ -28,14 +28,14 @@ fn tool_button(
 
     let is_dark = ui.visuals().dark_mode;
     let inactive_fg = if is_dark {
-        egui::Color32::from_rgb(205, 212, 228)
+        egui::Color32::from_rgb(200, 200, 200)
     } else {
-        egui::Color32::from_rgb(45, 52, 68)
+        egui::Color32::from_rgb(50, 50, 50)
     };
     let inactive_bg = if is_dark {
-        egui::Color32::from_rgb(26, 28, 36)
+        egui::Color32::from_rgb(50, 50, 50)
     } else {
-        egui::Color32::from_rgb(235, 238, 246)
+        egui::Color32::from_rgb(228, 228, 228)
     };
 
     match display_mode {
@@ -47,11 +47,11 @@ fn tool_button(
             }))
             .selected(active)
             .fill(if active {
-                egui::Color32::from_rgb(37, 99, 235)
+                egui::Color32::from_rgb(74, 137, 220)
             } else {
                 inactive_bg
             })
-            .corner_radius(egui::CornerRadius::same(4));
+            .corner_radius(egui::CornerRadius::same(2));
             ui.add_sized([ui.available_width().max(32.0), 22.0], btn)
                 .on_hover_text(tooltip)
         }
@@ -68,11 +68,11 @@ fn tool_button(
             }))
             .selected(active)
             .fill(if active {
-                egui::Color32::from_rgb(37, 99, 235)
+                egui::Color32::from_rgb(74, 137, 220)
             } else {
                 inactive_bg
             })
-            .corner_radius(egui::CornerRadius::same(4));
+            .corner_radius(egui::CornerRadius::same(2));
             ui.add_sized([ui.available_width(), 22.0], btn)
                 .on_hover_text(tooltip)
         }
@@ -112,58 +112,58 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     .size(11.5)
                     .color(if mode_is_sculpt {
                         if is_dark {
-                            egui::Color32::from_rgb(147, 197, 253)
+                            egui::Color32::from_rgb(130, 185, 240)
                         } else {
-                            egui::Color32::from_rgb(29, 78, 216)
+                            egui::Color32::from_rgb(40, 90, 200)
                         }
                     } else if mode_is_edit {
                         if is_dark {
-                            egui::Color32::from_rgb(255, 175, 50)
+                            egui::Color32::from_rgb(230, 170, 60)
                         } else {
-                            egui::Color32::from_rgb(180, 83, 9)
+                            egui::Color32::from_rgb(160, 90, 20)
                         }
                     } else {
                         if is_dark {
-                            egui::Color32::from_rgb(205, 215, 235)
+                            egui::Color32::from_rgb(200, 200, 200)
                         } else {
-                            egui::Color32::from_rgb(40, 48, 64)
+                            egui::Color32::from_rgb(50, 50, 50)
                         }
                     }),
                 )
                 .fill(if mode_is_sculpt {
                     if is_dark {
-                        egui::Color32::from_rgb(30, 45, 65)
+                        egui::Color32::from_rgb(45, 55, 72)
                     } else {
-                        egui::Color32::from_rgb(219, 234, 254)
+                        egui::Color32::from_rgb(210, 225, 245)
                     }
                 } else if mode_is_edit {
                     if is_dark {
-                        egui::Color32::from_rgb(45, 35, 20)
+                        egui::Color32::from_rgb(62, 52, 38)
                     } else {
-                        egui::Color32::from_rgb(254, 243, 199)
+                        egui::Color32::from_rgb(248, 238, 210)
                     }
                 } else {
                     if is_dark {
-                        egui::Color32::from_rgb(26, 28, 36)
+                        egui::Color32::from_rgb(50, 50, 50)
                     } else {
-                        egui::Color32::from_rgb(235, 238, 246)
+                        egui::Color32::from_rgb(228, 228, 228)
                     }
                 })
                 .stroke(egui::Stroke::new(
                     1.0,
                     if mode_is_sculpt {
-                        egui::Color32::from_rgb(59, 130, 246)
+                        egui::Color32::from_rgb(74, 137, 220)
                     } else if mode_is_edit {
-                        egui::Color32::from_rgb(240, 144, 32)
+                        egui::Color32::from_rgb(210, 140, 40)
                     } else {
                         if is_dark {
-                            egui::Color32::from_rgb(45, 50, 65)
+                            egui::Color32::from_rgb(65, 65, 65)
                         } else {
-                            egui::Color32::from_rgb(205, 212, 226)
+                            egui::Color32::from_rgb(195, 195, 195)
                         }
                     },
                 ))
-                .corner_radius(egui::CornerRadius::same(4));
+                .corner_radius(egui::CornerRadius::same(2));
 
                 if ui
                     .add_sized([ui.available_width().max(32.0), 24.0], mode_btn)
