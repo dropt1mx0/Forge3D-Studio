@@ -1041,6 +1041,47 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             });
             ui.ctx().request_repaint();
         }
+
+        // Timeline & Animation Shortcuts (I = Insert Keyframe, Shift+Space = Play/Pause, Arrows = Scrub/Jump)
+        if !input.modifiers.any()
+            && input.key_pressed(Key::I)
+            && app.editor_state.edit_mode == EditMode::Object
+            && !app.editor_state.modal_transform.active
+        {
+            app.insert_keyframe_active();
+            ui.ctx().request_repaint();
+        }
+
+        if input.modifiers.shift && input.key_pressed(Key::Space) {
+            app.toggle_timeline_playback();
+            ui.ctx().request_repaint();
+        }
+
+        if input.key_pressed(Key::ArrowLeft) {
+            if input.modifiers.shift {
+                let start_f = app.scene.animation.timeline.start_frame;
+                app.set_timeline_frame(start_f);
+            } else {
+                app.step_timeline_frame(-1);
+            }
+            ui.ctx().request_repaint();
+        } else if input.key_pressed(Key::ArrowRight) {
+            if input.modifiers.shift {
+                let end_f = app.scene.animation.timeline.end_frame;
+                app.set_timeline_frame(end_f);
+            } else {
+                app.step_timeline_frame(1);
+            }
+            ui.ctx().request_repaint();
+        }
+
+        if input.key_pressed(Key::ArrowUp) && !input.modifiers.any() {
+            app.jump_to_next_keyframe();
+            ui.ctx().request_repaint();
+        } else if input.key_pressed(Key::ArrowDown) && !input.modifiers.any() {
+            app.jump_to_prev_keyframe();
+            ui.ctx().request_repaint();
+        }
     }
 
     // =========================================================================

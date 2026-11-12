@@ -316,6 +316,42 @@ pub fn get_all_commands() -> Vec<CommandItem> {
             action_id: "ws_animation",
         },
         CommandItem {
+            category: "Animation",
+            title: "Play / Pause Animation",
+            shortcut: "Shift+Space",
+            action_id: "anim_toggle_playback",
+        },
+        CommandItem {
+            category: "Animation",
+            title: "Insert Transform Keyframe",
+            shortcut: "I",
+            action_id: "anim_insert_keyframe",
+        },
+        CommandItem {
+            category: "Animation",
+            title: "Next Keyframe",
+            shortcut: "Up",
+            action_id: "anim_next_keyframe",
+        },
+        CommandItem {
+            category: "Animation",
+            title: "Previous Keyframe",
+            shortcut: "Down",
+            action_id: "anim_prev_keyframe",
+        },
+        CommandItem {
+            category: "Animation",
+            title: "Next Frame",
+            shortcut: "Right",
+            action_id: "anim_next_frame",
+        },
+        CommandItem {
+            category: "Animation",
+            title: "Previous Frame",
+            shortcut: "Left",
+            action_id: "anim_prev_frame",
+        },
+        CommandItem {
             category: "Workspace",
             title: "Switch to Rendering Workspace",
             shortcut: "",
@@ -840,6 +876,24 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
         }
         "ws_animation" => {
             app.set_workspace(WorkspaceMode::Animation);
+        }
+        "anim_toggle_playback" => {
+            app.toggle_timeline_playback();
+        }
+        "anim_insert_keyframe" => {
+            app.insert_keyframe_active();
+        }
+        "anim_next_keyframe" => {
+            app.jump_to_next_keyframe();
+        }
+        "anim_prev_keyframe" => {
+            app.jump_to_prev_keyframe();
+        }
+        "anim_next_frame" => {
+            app.step_timeline_frame(1);
+        }
+        "anim_prev_frame" => {
+            app.step_timeline_frame(-1);
         }
         "ws_rendering" => {
             app.set_workspace(WorkspaceMode::Rendering);

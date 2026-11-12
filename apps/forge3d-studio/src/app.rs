@@ -1003,6 +1003,99 @@ impl Forge3dStudioApp {
         self.status_message = format!("Cleared all modifiers on {}", obj_name);
     }
 
+    /// Inserts a keyframe on the active object's current local transform at the current timeline frame.
+    pub fn insert_keyframe_active(&mut self) {
+        let Some(active_id) = self.selection.active_id else {
+            self.status_message = "Insert Keyframe: No object selected".into();
+            return;
+        };
+
+        let Some(obj) = self.scene.get_object(active_id) else {
+            return;
+        };
+
+        let frame = self.scene.animation.timeline.current_frame;
+        let tf = obj.local_transform;
+        let obj_name = obj.name.clone();
+
+        self.scene.animation.insert_keyframe(active_id, frame, tf);
+        self.scene.dirty = true;
+        self.status_message = format!("Inserted keyframe at frame {} for '{}'", frame, obj_name);
+    }
+
+    /// Removes a keyframe from the active object at the current timeline frame.
+    pub fn remove_keyframe_active(&mut self) {
+        let Some(active_id) = self.selection.active_id else {
+            return;
+        };
+
+        let frame = self.scene.animation.timeline.current_frame;
+        if self.scene.animation.remove_keyframe(active_id, frame) {
+            self.scene.dirty = true;
+            self.status_message = format!("Removed keyframe at frame {}", frame);
+        } else {
+            self.status_message = format!("No keyframe at frame {}", frame);
+        }
+    }
+
+    /// Jumps to the next keyframe on the active object.
+    pub fn jump_to_next_keyframe(&mut self) {
+        let Some(active_id) = self.selection.active_id else {
+            return;
+        };
+        let current_frame = self.scene.animation.timeline.current_frame;
+        if let Some(track) = self.scene.animation.tracks.get(&active_id) {
+            if let Some(next) = track.next_keyframe(current_frame) {
+                self.set_timeline_frame(next);
+            }
+        }
+    }
+
+    /// Jumps to the previous keyframe on the active object.
+    pub fn jump_to_prev_keyframe(&mut self) {
+        let Some(active_id) = self.selection.active_id else {
+            return;
+        };
+        let current_frame = self.scene.animation.timeline.current_frame;
+        if let Some(track) = self.scene.animation.tracks.get(&active_id) {
+            if let Some(prev) = track.prev_keyframe(current_frame) {
+                self.set_timeline_frame(prev);
+            }
+        }
+    }
+
+    /// Toggles play / pause on the timeline.
+    pub fn toggle_timeline_playback(&mut self) {
+        let is_playing = self.scene.animation.timeline.toggle_playback();
+        self.status_message = if is_playing {
+            "Timeline: Playing".to_string()
+        } else {
+            "Timeline: Paused".to_string()
+        };
+    }
+
+    /// Sets the current frame on the timeline and evaluates animations for all objects.
+    pub fn set_timeline_frame(&mut self, frame: u32) {
+        self.scene.animation.timeline.set_frame(frame);
+        let f = self.scene.animation.timeline.current_frame;
+        self.scene.evaluate_animations(f as f32);
+    }
+
+    /// Steps the timeline forward or backward by `delta` frames.
+    pub fn step_timeline_frame(&mut self, delta: i32) {
+        self.scene.animation.timeline.step_frame(delta);
+        let f = self.scene.animation.timeline.current_frame;
+        self.scene.evaluate_animations(f as f32);
+    }
+
+    /// Advances playback time and updates evaluated transforms if frame changed.
+    pub fn advance_animation(&mut self, dt_seconds: f32) {
+        if self.scene.animation.timeline.advance_time(dt_seconds) {
+            let f = self.scene.animation.timeline.current_frame;
+            self.scene.evaluate_animations(f as f32);
+        }
+    }
+
     /// Fast sync of edit mesh to scene object during interactive operations without pushing undo step.
     pub fn sync_edit_mesh_to_scene(&mut self) {
         if let Some((id, edit_mesh)) = &self.active_edit_mesh {
@@ -3852,6 +3945,10 @@ impl Forge3dStudioApp {
             self.update_showcase_demo(dt);
             ctx.request_repaint();
         }
+        if self.scene.animation.timeline.is_playing {
+            self.advance_animation(dt);
+            ctx.request_repaint();
+        }
 
         // Safety: Window focus loss cancels modal operations safely
         let window_focused = ui.input(|i| i.focused);
@@ -3954,156 +4051,214 @@ impl Forge3dStudioApp {
                     };
                     ui.painter().rect_filled(splitter_rect, 1.0, col);
 
-                    let frame_id = ui.make_persistent_id("studio_timeline_frame");
-                    let mut current_frame: i32 =
-                        ui.data_mut(|d| *d.get_temp_mut_or_default(frame_id));
-                    if current_frame == 0 {
-                        current_frame = 20; // Default matching reference screenshot
-                    }
+                    let start_frame = self.scene.animation.timeline.start_frame;
+                    let end_frame = self.scene.animation.timeline.end_frame.max(start_frame + 1);
+                    let current_frame = self.scene.animation.timeline.current_frame;
+                    let total_frames = (end_frame - start_frame) as f32;
 
-                    // 1. Frame Ruler Row (0 ... 30 F with ticks)
+                    let active_obj_keyframes = self
+                        .selection
+                        .active_id
+                        .map(|id| self.scene.animation.keyframe_frames(id))
+                        .unwrap_or_default();
+
+                    // 1. Transport & Playback Row
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(10.0, 2.0);
-                        let frames = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30];
-                        for f in frames {
-                            if f == current_frame {
-                                let _ = ui.add(
-                                    egui::Button::new(
-                                        egui::RichText::new(format!("[{f}]"))
-                                            .strong()
-                                            .size(10.5)
-                                            .color(egui::Color32::from_rgb(34, 197, 94)),
-                                    )
-                                    .fill(egui::Color32::from_rgb(26, 42, 32))
-                                    .corner_radius(egui::CornerRadius::same(3)),
-                                );
-                            } else if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new(format!("{f}"))
-                                            .size(10.0)
-                                            .color(egui::Color32::from_rgb(140, 150, 170)),
-                                    )
-                                    .fill(egui::Color32::TRANSPARENT),
-                                )
-                                .clicked()
-                            {
-                                current_frame = f;
-                            }
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
+
+                        if ui.button("⏮ Key").on_hover_text("Jump to Previous Keyframe (Down)").clicked() {
+                            self.jump_to_prev_keyframe();
                         }
-                        ui.label(
-                            egui::RichText::new("30 F")
-                                .strong()
-                                .size(10.5)
-                                .color(egui::Color32::from_rgb(170, 180, 200)),
-                        );
+                        if ui.button("|<").on_hover_text("Jump to Start Frame (Shift+Left)").clicked() {
+                            self.set_timeline_frame(start_frame);
+                        }
+                        if ui.button("◀").on_hover_text("Step Back 1 Frame (Left)").clicked() {
+                            self.step_timeline_frame(-1);
+                        }
+
+                        let play_text = if self.scene.animation.timeline.is_playing {
+                            "⏸ Pause"
+                        } else {
+                            "▶ Play"
+                        };
+                        let play_col = if self.scene.animation.timeline.is_playing {
+                            egui::Color32::from_rgb(240, 160, 40)
+                        } else {
+                            egui::Color32::from_rgb(34, 197, 94)
+                        };
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new(play_text).strong().color(play_col)))
+                            .on_hover_text("Play / Pause Animation (Space)")
+                            .clicked()
+                        {
+                            self.toggle_timeline_playback();
+                        }
+
+                        if ui.button("▶").on_hover_text("Step Forward 1 Frame (Right)").clicked() {
+                            self.step_timeline_frame(1);
+                        }
+                        if ui.button(">|").on_hover_text("Jump to End Frame (Shift+Right)").clicked() {
+                            self.set_timeline_frame(end_frame);
+                        }
+                        if ui.button("⏭ Key").on_hover_text("Jump to Next Keyframe (Up)").clicked() {
+                            self.jump_to_next_keyframe();
+                        }
+
+                        ui.separator();
+                        ui.checkbox(&mut self.scene.animation.timeline.is_looping, "🔁 Loop");
+
+                        ui.separator();
+                        ui.label("Start:");
+                        ui.add(egui::DragValue::new(&mut self.scene.animation.timeline.start_frame).range(0..=1000));
+
+                        ui.label("Frame:");
+                        let mut curr_f = current_frame;
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut curr_f)
+                                    .range(start_frame..=end_frame)
+                                    .speed(1.0),
+                            )
+                            .changed()
+                        {
+                            self.set_timeline_frame(curr_f);
+                        }
+
+                        ui.label("End:");
+                        ui.add(egui::DragValue::new(&mut self.scene.animation.timeline.end_frame).range(1..=10000));
+
+                        ui.label("FPS:");
+                        ui.add(egui::DragValue::new(&mut self.scene.animation.timeline.fps).range(1..=120));
+
+                        ui.separator();
+                        // Keyframe buttons
+                        if ui
+                            .button(
+                                egui::RichText::new("◆ Key (I)")
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(255, 215, 0)),
+                            )
+                            .on_hover_text("Insert Transform Keyframe for active object at current frame (I)")
+                            .clicked()
+                        {
+                            self.insert_keyframe_active();
+                        }
+
+                        if ui
+                            .button("◇ Del Key")
+                            .on_hover_text("Remove Keyframe at current frame")
+                            .clicked()
+                        {
+                            self.remove_keyframe_active();
+                        }
                     });
 
                     ui.add_space(2.0);
 
-                    // 2. Transport Scrubber Row with Red Bar
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
-                        ui.label(
-                            egui::RichText::new("0 F :")
-                                .monospace()
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(160, 170, 190)),
-                        );
+                    // 2. Timeline Scrubber Track with Keyframe Diamonds
+                    let bar_w = ui.available_width().max(120.0);
+                    let (bar_rect, bar_resp) = ui.allocate_exact_size(
+                        egui::vec2(bar_w, 20.0),
+                        egui::Sense::click_and_drag(),
+                    );
 
-                        // Red Scrub Progress Bar
-                        let bar_w = (ui.available_width() - 240.0).max(120.0);
-                        let (bar_rect, bar_resp) = ui.allocate_exact_size(
-                            egui::vec2(bar_w, 14.0),
-                            egui::Sense::click_and_drag(),
-                        );
-                        let progress = (current_frame as f32 / 30.0).clamp(0.0, 1.0);
+                    let progress = if total_frames > 0.0 {
+                        ((current_frame.saturating_sub(start_frame)) as f32 / total_frames).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
 
-                        // Background track
-                        ui.painter().rect_filled(
-                            bar_rect,
-                            egui::CornerRadius::same(3),
-                            egui::Color32::from_rgb(28, 30, 38),
-                        );
-                        // Red filled active progress
-                        let filled_w = bar_rect.width() * progress;
-                        let filled_rect = egui::Rect::from_min_size(
-                            bar_rect.min,
-                            egui::vec2(filled_w, bar_rect.height()),
-                        );
-                        ui.painter().rect_filled(
-                            filled_rect,
-                            egui::CornerRadius::same(3),
-                            egui::Color32::from_rgb(239, 68, 68), // Octane Red
-                        );
-                        // Playhead handle
-                        let handle_x = bar_rect.min.x + filled_w;
-                        let handle_rect = egui::Rect::from_center_size(
-                            egui::pos2(handle_x, bar_rect.center().y),
-                            egui::vec2(6.0, 18.0),
-                        );
-                        ui.painter().rect_filled(
-                            handle_rect,
-                            egui::CornerRadius::same(2),
-                            egui::Color32::WHITE,
-                        );
+                    // Background track
+                    ui.painter().rect_filled(
+                        bar_rect,
+                        egui::CornerRadius::same(3),
+                        egui::Color32::from_rgb(26, 28, 36),
+                    );
 
-                        if (bar_resp.clicked() || bar_resp.dragged())
-                            && let Some(mouse) = bar_resp.interact_pointer_pos()
-                        {
-                            let norm =
-                                ((mouse.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
-                            current_frame = (norm * 30.0).round() as i32;
-                        }
+                    // Tick lines and ruler marks
+                    let tick_step = if total_frames > 200.0 {
+                        50
+                    } else if total_frames > 80.0 {
+                        20
+                    } else if total_frames > 30.0 {
+                        10
+                    } else {
+                        5
+                    };
 
-                        ui.label(
-                            egui::RichText::new(format!("{current_frame} F :"))
-                                .monospace()
-                                .size(11.0)
-                                .color(egui::Color32::from_rgb(160, 170, 190)),
+                    for f in (start_frame..=end_frame).step_by(tick_step) {
+                        let norm = (f - start_frame) as f32 / total_frames;
+                        let tick_x = bar_rect.min.x + bar_rect.width() * norm;
+                        ui.painter().line_segment(
+                            [
+                                egui::pos2(tick_x, bar_rect.min.y + 2.0),
+                                egui::pos2(tick_x, bar_rect.min.y + 7.0),
+                            ],
+                            egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 75, 90)),
                         );
+                    }
 
-                        // Transport playback buttons
-                        if ui
-                            .button("|<")
-                            .on_hover_text("Jump to First Frame (Shift+Left)")
-                            .clicked()
-                        {
-                            current_frame = 0;
-                            self.status_message = "Timeline: Jump to Frame 0".to_string();
-                        }
-                        if ui
-                            .button("<")
-                            .on_hover_text("Step Back 1 Frame (Left)")
-                            .clicked()
-                        {
-                            current_frame = (current_frame - 1).max(0);
-                        }
-                        if ui
-                            .button("Play")
-                            .on_hover_text("Play / Pause (Space)")
-                            .clicked()
-                        {
-                            self.status_message = "Timeline: Play / Pause".to_string();
-                        }
-                        if ui
-                            .button(">|")
-                            .on_hover_text("Jump to End Frame (Shift+Right)")
-                            .clicked()
-                        {
-                            current_frame = 30;
-                            self.status_message = "Timeline: Jump to End".to_string();
-                        }
-                        if ui
-                            .button("Loop")
-                            .on_hover_text("Toggle Loop Playback")
-                            .clicked()
-                        {
-                            self.status_message = "Timeline: Loop Active".to_string();
-                        }
-                    });
+                    // Active progress fill (Orange / Red)
+                    let filled_w = bar_rect.width() * progress;
+                    let filled_rect = egui::Rect::from_min_size(
+                        bar_rect.min,
+                        egui::vec2(filled_w, bar_rect.height()),
+                    );
+                    ui.painter().rect_filled(
+                        filled_rect,
+                        egui::CornerRadius::same(3),
+                        egui::Color32::from_rgb(220, 60, 60).linear_multiply(0.35),
+                    );
 
-                    ui.data_mut(|d| *d.get_temp_mut_or_default(frame_id) = current_frame);
+                    // Draw keyframe diamonds for active object
+                    for &kf_frame in &active_obj_keyframes {
+                        if kf_frame >= start_frame && kf_frame <= end_frame {
+                            let kf_norm = (kf_frame - start_frame) as f32 / total_frames;
+                            let kf_x = bar_rect.min.x + bar_rect.width() * kf_norm;
+                            let center = egui::pos2(kf_x, bar_rect.center().y);
+                            let diamond = [
+                                egui::pos2(center.x, center.y - 5.0),
+                                egui::pos2(center.x + 4.0, center.y),
+                                egui::pos2(center.x, center.y + 5.0),
+                                egui::pos2(center.x - 4.0, center.y),
+                            ];
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                diamond.to_vec(),
+                                egui::Color32::from_rgb(255, 215, 0),
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 40, 40)),
+                            ));
+                        }
+                    }
+
+                    // Playhead needle
+                    let needle_x = bar_rect.min.x + filled_w;
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(needle_x, bar_rect.min.y),
+                            egui::pos2(needle_x, bar_rect.max.y),
+                        ],
+                        egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 70, 70)),
+                    );
+
+                    // Playhead handle
+                    let handle_rect = egui::Rect::from_center_size(
+                        egui::pos2(needle_x, bar_rect.center().y),
+                        egui::vec2(7.0, 18.0),
+                    );
+                    ui.painter().rect_filled(
+                        handle_rect,
+                        egui::CornerRadius::same(2),
+                        egui::Color32::WHITE,
+                    );
+
+                    if (bar_resp.clicked() || bar_resp.dragged())
+                        && let Some(mouse) = bar_resp.interact_pointer_pos()
+                    {
+                        let norm =
+                            ((mouse.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
+                        let target_f = start_frame + (norm * total_frames).round() as u32;
+                        self.set_timeline_frame(target_f);
+                    }
 
                     ui.add_space(4.0);
                     ui.separator();
@@ -5913,5 +6068,59 @@ mod tests {
         assert_eq!(app.scene.get_object(cube_id).unwrap().modifiers.len(), 1);
         app.clear_all_modifiers(cube_id);
         assert_eq!(app.scene.get_object(cube_id).unwrap().modifiers.len(), 0);
+    }
+
+    #[test]
+    fn test_timeline_and_keyframe_lifecycle() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        app.selection.select(cube_id);
+
+        assert!(!app.scene.animation.has_keyframe(cube_id, 0));
+
+        // 1. Insert keyframe at frame 0
+        app.set_timeline_frame(0);
+        app.insert_keyframe_active();
+        assert!(app.scene.animation.has_keyframe(cube_id, 0));
+
+        // 2. Scrub to frame 20, change position, and insert keyframe
+        app.set_timeline_frame(20);
+        if let Some(obj) = app.scene.get_object_mut(cube_id) {
+            obj.local_transform.translation = Vec3::new(10.0, 0.5, 0.0);
+        }
+        app.insert_keyframe_active();
+        assert!(app.scene.animation.has_keyframe(cube_id, 20));
+
+        // 3. Test next / prev keyframe navigation
+        app.set_timeline_frame(0);
+        app.jump_to_next_keyframe();
+        assert_eq!(app.scene.animation.timeline.current_frame, 20);
+
+        app.jump_to_prev_keyframe();
+        assert_eq!(app.scene.animation.timeline.current_frame, 0);
+
+        // 4. Test animation interpolation at frame 10 (halfway between 0 and 10)
+        app.set_timeline_frame(10);
+        let cube_tf = app.scene.get_object(cube_id).unwrap().local_transform;
+        assert!((cube_tf.translation.x - 5.0).abs() < 1e-3);
+
+        // 5. Test playback controls
+        assert!(!app.scene.animation.timeline.is_playing);
+        app.toggle_timeline_playback();
+        assert!(app.scene.animation.timeline.is_playing);
+
+        // Advance 0.5s at 24fps = 12 frames -> from 10 to 22
+        app.advance_animation(0.5);
+        assert_eq!(app.scene.animation.timeline.current_frame, 22);
+
+        app.toggle_timeline_playback();
+        assert!(!app.scene.animation.timeline.is_playing);
+
+        // 6. Test delete keyframe
+        app.set_timeline_frame(0);
+        app.remove_keyframe_active();
+        assert!(!app.scene.animation.has_keyframe(cube_id, 0));
+        assert!(app.scene.animation.has_keyframe(cube_id, 20));
     }
 }

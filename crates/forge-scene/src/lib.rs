@@ -5,6 +5,7 @@
 //!
 //! Strictly contains NO GPU handles or UI dependencies.
 
+pub mod animation;
 pub mod editor_state;
 pub mod extension;
 pub mod history;
@@ -15,6 +16,9 @@ pub mod selection;
 pub mod serialization;
 pub mod shader_graph;
 
+pub use animation::{
+    AnimationManager, KeyframeInterpolation, ObjectAnimationTrack, TimelineState, TransformKeyframe,
+};
 pub use editor_state::{
     AxisConstraint, EditMode, EditorState, GizmoMode, ModalTransformState, PanelSettings,
     PivotPoint, PointerInteractionState, RecentProjectItem, SelectionElement, SnapSettings,

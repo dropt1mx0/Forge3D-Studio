@@ -25,6 +25,8 @@ pub struct Scene {
     pub world_lighting: WorldLighting,
     pub root_objects: Vec<ObjectId>,
     pub active_camera_id: Option<ObjectId>,
+    #[serde(default)]
+    pub animation: crate::animation::AnimationManager,
     #[serde(skip)]
     pub dirty: bool,
 }
@@ -45,8 +47,33 @@ impl Scene {
             world_lighting: WorldLighting::default(),
             root_objects: Vec::new(),
             active_camera_id: None,
+            animation: crate::animation::AnimationManager::default(),
             dirty: true,
         }
+    }
+
+    /// Evaluates animated transforms for all objects in the scene at `frame`,
+    /// updating `object.transform` and marking `dirty = true` if any transform changed.
+    pub fn evaluate_animations(&mut self, frame: f32) -> bool {
+        let updates = self.animation.evaluate_all(frame);
+        if updates.is_empty() {
+            return false;
+        }
+
+        let mut changed = false;
+        for (id, animated_tf) in updates {
+            if let Some(obj) = self.objects.get_mut(&id) {
+                if obj.local_transform != animated_tf {
+                    obj.local_transform = animated_tf;
+                    changed = true;
+                }
+            }
+        }
+
+        if changed {
+            self.dirty = true;
+        }
+        changed
     }
 
     /// Adds a new object to the scene and returns its `ObjectId`.
