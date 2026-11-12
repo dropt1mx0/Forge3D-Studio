@@ -5,6 +5,7 @@ use forge_core::id::ObjectId;
 use forge_geometry::{EditSelectionMode, EditableMesh};
 use forge_gpu::GpuAdapterInfo;
 use forge_math::{Ray, Transform, Vec2, Vec3};
+use forge_modifiers::ModifierType;
 use forge_render::{Camera, ViewportRenderer};
 use forge_scene::{
     Action, EditMode, EditorState, HistoryStack, PrimitiveType, Scene, SceneObject,
@@ -826,6 +827,180 @@ impl Forge3dStudioApp {
             vert_count,
             tri_count
         );
+    }
+
+    /// Appends a new modifier to the given object's modifier stack.
+    pub fn add_modifier(&mut self, id: ObjectId, modifier: ModifierType) {
+        let mod_name = modifier.name().to_string();
+        let obj_name = {
+            let Some(obj) = self.scene.get_object_mut(id) else {
+                return;
+            };
+            obj.modifiers.add(modifier);
+            obj.invalidate_evaluated_mesh();
+            obj.name.clone()
+        };
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&id);
+        }
+        self.status_message = format!("Added modifier '{}' to {}", mod_name, obj_name);
+    }
+
+    /// Removes a modifier from the given object's modifier stack at `index`.
+    pub fn remove_modifier(&mut self, id: ObjectId, index: usize) {
+        let removed_name = {
+            let Some(obj) = self.scene.get_object_mut(id) else {
+                return;
+            };
+            let Some(removed) = obj.modifiers.remove(index) else {
+                return;
+            };
+            obj.invalidate_evaluated_mesh();
+            removed.name
+        };
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&id);
+        }
+        self.status_message = format!("Removed modifier '{}'", removed_name);
+    }
+
+    /// Moves the modifier at `index` up in the stack.
+    pub fn move_modifier_up(&mut self, id: ObjectId, index: usize) {
+        if let Some(obj) = self.scene.get_object_mut(id) {
+            obj.modifiers.move_up(index);
+            obj.invalidate_evaluated_mesh();
+        }
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&id);
+        }
+    }
+
+    /// Moves the modifier at `index` down in the stack.
+    pub fn move_modifier_down(&mut self, id: ObjectId, index: usize) {
+        if let Some(obj) = self.scene.get_object_mut(id) {
+            obj.modifiers.move_down(index);
+            obj.invalidate_evaluated_mesh();
+        }
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&id);
+        }
+    }
+
+    /// Duplicates the modifier at `index` on the given object.
+    pub fn duplicate_modifier(&mut self, id: ObjectId, index: usize) {
+        let obj_name = {
+            let Some(obj) = self.scene.get_object_mut(id) else {
+                return;
+            };
+            if !obj.modifiers.duplicate(index) {
+                return;
+            }
+            obj.invalidate_evaluated_mesh();
+            obj.name.clone()
+        };
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&id);
+        }
+        self.status_message = format!("Duplicated modifier on {}", obj_name);
+    }
+
+    /// Bakes the modifier at `index` into the base mesh and removes it from the stack.
+    /// Pushes an undo step (`Action::ModifyMesh`) for full rollback.
+    pub fn apply_modifier(&mut self, id: ObjectId, index: usize) -> bool {
+        if self.editor_state.edit_mode == EditMode::Edit {
+            self.status_message = "Cannot apply modifier in Edit Mode. Switch to Object Mode first.".into();
+            return false;
+        }
+
+        let Some(obj) = self.scene.get_object_mut(id) else {
+            return false;
+        };
+
+        if index >= obj.modifiers.len() {
+            return false;
+        }
+
+        let mod_name = obj.modifiers.modifiers[index].name.clone();
+        let old_mesh = std::sync::Arc::new(obj.mesh.clone());
+        obj.modifiers.apply_to_mesh(index, &mut obj.mesh);
+        let new_mesh = std::sync::Arc::new(obj.mesh.clone());
+        let obj_name = obj.name.clone();
+
+        obj.invalidate_evaluated_mesh();
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&id);
+        }
+
+        self.history.push(Action::ModifyMesh {
+            id,
+            old_mesh,
+            new_mesh,
+            name: format!("Apply Modifier: {}", mod_name),
+        });
+
+        self.status_message = format!("Applied modifier '{}' on {}", mod_name, obj_name);
+        true
+    }
+
+    /// Evaluates and bakes all modifiers into base mesh, then clears the stack.
+    /// Pushes an undo step (`Action::ModifyMesh`).
+    pub fn apply_all_modifiers(&mut self, id: ObjectId) -> bool {
+        if self.editor_state.edit_mode == EditMode::Edit {
+            self.status_message = "Cannot apply modifiers in Edit Mode. Switch to Object Mode first.".into();
+            return false;
+        }
+
+        let Some(obj) = self.scene.get_object_mut(id) else {
+            return false;
+        };
+
+        if obj.modifiers.is_empty() {
+            return false;
+        }
+
+        let old_mesh = std::sync::Arc::new(obj.mesh.clone());
+        obj.modifiers.apply_all(&mut obj.mesh);
+        let new_mesh = std::sync::Arc::new(obj.mesh.clone());
+        let obj_name = obj.name.clone();
+
+        obj.invalidate_evaluated_mesh();
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&id);
+        }
+
+        self.history.push(Action::ModifyMesh {
+            id,
+            old_mesh,
+            new_mesh,
+            name: "Apply All Modifiers".to_string(),
+        });
+
+        self.status_message = format!("Applied all modifiers on {}", obj_name);
+        true
+    }
+
+    /// Clears all modifiers from the given object's stack.
+    pub fn clear_all_modifiers(&mut self, id: ObjectId) {
+        let obj_name = {
+            let Some(obj) = self.scene.get_object_mut(id) else {
+                return;
+            };
+            obj.modifiers.clear();
+            obj.invalidate_evaluated_mesh();
+            obj.name.clone()
+        };
+        self.scene.dirty = true;
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_mesh(&id);
+        }
+        self.status_message = format!("Cleared all modifiers on {}", obj_name);
     }
 
     /// Fast sync of edit mesh to scene object during interactive operations without pushing undo step.
@@ -5673,5 +5848,70 @@ mod tests {
         let (active_mesh_id, ref edit_mesh) = *app.active_edit_mesh.as_ref().unwrap();
         assert_eq!(active_mesh_id, cube_id);
         assert_eq!(edit_mesh.vertices.len(), app.scene.get_object(cube_id).unwrap().mesh.vertices.len());
+    }
+
+    #[test]
+    fn test_modifier_stack_lifecycle_and_undo() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        app.selection.select(cube_id);
+
+        let initial_base_verts = app.scene.get_object(cube_id).unwrap().mesh.vertices.len();
+
+        // 1. Add Subdivide modifier
+        app.add_modifier(
+            cube_id,
+            ModifierType::Subdivide(forge_modifiers::SubdivisionModifier::new(1)),
+        );
+        let obj = app.scene.get_object(cube_id).unwrap();
+        assert_eq!(obj.modifiers.len(), 1);
+        assert_eq!(obj.mesh.vertices.len(), initial_base_verts); // base mesh untouched
+        assert!(obj.evaluated_mesh().vertices.len() > initial_base_verts); // evaluated mesh subdivided
+
+        // 2. Duplicate modifier
+        app.duplicate_modifier(cube_id, 0);
+        let obj = app.scene.get_object(cube_id).unwrap();
+        assert_eq!(obj.modifiers.len(), 2);
+        assert_eq!(obj.modifiers.modifiers[1].name, "Subdivision Surface (Copy)");
+
+        // 3. Move modifiers up / down
+        app.move_modifier_up(cube_id, 1);
+        let obj = app.scene.get_object(cube_id).unwrap();
+        assert_eq!(obj.modifiers.modifiers[0].name, "Subdivision Surface (Copy)");
+
+        // 4. In Edit Mode, applying modifier is disallowed
+        app.set_edit_mode(EditMode::Edit);
+        assert!(!app.apply_modifier(cube_id, 0));
+        assert_eq!(app.scene.get_object(cube_id).unwrap().modifiers.len(), 2);
+
+        // 5. Back in Object Mode, apply first modifier with undo
+        app.set_edit_mode(EditMode::Object);
+        assert!(app.apply_modifier(cube_id, 0));
+        let obj = app.scene.get_object(cube_id).unwrap();
+        assert_eq!(obj.modifiers.len(), 1);
+        let baked_verts = obj.mesh.vertices.len();
+        assert!(baked_verts > initial_base_verts);
+
+        // 6. Undo restores base mesh and modifier can be redone
+        app.undo();
+        let obj = app.scene.get_object(cube_id).unwrap();
+        assert_eq!(obj.mesh.vertices.len(), initial_base_verts);
+
+        app.redo();
+        let obj = app.scene.get_object(cube_id).unwrap();
+        assert_eq!(obj.mesh.vertices.len(), baked_verts);
+
+        // 7. Apply All Modifiers
+        app.add_modifier(cube_id, ModifierType::Solidify(forge_modifiers::SolidifyModifier::default()));
+        assert!(app.apply_all_modifiers(cube_id));
+        let obj = app.scene.get_object(cube_id).unwrap();
+        assert_eq!(obj.modifiers.len(), 0);
+
+        // 8. Clear all
+        app.add_modifier(cube_id, ModifierType::Mirror(forge_modifiers::MirrorModifier::default()));
+        assert_eq!(app.scene.get_object(cube_id).unwrap().modifiers.len(), 1);
+        app.clear_all_modifiers(cube_id);
+        assert_eq!(app.scene.get_object(cube_id).unwrap().modifiers.len(), 0);
     }
 }

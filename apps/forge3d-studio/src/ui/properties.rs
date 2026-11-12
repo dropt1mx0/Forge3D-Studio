@@ -4,7 +4,7 @@ use forge_modifiers::{
     ArrayModifier, BevelModifier, DecimateModifier, DisplaceModifier, MirrorModifier, ModifierType,
     SolidifyModifier, SubdivisionModifier, WeightedNormalModifier,
 };
-use forge_scene::{CameraData, CameraProjectionType, PrimitiveType, TransformOrientation};
+use forge_scene::{CameraData, CameraProjectionType, EditMode, PrimitiveType, TransformOrientation};
 
 use crate::app::Forge3dStudioApp;
 
@@ -26,7 +26,10 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
         let mut add_modifier_type = None;
         let mut remove_mod_idx = None;
+        let mut duplicate_mod_idx = None;
         let mut apply_mod_idx = None;
+        let mut apply_all_mods = false;
+        let mut clear_all_mods = false;
         let mut move_up_idx = None;
         let mut move_down_idx = None;
 
@@ -599,194 +602,296 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
             // Modifiers Section
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Modifiers").strong());
+                ui.label(egui::RichText::new("🔧 Modifiers").strong());
                 egui::ComboBox::from_id_salt("add_modifier_combo")
                     .selected_text("+ Add Modifier")
                     .show_ui(ui, |ui| {
-                        if ui.selectable_label(false, "Mirror").clicked() {
+                        if ui.selectable_label(false, "⇋ Mirror").clicked() {
                             add_modifier_type =
                                 Some(ModifierType::Mirror(MirrorModifier::default()));
                         }
-                        if ui.selectable_label(false, "Subdivision Surface").clicked() {
+                        if ui.selectable_label(false, "▦ Subdivision Surface").clicked() {
                             add_modifier_type =
                                 Some(ModifierType::Subdivide(SubdivisionModifier::default()));
                         }
-                        if ui.selectable_label(false, "Solidify").clicked() {
+                        if ui.selectable_label(false, "▣ Solidify").clicked() {
                             add_modifier_type =
                                 Some(ModifierType::Solidify(SolidifyModifier::default()));
                         }
-                        if ui.selectable_label(false, "Array").clicked() {
+                        if ui.selectable_label(false, "☰ Array").clicked() {
                             add_modifier_type = Some(ModifierType::Array(ArrayModifier::default()));
                         }
-                        if ui.selectable_label(false, "Bevel").clicked() {
+                        if ui.selectable_label(false, "⊿ Bevel").clicked() {
                             add_modifier_type = Some(ModifierType::Bevel(BevelModifier::default()));
                         }
-                        if ui.selectable_label(false, "Decimate").clicked() {
+                        if ui.selectable_label(false, "▽ Decimate").clicked() {
                             add_modifier_type =
                                 Some(ModifierType::Decimate(DecimateModifier::default()));
                         }
-                        if ui.selectable_label(false, "Displace").clicked() {
+                        if ui.selectable_label(false, "∿ Displace").clicked() {
                             add_modifier_type =
                                 Some(ModifierType::Displace(DisplaceModifier::default()));
                         }
-                        if ui.selectable_label(false, "Weighted Normal").clicked() {
+                        if ui.selectable_label(false, "⬡ Weighted Normal").clicked() {
                             add_modifier_type = Some(ModifierType::WeightedNormal(
                                 WeightedNormalModifier::default(),
                             ));
                         }
                     });
+
+                if !obj.modifiers.is_empty() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Clear All").on_hover_text("Remove all modifiers from stack").clicked() {
+                            clear_all_mods = true;
+                        }
+                        let in_edit = app.editor_state.edit_mode == EditMode::Edit;
+                        if ui.add_enabled(!in_edit, egui::Button::new("Apply All"))
+                            .on_hover_text(if in_edit { "Cannot apply modifiers in Edit Mode" } else { "Bake all active modifiers sequentially into base mesh" })
+                            .clicked()
+                        {
+                            apply_all_mods = true;
+                        }
+                    });
+                }
             });
 
             let mut modifier_changed = false;
             let num_mods = obj.modifiers.len();
             for i in 0..num_mods {
                 let entry = &mut obj.modifiers.modifiers[i];
+                let mod_icon = match &entry.modifier {
+                    ModifierType::Mirror(_) => "⇋",
+                    ModifierType::Subdivide(_) => "▦",
+                    ModifierType::Solidify(_) => "▣",
+                    ModifierType::Array(_) => "☰",
+                    ModifierType::Bevel(_) => "⊿",
+                    ModifierType::Decimate(_) => "▽",
+                    ModifierType::Displace(_) => "∿",
+                    ModifierType::WeightedNormal(_) => "⬡",
+                };
+
+                let card_id = ui.make_persistent_id(format!("mod_card_open_{}_{}", selected_id, i));
+                let mut is_open = ui.data_mut(|d| d.get_temp::<bool>(card_id).unwrap_or(true));
+
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
-                        if ui.checkbox(&mut entry.enabled, "").changed() {
+                        let chevron = if is_open { "▼" } else { "▶" };
+                        if ui.small_button(chevron).on_hover_text("Toggle Expand/Collapse").clicked() {
+                            is_open = !is_open;
+                            ui.data_mut(|d| d.insert_temp(card_id, is_open));
+                        }
+
+                        if ui.checkbox(&mut entry.enabled, "")
+                            .on_hover_text(if entry.enabled { "Disable modifier in viewport" } else { "Enable modifier in viewport" })
+                            .changed()
+                        {
                             modifier_changed = true;
                         }
-                        ui.label(egui::RichText::new(&entry.name).strong());
+
+                        ui.label(egui::RichText::new(format!("{} {}", mod_icon, entry.name)).strong());
+
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button("✕").on_hover_text("Delete Modifier").clicked() {
                                 remove_mod_idx = Some(i);
                             }
-                            if ui.button("Apply").on_hover_text("Apply to Mesh").clicked() {
+                            let in_edit_mode = app.editor_state.edit_mode == EditMode::Edit;
+                            if ui.add_enabled(!in_edit_mode, egui::Button::new("✔ Apply"))
+                                .on_hover_text(if in_edit_mode { "Cannot apply modifiers in Edit Mode" } else { "Bake modifier into base mesh" })
+                                .clicked()
+                            {
                                 apply_mod_idx = Some(i);
                             }
-                            if i > 0 && ui.button("Up").clicked() {
-                                move_up_idx = Some(i);
+                            if ui.button("⎘").on_hover_text("Duplicate Modifier").clicked() {
+                                duplicate_mod_idx = Some(i);
                             }
-                            if i + 1 < num_mods && ui.button("Down").clicked() {
+                            if i + 1 < num_mods && ui.button("▼").on_hover_text("Move Down").clicked() {
                                 move_down_idx = Some(i);
+                            }
+                            if i > 0 && ui.button("▲").on_hover_text("Move Up").clicked() {
+                                move_up_idx = Some(i);
                             }
                         });
                     });
 
                     // Modifier-specific parameters
-                    match &mut entry.modifier {
-                        ModifierType::Mirror(m) => {
-                            ui.horizontal(|ui| {
-                                ui.label("Axis:");
-                                if ui.checkbox(&mut m.axis_x, "X").changed() {
+                    if is_open {
+                        ui.add_space(2.0);
+                        match &mut entry.modifier {
+                            ModifierType::Mirror(m) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Axes:");
+                                    if ui.checkbox(&mut m.axis_x, "X").changed() {
+                                        modifier_changed = true;
+                                    }
+                                    if ui.checkbox(&mut m.axis_y, "Y").changed() {
+                                        modifier_changed = true;
+                                    }
+                                    if ui.checkbox(&mut m.axis_z, "Z").changed() {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    if ui.checkbox(&mut m.merge, "Merge Vertices").changed() {
+                                        modifier_changed = true;
+                                    }
+                                    if m.merge {
+                                        ui.label("Threshold:");
+                                        if ui.add(DragValue::new(&mut m.merge_threshold).speed(0.001).range(0.0001..=1.0)).changed() {
+                                            modifier_changed = true;
+                                        }
+                                    }
+                                });
+                            }
+                            ModifierType::Subdivide(s) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Levels:");
+                                    if ui.add(Slider::new(&mut s.levels, 1..=4)).changed() {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                if s.levels >= 3 {
+                                    ui.label(
+                                        egui::RichText::new("⚠ Higher subdivision increases vertex count exponentially.")
+                                            .color(egui::Color32::from_rgb(240, 180, 50))
+                                            .size(11.0),
+                                    );
+                                }
+                            }
+                            ModifierType::Solidify(s) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Thickness:");
+                                    if ui
+                                        .add(
+                                            DragValue::new(&mut s.thickness)
+                                                .speed(0.01)
+                                                .range(-5.0..=10.0),
+                                        )
+                                        .changed()
+                                    {
+                                        modifier_changed = true;
+                                    }
+                                });
+                            }
+                            ModifierType::Array(a) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Count:");
+                                    if ui.add(Slider::new(&mut a.count, 1..=50)).changed() {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Offset:");
+                                    ui.label("X:");
+                                    if ui.add(DragValue::new(&mut a.offset.x).speed(0.1)).changed() {
+                                        modifier_changed = true;
+                                    }
+                                    ui.label("Y:");
+                                    if ui.add(DragValue::new(&mut a.offset.y).speed(0.1)).changed() {
+                                        modifier_changed = true;
+                                    }
+                                    ui.label("Z:");
+                                    if ui.add(DragValue::new(&mut a.offset.z).speed(0.1)).changed() {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                if ui.small_button("Reset Offset").clicked() {
+                                    a.offset = forge_math::Vec3::new(2.0, 0.0, 0.0);
                                     modifier_changed = true;
                                 }
-                                if ui.checkbox(&mut m.axis_y, "Y").changed() {
-                                    modifier_changed = true;
-                                }
-                                if ui.checkbox(&mut m.axis_z, "Z").changed() {
-                                    modifier_changed = true;
-                                }
-                            });
-                        }
-                        ModifierType::Subdivide(s) => {
-                            ui.horizontal(|ui| {
-                                ui.label("Levels:");
-                                if ui.add(egui::Slider::new(&mut s.levels, 1..=4)).changed() {
-                                    modifier_changed = true;
-                                }
-                            });
-                        }
-                        ModifierType::Solidify(s) => {
-                            ui.horizontal(|ui| {
-                                ui.label("Thickness:");
-                                if ui
-                                    .add(
-                                        DragValue::new(&mut s.thickness)
-                                            .speed(0.01)
-                                            .range(0.0..=10.0),
-                                    )
-                                    .changed()
-                                {
-                                    modifier_changed = true;
-                                }
-                            });
-                        }
-                        ModifierType::Array(a) => {
-                            ui.horizontal(|ui| {
-                                ui.label("Count:");
-                                if ui.add(egui::Slider::new(&mut a.count, 1..=20)).changed() {
-                                    modifier_changed = true;
-                                }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Offset:");
-                                if ui.add(DragValue::new(&mut a.offset.x).speed(0.1)).changed() {
-                                    modifier_changed = true;
-                                }
-                                if ui.add(DragValue::new(&mut a.offset.y).speed(0.1)).changed() {
-                                    modifier_changed = true;
-                                }
-                                if ui.add(DragValue::new(&mut a.offset.z).speed(0.1)).changed() {
-                                    modifier_changed = true;
-                                }
-                            });
-                        }
-                        ModifierType::Bevel(b) => {
-                            ui.horizontal(|ui| {
-                                ui.label("Width:");
-                                if ui
-                                    .add(
-                                        DragValue::new(&mut b.width)
-                                            .speed(0.01)
-                                            .range(0.001..=10.0),
-                                    )
-                                    .changed()
-                                {
-                                    modifier_changed = true;
-                                }
-                            });
-                        }
-                        ModifierType::Decimate(d) => {
-                            ui.horizontal(|ui| {
-                                ui.label("Ratio:");
-                                if ui
-                                    .add(Slider::new(&mut d.ratio, 0.05..=1.0).step_by(0.05))
-                                    .changed()
-                                {
-                                    modifier_changed = true;
-                                }
-                            });
-                        }
-                        ModifierType::Displace(d) => {
-                            ui.horizontal(|ui| {
-                                ui.label("Strength:");
-                                if ui
-                                    .add(DragValue::new(&mut d.strength).speed(0.01))
-                                    .changed()
-                                {
-                                    modifier_changed = true;
-                                }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Frequency:");
-                                if ui
-                                    .add(
-                                        DragValue::new(&mut d.frequency)
-                                            .speed(0.1)
-                                            .range(0.01..=50.0),
-                                    )
-                                    .changed()
-                                {
-                                    modifier_changed = true;
-                                }
-                            });
-                        }
-                        ModifierType::WeightedNormal(w) => {
-                            ui.horizontal(|ui| {
-                                ui.label("Weight:");
-                                if ui
-                                    .add(Slider::new(&mut w.weight, 0.0..=1.0).step_by(0.05))
-                                    .changed()
-                                {
-                                    modifier_changed = true;
-                                }
-                            });
-                            ui.horizontal(|ui| {
-                                if ui.checkbox(&mut w.keep_sharp, "Keep Sharp").changed() {
-                                    modifier_changed = true;
-                                }
-                            });
+                            }
+                            ModifierType::Bevel(b) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Width:");
+                                    if ui
+                                        .add(
+                                            DragValue::new(&mut b.width)
+                                                .speed(0.01)
+                                                .range(0.001..=5.0),
+                                        )
+                                        .changed()
+                                    {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Segments:");
+                                    if ui.add(Slider::new(&mut b.segments, 1..=6)).changed() {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Angle threshold:");
+                                    let mut deg = b.angle_threshold.to_degrees();
+                                    if ui.add(Slider::new(&mut deg, 0.0..=180.0).suffix("°")).changed() {
+                                        b.angle_threshold = deg.to_radians();
+                                        modifier_changed = true;
+                                    }
+                                });
+                            }
+                            ModifierType::Decimate(d) => {
+                                let orig_tris = obj.mesh.indices.len() / 3;
+                                let est_tris = (orig_tris as f32 * d.ratio).round() as usize;
+                                ui.horizontal(|ui| {
+                                    ui.label("Ratio:");
+                                    if ui
+                                        .add(Slider::new(&mut d.ratio, 0.05..=1.0).step_by(0.01))
+                                        .changed()
+                                    {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                ui.label(
+                                    egui::RichText::new(format!("Estimated triangles: ~{} (original: {})", est_tris, orig_tris))
+                                        .weak()
+                                        .size(11.0),
+                                );
+                            }
+                            ModifierType::Displace(d) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Strength:");
+                                    if ui
+                                        .add(DragValue::new(&mut d.strength).speed(0.01).range(-5.0..=5.0))
+                                        .changed()
+                                    {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Midlevel:");
+                                    if ui.add(Slider::new(&mut d.midlevel, 0.0..=1.0)).changed() {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Frequency:");
+                                    if ui
+                                        .add(
+                                            DragValue::new(&mut d.frequency)
+                                                .speed(0.1)
+                                                .range(0.01..=30.0),
+                                        )
+                                        .changed()
+                                    {
+                                        modifier_changed = true;
+                                    }
+                                });
+                            }
+                            ModifierType::WeightedNormal(w) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Weight:");
+                                    if ui
+                                        .add(Slider::new(&mut w.weight, 0.0..=1.0).step_by(0.05))
+                                        .changed()
+                                    {
+                                        modifier_changed = true;
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    if ui.checkbox(&mut w.keep_sharp, "Keep Sharp Corners").changed() {
+                                        modifier_changed = true;
+                                    }
+                                });
+                            }
                         }
                     }
                 });
@@ -866,51 +971,29 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         if reset_tf {
             app.scene.reset_transform_for_object(selected_id);
         }
-        if let Some(mod_type) = add_modifier_type
-            && let Some(obj) = app.scene.get_object_mut(selected_id)
-        {
-            obj.modifiers.add(mod_type);
-            obj.invalidate_evaluated_mesh();
-            if let Some(r) = &mut app.renderer {
-                r.invalidate_mesh(&selected_id);
-            }
+        if let Some(mod_type) = add_modifier_type {
+            app.add_modifier(selected_id, mod_type);
         }
-        if let Some(idx) = remove_mod_idx
-            && let Some(obj) = app.scene.get_object_mut(selected_id)
-        {
-            obj.modifiers.remove(idx);
-            obj.invalidate_evaluated_mesh();
-            if let Some(r) = &mut app.renderer {
-                r.invalidate_mesh(&selected_id);
-            }
+        if let Some(idx) = remove_mod_idx {
+            app.remove_modifier(selected_id, idx);
         }
-        if let Some(idx) = apply_mod_idx
-            && let Some(obj) = app.scene.get_object_mut(selected_id)
-        {
-            obj.modifiers.apply_to_mesh(idx, &mut obj.mesh);
-            obj.invalidate_evaluated_mesh();
-            if let Some(r) = &mut app.renderer {
-                r.invalidate_mesh(&selected_id);
-            }
-            app.status_message = "Applied modifier to base mesh".to_string();
+        if let Some(idx) = duplicate_mod_idx {
+            app.duplicate_modifier(selected_id, idx);
         }
-        if let Some(idx) = move_up_idx
-            && let Some(obj) = app.scene.get_object_mut(selected_id)
-        {
-            obj.modifiers.move_up(idx);
-            obj.invalidate_evaluated_mesh();
-            if let Some(r) = &mut app.renderer {
-                r.invalidate_mesh(&selected_id);
-            }
+        if let Some(idx) = apply_mod_idx {
+            app.apply_modifier(selected_id, idx);
         }
-        if let Some(idx) = move_down_idx
-            && let Some(obj) = app.scene.get_object_mut(selected_id)
-        {
-            obj.modifiers.move_down(idx);
-            obj.invalidate_evaluated_mesh();
-            if let Some(r) = &mut app.renderer {
-                r.invalidate_mesh(&selected_id);
-            }
+        if apply_all_mods {
+            app.apply_all_modifiers(selected_id);
+        }
+        if clear_all_mods {
+            app.clear_all_modifiers(selected_id);
+        }
+        if let Some(idx) = move_up_idx {
+            app.move_modifier_up(selected_id, idx);
+        }
+        if let Some(idx) = move_down_idx {
+            app.move_modifier_down(selected_id, idx);
         }
     } else {
         ui.label("No object selected.");

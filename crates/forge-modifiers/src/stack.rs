@@ -136,6 +136,29 @@ impl ModifierStack {
             false
         }
     }
+
+    /// Duplicates the modifier at `index` and inserts it right after `index`.
+    pub fn duplicate(&mut self, index: usize) -> bool {
+        if index < self.modifiers.len() {
+            let mut clone = self.modifiers[index].clone();
+            clone.name = format!("{} (Copy)", clone.name);
+            self.modifiers.insert(index + 1, clone);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Applies all active modifiers sequentially onto `base_mesh` and clears the stack.
+    pub fn apply_all(&mut self, base_mesh: &mut Mesh) {
+        *base_mesh = self.evaluate(base_mesh);
+        self.modifiers.clear();
+    }
+
+    /// Clears all modifiers from the stack.
+    pub fn clear(&mut self) {
+        self.modifiers.clear();
+    }
 }
 
 #[cfg(test)]
@@ -194,5 +217,29 @@ mod tests {
         assert_eq!(result.vertices.len(), cube.vertices.len());
         assert_eq!(result.indices.len(), cube.indices.len());
         assert!(result.validate().is_ok());
+    }
+
+    #[test]
+    fn test_modifier_stack_duplicate_and_apply_all() {
+        let mut cube = generate_cube(1.0);
+        let mut stack = ModifierStack::new();
+        stack.add(ModifierType::Array(ArrayModifier::new(2, forge_math::Vec3::new(2.0, 0.0, 0.0))));
+        assert_eq!(stack.len(), 1);
+
+        // Duplicate
+        assert!(stack.duplicate(0));
+        assert_eq!(stack.len(), 2);
+        assert_eq!(stack.modifiers[1].name, "Array (Copy)");
+
+        // Apply all
+        stack.apply_all(&mut cube);
+        assert_eq!(stack.len(), 0);
+        assert!(cube.vertices.len() > 24);
+
+        // Clear
+        stack.add(ModifierType::Solidify(SolidifyModifier::default()));
+        assert_eq!(stack.len(), 1);
+        stack.clear();
+        assert_eq!(stack.len(), 0);
     }
 }
