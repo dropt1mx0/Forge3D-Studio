@@ -4538,6 +4538,31 @@ mod tests {
         app.undo();
         let restored_obj = app.scene.get_object(sphere_id).unwrap();
         assert_eq!(restored_obj.mesh.vertices.len(), orig_mesh.vertices.len());
+
+        // Test SnakeHook pulling deformation
+        app.sculpt_settings.brush = SculptBrush::SnakeHook;
+        let (_, edit_mesh) = app.active_edit_mesh.as_mut().unwrap();
+        let pull_delta = Vec3::new(1.0, 2.0, 0.0);
+        let affected_hook = forge_geometry::apply_sculpt_stroke(
+            edit_mesh,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::Y,
+            pull_delta,
+            &app.sculpt_settings,
+        );
+        assert!(affected_hook > 0);
+
+        // Test ElasticDeform
+        app.sculpt_settings.brush = SculptBrush::ElasticDeform;
+        let (_, edit_mesh) = app.active_edit_mesh.as_mut().unwrap();
+        let affected_elastic = forge_geometry::apply_sculpt_stroke(
+            edit_mesh,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::Y,
+            Vec3::new(0.0, 0.5, 0.0),
+            &app.sculpt_settings,
+        );
+        assert!(affected_elastic > 0);
     }
 
     #[test]

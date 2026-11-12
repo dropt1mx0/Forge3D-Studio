@@ -739,7 +739,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         }
 
-        // Sculpt Mode Brush & Parameter Shortcuts (1..9 = Brushes, [ / ] = Radius, F / Shift+F = Radius/Strength, X = Symmetry)
+        // Sculpt Mode Brush & Parameter Shortcuts (1..0 = Brushes, [ / ] = Radius, F / Shift+F = Radius/Strength, X/Y/Z = Symmetry)
         if app.editor_state.edit_mode == EditMode::Sculpt && !emulate {
             if input.key_pressed(Key::Num1) && !input.modifiers.any() {
                 app.sculpt_settings.brush = forge_geometry::SculptBrush::Draw;
@@ -770,18 +770,37 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.status_message = "Sculpt Brush: Grab (7)".to_string();
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::Num8) && !input.modifiers.any() {
-                app.sculpt_settings.brush = forge_geometry::SculptBrush::Pinch;
-                app.status_message = "Sculpt Brush: Pinch (8)".to_string();
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::SnakeHook;
+                app.status_message = "Sculpt Brush: Snake Hook (8)".to_string();
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::Num9) && !input.modifiers.any() {
-                app.sculpt_settings.brush = forge_geometry::SculptBrush::Crease;
-                app.status_message = "Sculpt Brush: Crease (9)".to_string();
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::ElasticDeform;
+                app.status_message = "Sculpt Brush: Elastic Deform (9)".to_string();
                 ui.ctx().request_repaint();
-            } else if input.key_pressed(Key::X) && !input.modifiers.any() {
+            } else if input.key_pressed(Key::Num0) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Thumb;
+                app.status_message = "Sculpt Brush: Thumb (0)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::P) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Pinch;
+                app.status_message = "Sculpt Brush: Pinch (P)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::C) && !input.modifiers.any() {
+                app.sculpt_settings.brush = forge_geometry::SculptBrush::Crease;
+                app.status_message = "Sculpt Brush: Crease (C)".to_string();
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::X) && !input.modifiers.ctrl && !input.modifiers.command {
                 app.sculpt_settings.symmetry_x = !app.sculpt_settings.symmetry_x;
                 app.status_message = format!(
                     "Sculpt Symmetry X: {}",
                     if app.sculpt_settings.symmetry_x { "ON" } else { "OFF" }
+                );
+                ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::Y) && !input.modifiers.ctrl && !input.modifiers.command {
+                app.sculpt_settings.symmetry_y = !app.sculpt_settings.symmetry_y;
+                app.status_message = format!(
+                    "Sculpt Symmetry Y: {}",
+                    if app.sculpt_settings.symmetry_y { "ON" } else { "OFF" }
                 );
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::OpenBracket) {
@@ -1911,7 +1930,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         .transform_vector(ray.direction)
                         .normalize_or_zero();
                     let ptr_delta = input.pointer.delta();
-                    let stroke_delta = Vec3::new(ptr_delta.x * 0.01, -ptr_delta.y * 0.01, 0.0);
+                    // Compute camera-aligned 3D motion on view plane at hit depth, then transform to object local coordinates
+                    let fov_rad = app.camera.fov_y_deg.to_radians();
+                    let world_height = 2.0 * hit_dist * (fov_rad * 0.5).tan();
+                    let world_per_px = world_height / rect.height().max(1.0);
+                    let cam_right = app.camera.right();
+                    let cam_up = app.camera.up;
+                    let world_delta = cam_right * (ptr_delta.x * world_per_px)
+                        - cam_up * (ptr_delta.y * world_per_px);
+                    let stroke_delta = tf.inverse().transform_vector(world_delta);
                     let affected = forge_geometry::apply_sculpt_stroke(
                         edit_mesh,
                         hit_local_pt,
@@ -1983,6 +2010,34 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 Stroke::new(1.3, Color32::from_rgba_unmultiplied(100, 200, 255, 180)),
                             );
                             painter.circle_filled(symm_screen, 2.0, Color32::from_rgb(120, 220, 255));
+                        }
+                    }
+                }
+                if app.sculpt_settings.symmetry_y {
+                    if let Some((_, hit_local, tf)) = hit_info {
+                        let symm_local = Vec3::new(hit_local.x, -hit_local.y, hit_local.z);
+                        let symm_world = tf.transform_point(symm_local);
+                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect) {
+                            painter.circle_stroke(
+                                symm_screen,
+                                radius_px,
+                                Stroke::new(1.3, Color32::from_rgba_unmultiplied(100, 255, 180, 180)),
+                            );
+                            painter.circle_filled(symm_screen, 2.0, Color32::from_rgb(120, 255, 180));
+                        }
+                    }
+                }
+                if app.sculpt_settings.symmetry_z {
+                    if let Some((_, hit_local, tf)) = hit_info {
+                        let symm_local = Vec3::new(hit_local.x, hit_local.y, -hit_local.z);
+                        let symm_world = tf.transform_point(symm_local);
+                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect) {
+                            painter.circle_stroke(
+                                symm_screen,
+                                radius_px,
+                                Stroke::new(1.3, Color32::from_rgba_unmultiplied(220, 150, 255, 180)),
+                            );
+                            painter.circle_filled(symm_screen, 2.0, Color32::from_rgb(220, 150, 255));
                         }
                     }
                 }
@@ -2073,7 +2128,20 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     let mode_str = match app.editor_state.edit_mode {
         EditMode::Object => "Object Mode".to_string(),
         EditMode::Edit => format!("Edit Mode ({:?})", app.editor_state.selection_element),
-        EditMode::Sculpt => "Sculpt Mode".to_string(),
+        EditMode::Sculpt => {
+            let mut symm = String::new();
+            if app.sculpt_settings.symmetry_x { symm.push('X'); }
+            if app.sculpt_settings.symmetry_y { symm.push('Y'); }
+            if app.sculpt_settings.symmetry_z { symm.push('Z'); }
+            let symm_str = if symm.is_empty() { String::new() } else { format!(" Symm [{}]", symm) };
+            format!(
+                "Sculpt: {} (R: {:.2}, Str: {:.2}){}",
+                app.sculpt_settings.brush.name(),
+                app.sculpt_settings.radius,
+                app.sculpt_settings.strength,
+                symm_str
+            )
+        }
     };
     let tool_str = format!("{:?}", app.editor_state.transform_mode);
     let proj_str = match app.camera.projection {

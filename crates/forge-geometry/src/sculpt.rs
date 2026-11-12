@@ -16,6 +16,9 @@ pub enum SculptBrush {
     Grab,
     Pinch,
     Crease,
+    SnakeHook,
+    ElasticDeform,
+    Thumb,
 }
 
 impl SculptBrush {
@@ -30,6 +33,9 @@ impl SculptBrush {
             Self::Grab => "Grab",
             Self::Pinch => "Pinch",
             Self::Crease => "Crease",
+            Self::SnakeHook => "Snake Hook",
+            Self::ElasticDeform => "Elastic Deform",
+            Self::Thumb => "Thumb",
         }
     }
 }
@@ -169,6 +175,18 @@ pub fn apply_sculpt_stroke(
                             let to_center = center - v.position;
                             v.position += to_center * (strength * w * 0.35);
                             v.position -= norm * (strength * w * radius * 0.35);
+                        }
+                        SculptBrush::SnakeHook => {
+                            let hook_factor = (w * w * 1.5).min(2.5);
+                            v.position += delta * (strength * hook_factor);
+                        }
+                        SculptBrush::ElasticDeform => {
+                            let t = (dist / radius).clamp(0.0, 1.0);
+                            let elastic_w = (1.0 - t * t).clamp(0.0, 1.0);
+                            v.position += delta * (strength * elastic_w);
+                        }
+                        SculptBrush::Thumb => {
+                            v.position += delta * (strength * w * 0.75);
                         }
                     }
                     affected_count += 1;
@@ -318,5 +336,43 @@ mod tests {
             neg_v.position.y > 0.0,
             "Negative side must be mirrored via symmetry_x"
         );
+    }
+
+    #[test]
+    fn test_sculpt_snake_hook_and_elastic_deform() {
+        let plane_mesh = generate_plane(2.0, 8);
+        let mut edit_mesh = EditableMesh::from_mesh(&plane_mesh);
+
+        let hit_pt = Vec3::new(0.0, 0.0, 0.0);
+        let hit_norm = Vec3::Y;
+        let pull_delta = Vec3::new(0.5, 0.8, 0.0);
+
+        let settings = SculptSettings {
+            brush: SculptBrush::SnakeHook,
+            radius: 0.6,
+            strength: 0.8,
+            ..Default::default()
+        };
+
+        let affected = apply_sculpt_stroke(&mut edit_mesh, hit_pt, hit_norm, pull_delta, &settings);
+        assert!(affected > 0);
+
+        let displaced_v = edit_mesh
+            .vertices
+            .iter()
+            .find(|v| v.position.y > 0.1)
+            .unwrap();
+        assert!(displaced_v.position.y > 0.1, "Snake Hook must pull vertices along delta");
+
+        // Test ElasticDeform
+        let elastic_settings = SculptSettings {
+            brush: SculptBrush::ElasticDeform,
+            radius: 0.6,
+            strength: 0.5,
+            ..Default::default()
+        };
+        let affected_elastic =
+            apply_sculpt_stroke(&mut edit_mesh, hit_pt, hit_norm, Vec3::new(0.0, 0.5, 0.0), &elastic_settings);
+        assert!(affected_elastic > 0);
     }
 }

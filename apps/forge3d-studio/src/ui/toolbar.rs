@@ -381,6 +381,9 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         forge_geometry::SculptBrush::Inflate,
                         forge_geometry::SculptBrush::Deflate,
                         forge_geometry::SculptBrush::Grab,
+                        forge_geometry::SculptBrush::SnakeHook,
+                        forge_geometry::SculptBrush::ElasticDeform,
+                        forge_geometry::SculptBrush::Thumb,
                         forge_geometry::SculptBrush::Pinch,
                         forge_geometry::SculptBrush::Crease,
                     ] {
@@ -393,6 +396,9 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             forge_geometry::SculptBrush::Inflate => "Inf",
                             forge_geometry::SculptBrush::Deflate => "Def",
                             forge_geometry::SculptBrush::Grab => "Grb",
+                            forge_geometry::SculptBrush::SnakeHook => "Snk",
+                            forge_geometry::SculptBrush::ElasticDeform => "Elst",
+                            forge_geometry::SculptBrush::Thumb => "Thmb",
                             forge_geometry::SculptBrush::Pinch => "Pnch",
                             forge_geometry::SculptBrush::Crease => "Crs",
                         };
@@ -422,6 +428,8 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             ));
                         });
                         ui.checkbox(&mut app.sculpt_settings.symmetry_x, "Symm X");
+                        ui.checkbox(&mut app.sculpt_settings.symmetry_y, "Symm Y");
+                        ui.checkbox(&mut app.sculpt_settings.symmetry_z, "Symm Z");
                     }
 
                     ui.add_space(4.0);
