@@ -297,6 +297,135 @@ impl EditableMesh {
         }
     }
 
+    /// Selects or deselects all connected mesh elements sharing a topological component (island).
+    ///
+    /// - If `seed_vertex` is provided, the component containing that vertex is traversed.
+    /// - If `None`, components containing all currently selected elements are traversed.
+    /// - If `deselect` is true, traversed elements are deselected; otherwise they are selected.
+    ///
+    /// Returns the number of affected elements.
+    pub fn select_linked(
+        &mut self,
+        mode: EditSelectionMode,
+        seed_vertex: Option<usize>,
+        deselect: bool,
+    ) -> usize {
+        if self.vertices.is_empty() {
+            return 0;
+        }
+
+        // Build vertex adjacency map from edges and faces
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); self.vertices.len()];
+        for e in &self.edges {
+            if e.v0 < self.vertices.len() && e.v1 < self.vertices.len() {
+                adj[e.v0].push(e.v1);
+                adj[e.v1].push(e.v0);
+            }
+        }
+        for f in &self.faces {
+            for i in 0..f.vertices.len() {
+                let v0 = f.vertices[i];
+                let v1 = f.vertices[(i + 1) % f.vertices.len()];
+                if v0 < self.vertices.len() && v1 < self.vertices.len() {
+                    adj[v0].push(v1);
+                    adj[v1].push(v0);
+                }
+            }
+        }
+
+        // Determine starting seeds for BFS
+        let mut seeds = Vec::new();
+        if let Some(seed) = seed_vertex {
+            if seed < self.vertices.len() {
+                seeds.push(seed);
+            }
+        } else {
+            match mode {
+                EditSelectionMode::Vertex => {
+                    for (i, v) in self.vertices.iter().enumerate() {
+                        if v.selected {
+                            seeds.push(i);
+                        }
+                    }
+                }
+                EditSelectionMode::Edge => {
+                    for e in &self.edges {
+                        if e.selected {
+                            seeds.push(e.v0);
+                            seeds.push(e.v1);
+                        }
+                    }
+                }
+                EditSelectionMode::Face => {
+                    for f in &self.faces {
+                        if f.selected {
+                            seeds.extend_from_slice(&f.vertices);
+                        }
+                    }
+                }
+            }
+        }
+
+        if seeds.is_empty() {
+            return 0;
+        }
+
+        // BFS to find all connected vertices in component(s)
+        let mut visited = HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+
+        for s in seeds {
+            if visited.insert(s) {
+                queue.push_back(s);
+            }
+        }
+
+        while let Some(curr) = queue.pop_front() {
+            if let Some(neighbors) = adj.get(curr) {
+                for &next in neighbors {
+                    if next < self.vertices.len() && visited.insert(next) {
+                        queue.push_back(next);
+                    }
+                }
+            }
+        }
+
+        let mut affected = 0;
+        let new_state = !deselect;
+
+        // Apply to vertices
+        for &v_idx in &visited {
+            if v_idx < self.vertices.len() {
+                self.vertices[v_idx].selected = new_state;
+                if mode == EditSelectionMode::Vertex {
+                    affected += 1;
+                }
+            }
+        }
+
+        // Apply to edges
+        for e in &mut self.edges {
+            if visited.contains(&e.v0) && visited.contains(&e.v1) {
+                e.selected = new_state;
+                if mode == EditSelectionMode::Edge {
+                    affected += 1;
+                }
+            }
+        }
+
+        // Apply to faces
+        for f in &mut self.faces {
+            if f.vertices.iter().any(|v| visited.contains(v)) {
+                f.selected = new_state;
+                if mode == EditSelectionMode::Face {
+                    affected += 1;
+                }
+            }
+        }
+
+        affected
+    }
+
     /// Returns list of selected vertex indices.
     pub fn selected_vertices(&self) -> Vec<usize> {
         self.vertices
@@ -2041,5 +2170,65 @@ mod tests {
         assert!(res.is_ok(), "Spin should succeed: {:?}", res);
         let created_faces = res.unwrap();
         assert_eq!(created_faces.len(), 8);
+    }
+
+    #[test]
+    fn test_select_linked_islands() {
+        let cube_a = generate_cube(1.0);
+        let mut edit_mesh = EditableMesh::from_mesh(&cube_a);
+        edit_mesh.weld_colocated_vertices(1e-4);
+        let cube_a_vert_count = edit_mesh.vertices.len();
+        let cube_a_face_count = edit_mesh.faces.len();
+
+        // Add a second disconnected cube B offset by (5, 0, 0)
+        let cube_b = generate_cube(1.0);
+        let mut edit_b = EditableMesh::from_mesh(&cube_b);
+        edit_b.weld_colocated_vertices(1e-4);
+        let v_offset = edit_mesh.vertices.len();
+        for mut v in edit_b.vertices {
+            v.position += Vec3::new(5.0, 0.0, 0.0);
+            edit_mesh.vertices.push(v);
+        }
+        for e in edit_b.edges {
+            edit_mesh.edges.push(EditEdge::new(e.v0 + v_offset, e.v1 + v_offset));
+        }
+        for f in edit_b.faces {
+            let remapped_verts: Vec<usize> = f.vertices.iter().map(|&idx| idx + v_offset).collect();
+            edit_mesh.faces.push(EditFace::new(remapped_verts, f.normal));
+        }
+
+        assert_eq!(edit_mesh.vertices.len(), cube_a_vert_count * 2);
+
+        // 1. Select linked from seed on Cube A
+        let affected = edit_mesh.select_linked(EditSelectionMode::Vertex, Some(0), false);
+        assert_eq!(affected, cube_a_vert_count);
+
+        // All Cube A vertices must be selected, Cube B must be untouched
+        for i in 0..cube_a_vert_count {
+            assert!(edit_mesh.vertices[i].selected);
+        }
+        for i in cube_a_vert_count..edit_mesh.vertices.len() {
+            assert!(!edit_mesh.vertices[i].selected);
+        }
+
+        // 2. Deselect linked on Cube A
+        let deselected = edit_mesh.select_linked(EditSelectionMode::Vertex, Some(0), true);
+        assert_eq!(deselected, cube_a_vert_count);
+        for v in &edit_mesh.vertices {
+            assert!(!v.selected);
+        }
+
+        // 3. Select linked via Face mode starting from a selected face on Cube B
+        edit_mesh.faces[cube_a_face_count].selected = true;
+        let affected_faces = edit_mesh.select_linked(EditSelectionMode::Face, None, false);
+        assert_eq!(affected_faces, cube_a_face_count);
+
+        // All Cube B faces must be selected, Cube A faces must be unselected
+        for i in 0..cube_a_face_count {
+            assert!(!edit_mesh.faces[i].selected);
+        }
+        for i in cube_a_face_count..edit_mesh.faces.len() {
+            assert!(edit_mesh.faces[i].selected);
+        }
     }
 }

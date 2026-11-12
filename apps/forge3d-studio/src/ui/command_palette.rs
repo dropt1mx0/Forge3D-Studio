@@ -158,6 +158,18 @@ pub fn get_all_commands() -> Vec<CommandItem> {
         },
         CommandItem {
             category: "Mesh",
+            title: "Select Linked",
+            shortcut: "L",
+            action_id: "mesh_select_linked",
+        },
+        CommandItem {
+            category: "Mesh",
+            title: "Deselect Linked",
+            shortcut: "Shift+L",
+            action_id: "mesh_deselect_linked",
+        },
+        CommandItem {
+            category: "Mesh",
             title: "Merge at Center",
             shortcut: "M",
             action_id: "mesh_merge",
@@ -605,6 +617,18 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
                 app.toggle_edit_mode();
             }
             app.fill_selected_geometry();
+        }
+        "mesh_select_linked" => {
+            if app.editor_state.edit_mode != EditMode::Edit {
+                app.toggle_edit_mode();
+            }
+            app.select_linked(false);
+        }
+        "mesh_deselect_linked" => {
+            if app.editor_state.edit_mode != EditMode::Edit {
+                app.toggle_edit_mode();
+            }
+            app.select_linked(true);
         }
         "mesh_merge" => {
             if app.editor_state.edit_mode != EditMode::Edit {

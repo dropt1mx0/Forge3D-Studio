@@ -745,6 +745,28 @@ impl Forge3dStudioApp {
         }
     }
 
+    /// Blender-style "Select Linked" (L / Shift+L): selects or deselects all connected geometry
+    /// in the active edit mesh belonging to the same island as the hovered or selected element.
+    pub fn select_linked(&mut self, deselect: bool) {
+        if self.editor_state.edit_mode != EditMode::Edit {
+            return;
+        }
+
+        let seed = self.editor_state.active_vertex;
+        let mode = match self.editor_state.selection_element {
+            forge_scene::SelectionElement::Vertex => EditSelectionMode::Vertex,
+            forge_scene::SelectionElement::Edge => EditSelectionMode::Edge,
+            forge_scene::SelectionElement::Face => EditSelectionMode::Face,
+        };
+
+        if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+            let count = edit_mesh.select_linked(mode, seed, deselect);
+            self.sync_edit_mesh_to_scene();
+            let action = if deselect { "Deselected" } else { "Selected" };
+            self.status_message = format!("{} {} linked element(s) (L)", action, count);
+        }
+    }
+
     /// Fast sync of edit mesh to scene object during interactive operations without pushing undo step.
     pub fn sync_edit_mesh_to_scene(&mut self) {
         if let Some((id, edit_mesh)) = &self.active_edit_mesh {
@@ -5507,5 +5529,52 @@ mod tests {
         app.circle_select(cube_screen_p, 500.0, view_proj, viewport_rect, true);
         let (_, edit_mesh) = app.active_edit_mesh.as_ref().unwrap();
         assert!(edit_mesh.vertices.iter().all(|v| !v.selected));
+    }
+
+    #[test]
+    fn test_select_linked_edit_mode() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+
+        // Join Sphere into Cube to create a two-island mesh
+        app.selection.select(cube_id);
+        app.selection.add_to_selection(sphere_id);
+        app.join_selected();
+
+        let joined_id = app.selection.active_id.expect("Joined object should be active");
+
+        // Enter Edit Mode
+        app.set_edit_mode(EditMode::Edit);
+        assert!(app.active_edit_mesh.is_some());
+        assert_eq!(app.active_edit_mesh.as_ref().map(|(id, _)| *id), Some(joined_id));
+
+        let total_verts = app.active_edit_mesh.as_ref().unwrap().1.vertices.len();
+
+        // Deselect all vertices first
+        if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
+            for v in &mut edit_mesh.vertices {
+                v.selected = false;
+            }
+            // Select only vertex 0 (which belongs to the cube island)
+            edit_mesh.vertices[0].selected = true;
+        }
+
+        // Run select linked
+        app.select_linked(false);
+
+        let (_, edit_mesh) = app.active_edit_mesh.as_ref().unwrap();
+        let selected_count = edit_mesh.vertices.iter().filter(|v| v.selected).count();
+
+        // More than 1 vertex selected (the whole cube island), but not all vertices of both islands
+        assert!(selected_count > 1);
+        assert!(selected_count < total_verts);
+
+        // Deselect linked
+        app.select_linked(true);
+        let (_, edit_mesh) = app.active_edit_mesh.as_ref().unwrap();
+        let selected_count_after = edit_mesh.vertices.iter().filter(|v| v.selected).count();
+        assert_eq!(selected_count_after, 0);
     }
 }

@@ -755,6 +755,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.dissolve_selected_geometry();
             } else if !input.modifiers.any() && input.key_pressed(Key::P) {
                 app.separate_selected_geometry();
+            } else if input.key_pressed(Key::L) && !input.modifiers.ctrl && !input.modifiers.alt {
+                let deselect = input.modifiers.shift;
+                app.select_linked(deselect);
+                ui.ctx().request_repaint();
             } else if !input.modifiers.any() && input.key_pressed(Key::K) {
                 app.knife_connect_selected_geometry();
             } else if input.modifiers.alt && input.key_pressed(Key::B) {
