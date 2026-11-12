@@ -2116,7 +2116,28 @@ impl Forge3dStudioApp {
             self.selection.selected_ids.len()
         );
     }
+}
 
+pub fn point_in_polygon(point: egui::Pos2, polygon: &[egui::Pos2]) -> bool {
+    if polygon.len() < 3 {
+        return false;
+    }
+    let mut inside = false;
+    let mut j = polygon.len() - 1;
+    for i in 0..polygon.len() {
+        let pi = polygon[i];
+        let pj = polygon[j];
+        if ((pi.y > point.y) != (pj.y > point.y))
+            && (point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x)
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+impl Forge3dStudioApp {
     pub fn box_select(
         &mut self,
         box_rect: egui::Rect,
@@ -2289,6 +2310,297 @@ impl Forge3dStudioApp {
         }
         self.status_message = format!(
             "Box Selected ({} objects)",
+            self.selection.selected_ids.len()
+        );
+    }
+
+    pub fn lasso_select(
+        &mut self,
+        polygon: &[egui::Pos2],
+        view_proj: forge_math::Mat4,
+        viewport_rect: egui::Rect,
+        toggle: bool,
+    ) {
+        if polygon.len() < 3 {
+            return;
+        }
+
+        let mut poly_bbox = egui::Rect::NOTHING;
+        for p in polygon {
+            poly_bbox.extend_with(*p);
+        }
+
+        if self.editor_state.edit_mode == EditMode::Edit {
+            if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+                let aid = self.selection.active_id;
+                let model_mat = aid
+                    .and_then(|id| self.scene.get_object(id))
+                    .map(|obj| obj.local_transform.to_matrix())
+                    .unwrap_or(forge_math::Mat4::IDENTITY);
+
+                let mut modified_count = 0;
+                match self.editor_state.selection_element {
+                    forge_scene::SelectionElement::Vertex => {
+                        for v in &mut edit_mesh.vertices {
+                            let world_p = model_mat.transform_point3(v.position);
+                            if let Some(screen_p) =
+                                crate::ui::gizmo::world_to_screen_pos(world_p, view_proj, viewport_rect)
+                            {
+                                if poly_bbox.contains(screen_p) && point_in_polygon(screen_p, polygon) {
+                                    if toggle {
+                                        v.selected = !v.selected;
+                                    } else {
+                                        v.selected = true;
+                                    }
+                                    modified_count += 1;
+                                } else if !toggle {
+                                    v.selected = false;
+                                }
+                            }
+                        }
+                    }
+                    forge_scene::SelectionElement::Edge => {
+                        for e in &mut edit_mesh.edges {
+                            if e.v0 < edit_mesh.vertices.len() && e.v1 < edit_mesh.vertices.len() {
+                                let p0 = model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
+                                let p1 = model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
+                                let mid = (p0 + p1) * 0.5;
+                                if let Some(screen_p) =
+                                    crate::ui::gizmo::world_to_screen_pos(mid, view_proj, viewport_rect)
+                                {
+                                    if poly_bbox.contains(screen_p) && point_in_polygon(screen_p, polygon) {
+                                        if toggle {
+                                            e.selected = !e.selected;
+                                        } else {
+                                            e.selected = true;
+                                        }
+                                        modified_count += 1;
+                                    } else if !toggle {
+                                        e.selected = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    forge_scene::SelectionElement::Face => {
+                        for f in &mut edit_mesh.faces {
+                            let mut face_center = forge_math::Vec3::ZERO;
+                            let mut v_count = 0.0;
+                            for &v_idx in &f.vertices {
+                                if v_idx < edit_mesh.vertices.len() {
+                                    face_center += model_mat.transform_point3(edit_mesh.vertices[v_idx].position);
+                                    v_count += 1.0;
+                                }
+                            }
+                            if v_count > 0.0 {
+                                face_center /= v_count;
+                                if let Some(screen_p) =
+                                    crate::ui::gizmo::world_to_screen_pos(face_center, view_proj, viewport_rect)
+                                {
+                                    if poly_bbox.contains(screen_p) && point_in_polygon(screen_p, polygon) {
+                                        if toggle {
+                                            f.selected = !f.selected;
+                                        } else {
+                                            f.selected = true;
+                                        }
+                                        modified_count += 1;
+                                    } else if !toggle {
+                                        f.selected = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                self.sync_edit_mesh_to_scene();
+                self.status_message = format!("Lasso Selected {} element(s)", modified_count);
+                return;
+            }
+        }
+
+        let mut hit_ids = std::collections::HashSet::new();
+        for (&id, obj) in &self.scene.objects {
+            if !obj.visible || !obj.selectable || obj.locked {
+                continue;
+            }
+            let world_tf = self.scene.world_transform(id);
+            let model_mat = world_tf.to_matrix();
+            let mut screen_points = Vec::new();
+
+            if let Some(screen_p) =
+                crate::ui::gizmo::world_to_screen_pos(world_tf.translation, view_proj, viewport_rect)
+            {
+                screen_points.push(screen_p);
+            }
+
+            let aabb = obj.mesh.aabb;
+            if !aabb.is_empty() {
+                let corners = [
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z)),
+                ];
+                for c in &corners {
+                    if let Some(sp) = crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect) {
+                        screen_points.push(sp);
+                    }
+                }
+            }
+
+            let is_hit = screen_points.iter().any(|p| poly_bbox.contains(*p) && point_in_polygon(*p, polygon));
+            if is_hit {
+                hit_ids.insert(id);
+            }
+        }
+
+        if toggle {
+            for id in hit_ids {
+                self.selection.toggle_selection(id);
+            }
+        } else if !hit_ids.is_empty() {
+            self.selection.selected_ids = hit_ids;
+            self.selection.active_id = self.selection.selected_ids.iter().next().copied();
+        } else {
+            self.selection.deselect();
+        }
+        self.status_message = format!(
+            "Lasso Selected ({} objects)",
+            self.selection.selected_ids.len()
+        );
+    }
+
+    pub fn circle_select(
+        &mut self,
+        center: egui::Pos2,
+        radius: f32,
+        view_proj: forge_math::Mat4,
+        viewport_rect: egui::Rect,
+        deselect: bool,
+    ) {
+        if self.editor_state.edit_mode == EditMode::Edit {
+            if let Some((_, edit_mesh)) = &mut self.active_edit_mesh {
+                let aid = self.selection.active_id;
+                let model_mat = aid
+                    .and_then(|id| self.scene.get_object(id))
+                    .map(|obj| obj.local_transform.to_matrix())
+                    .unwrap_or(forge_math::Mat4::IDENTITY);
+
+                let mut modified_count = 0;
+                match self.editor_state.selection_element {
+                    forge_scene::SelectionElement::Vertex => {
+                        for v in &mut edit_mesh.vertices {
+                            let world_p = model_mat.transform_point3(v.position);
+                            if let Some(screen_p) =
+                                crate::ui::gizmo::world_to_screen_pos(world_p, view_proj, viewport_rect)
+                            {
+                                if screen_p.distance(center) <= radius {
+                                    v.selected = !deselect;
+                                    modified_count += 1;
+                                }
+                            }
+                        }
+                    }
+                    forge_scene::SelectionElement::Edge => {
+                        for e in &mut edit_mesh.edges {
+                            if e.v0 < edit_mesh.vertices.len() && e.v1 < edit_mesh.vertices.len() {
+                                let p0 = model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
+                                let p1 = model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
+                                let mid = (p0 + p1) * 0.5;
+                                if let Some(screen_p) =
+                                    crate::ui::gizmo::world_to_screen_pos(mid, view_proj, viewport_rect)
+                                {
+                                    if screen_p.distance(center) <= radius {
+                                        e.selected = !deselect;
+                                        modified_count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    forge_scene::SelectionElement::Face => {
+                        for f in &mut edit_mesh.faces {
+                            let mut face_center = forge_math::Vec3::ZERO;
+                            let mut v_count = 0.0;
+                            for &v_idx in &f.vertices {
+                                if v_idx < edit_mesh.vertices.len() {
+                                    face_center += model_mat.transform_point3(edit_mesh.vertices[v_idx].position);
+                                    v_count += 1.0;
+                                }
+                            }
+                            if v_count > 0.0 {
+                                face_center /= v_count;
+                                if let Some(screen_p) =
+                                    crate::ui::gizmo::world_to_screen_pos(face_center, view_proj, viewport_rect)
+                                {
+                                    if screen_p.distance(center) <= radius {
+                                        f.selected = !deselect;
+                                        modified_count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                self.sync_edit_mesh_to_scene();
+                self.status_message = format!("Circle Selected {} element(s)", modified_count);
+                return;
+            }
+        }
+
+        let mut hit_ids = Vec::new();
+        for (&id, obj) in &self.scene.objects {
+            if !obj.visible || !obj.selectable || obj.locked {
+                continue;
+            }
+            let world_tf = self.scene.world_transform(id);
+            let model_mat = world_tf.to_matrix();
+            let mut screen_points = Vec::new();
+
+            if let Some(screen_p) =
+                crate::ui::gizmo::world_to_screen_pos(world_tf.translation, view_proj, viewport_rect)
+            {
+                screen_points.push(screen_p);
+            }
+
+            let aabb = obj.mesh.aabb;
+            if !aabb.is_empty() {
+                let corners = [
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z)),
+                ];
+                for c in &corners {
+                    if let Some(sp) = crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect) {
+                        screen_points.push(sp);
+                    }
+                }
+            }
+
+            let is_hit = screen_points.iter().any(|p| p.distance(center) <= radius);
+            if is_hit {
+                hit_ids.push(id);
+            }
+        }
+
+        for id in hit_ids {
+            if deselect {
+                self.selection.remove_from_selection(id);
+            } else {
+                self.selection.add_to_selection(id);
+            }
+        }
+        self.status_message = format!(
+            "Circle Selected ({} objects)",
             self.selection.selected_ids.len()
         );
     }
@@ -5129,5 +5441,71 @@ mod tests {
         assert!(wgsl.contains("distribution_ggx"));
         assert!(wgsl.contains("fresnel_schlick"));
         assert!(wgsl.contains("fn fs_main("));
+    }
+
+    #[test]
+    fn test_lasso_select_and_circle_select_modes() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        // 1. Point in polygon basic test
+        let triangle = [
+            egui::pos2(0.0, 0.0),
+            egui::pos2(100.0, 0.0),
+            egui::pos2(50.0, 100.0),
+        ];
+        assert!(point_in_polygon(egui::pos2(50.0, 30.0), &triangle));
+        assert!(!point_in_polygon(egui::pos2(150.0, 30.0), &triangle));
+        assert!(!point_in_polygon(egui::pos2(-10.0, 30.0), &triangle));
+
+        // 2. Lasso select in Object Mode
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        let ground_id = app.scene.objects.values().find(|o| o.name == "Ground Plane").unwrap().id;
+
+        let view_proj = app.camera.view_proj_matrix();
+        let viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
+
+        // Quad covering the whole viewport
+        let whole_screen_polygon = [
+            egui::pos2(0.0, 0.0),
+            egui::pos2(1920.0, 0.0),
+            egui::pos2(1920.0, 1080.0),
+            egui::pos2(0.0, 1080.0),
+        ];
+
+        app.lasso_select(&whole_screen_polygon, view_proj, viewport_rect, false);
+        assert!(app.selection.selected_ids.contains(&cube_id));
+        assert!(app.selection.selected_ids.contains(&sphere_id));
+        assert!(!app.selection.selected_ids.contains(&ground_id));
+
+        // 3. Circle select in Object Mode
+        app.deselect_all();
+        assert_eq!(app.selection.selected_ids.len(), 0);
+
+        let cube_tf = app.scene.world_transform(cube_id);
+        let cube_screen_p = crate::ui::gizmo::world_to_screen_pos(cube_tf.translation, view_proj, viewport_rect)
+            .expect("Cube should project to screen");
+
+        app.circle_select(cube_screen_p, 100.0, view_proj, viewport_rect, false);
+        assert!(app.selection.selected_ids.contains(&cube_id));
+
+        // Deselect with circle select
+        app.circle_select(cube_screen_p, 100.0, view_proj, viewport_rect, true);
+        assert!(!app.selection.selected_ids.contains(&cube_id));
+
+        // 4. Circle select in Edit Mode
+        app.selection.select(cube_id);
+        app.set_edit_mode(EditMode::Edit);
+        assert!(app.active_edit_mesh.is_some());
+
+        // Select all vertices with a large circle
+        app.circle_select(cube_screen_p, 500.0, view_proj, viewport_rect, false);
+        let (_, edit_mesh) = app.active_edit_mesh.as_ref().unwrap();
+        assert!(edit_mesh.vertices.iter().all(|v| v.selected));
+
+        // Deselect all vertices with a large circle
+        app.circle_select(cube_screen_p, 500.0, view_proj, viewport_rect, true);
+        let (_, edit_mesh) = app.active_edit_mesh.as_ref().unwrap();
+        assert!(edit_mesh.vertices.iter().all(|v| !v.selected));
     }
 }

@@ -234,6 +234,19 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.status_message = "Tool: Box Select (B)".to_string();
                 }
 
+                let lasso_active = app.editor_state.transform_mode == TransformMode::LassoSelect;
+                if tool_button(ui, lasso_active, "Las", "Lasso Select", "Ctrl+RMB", display_mode).clicked() {
+                    app.editor_state.transform_mode = TransformMode::LassoSelect;
+                    app.status_message = "Tool: Lasso Select (Ctrl+RMB)".to_string();
+                }
+
+                let circle_active = app.editor_state.transform_mode == TransformMode::CircleSelect;
+                if tool_button(ui, circle_active, "Cir", "Circle Select", "C", display_mode).clicked() {
+                    app.editor_state.transform_mode = TransformMode::CircleSelect;
+                    app.editor_state.circle_select_active = true;
+                    app.status_message = "Tool: Circle Select (C)".to_string();
+                }
+
                 ui.add_space(4.0);
                 ui.separator();
 

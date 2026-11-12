@@ -28,6 +28,14 @@ impl SelectionState {
         self.active_id = Some(id);
     }
 
+    /// Removes an object from the current selection.
+    pub fn remove_from_selection(&mut self, id: ObjectId) {
+        self.selected_ids.remove(&id);
+        if self.active_id == Some(id) {
+            self.active_id = self.selected_ids.iter().next().copied();
+        }
+    }
+
     /// Toggles selection of an object.
     pub fn toggle_selection(&mut self, id: ObjectId) {
         if self.selected_ids.contains(&id) {

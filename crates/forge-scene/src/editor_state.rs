@@ -33,6 +33,8 @@ pub enum TransformMode {
     #[default]
     Select,
     BoxSelect,
+    LassoSelect,
+    CircleSelect,
     Translate,
     Rotate,
     Scale,
@@ -56,6 +58,8 @@ pub enum PointerInteractionState {
     ObjectDragging,
     GizmoDragging,
     BoxSelecting,
+    LassoSelecting,
+    CircleSelecting,
     ViewportOrbiting,
     UIInteraction,
 }
@@ -458,6 +462,12 @@ pub struct EditorState {
     #[serde(skip)]
     pub box_select_start: Option<Vec2>,
     #[serde(skip)]
+    pub lasso_points: Vec<Vec2>,
+    #[serde(skip)]
+    pub circle_select_radius: f32,
+    #[serde(skip)]
+    pub circle_select_active: bool,
+    #[serde(skip)]
     pub pointer_state: PointerInteractionState,
     #[serde(skip)]
     pub pointer_press_pos: Option<Vec2>,
@@ -505,6 +515,9 @@ impl Default for EditorState {
             modal_transform: ModalTransformState::default(),
             transform_clipboard: None,
             box_select_start: None,
+            lasso_points: Vec::new(),
+            circle_select_radius: 35.0,
+            circle_select_active: false,
             pointer_state: PointerInteractionState::Idle,
             pointer_press_pos: None,
             active_vertex: None,

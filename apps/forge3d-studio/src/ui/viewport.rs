@@ -650,6 +650,16 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.editor_state.transform_mode = TransformMode::BoxSelect;
                 app.status_message = "Box Select: Drag over objects to select".to_string();
                 ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::C) {
+                app.editor_state.circle_select_active = !app.editor_state.circle_select_active;
+                if app.editor_state.circle_select_active {
+                    app.editor_state.transform_mode = TransformMode::CircleSelect;
+                    app.status_message = "Circle Select (C): Click/drag to paint-select, MMB/Shift to deselect, Wheel to resize, RMB/Esc to exit".to_string();
+                } else {
+                    app.editor_state.transform_mode = TransformMode::Select;
+                    app.status_message = "Exited Circle Select".to_string();
+                }
+                ui.ctx().request_repaint();
             }
         } else if input.modifiers.alt && input.key_pressed(Key::A) {
             app.deselect_all();
@@ -657,6 +667,26 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         } else if (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(Key::I) {
             app.invert_selection();
             ui.ctx().request_repaint();
+        }
+
+        // Exit Circle Select on Escape or RMB
+        if app.editor_state.circle_select_active
+            && (input.key_pressed(Key::Escape) || input.pointer.secondary_clicked())
+        {
+            app.editor_state.circle_select_active = false;
+            app.editor_state.transform_mode = TransformMode::Select;
+            app.status_message = "Exited Circle Select".to_string();
+            ui.ctx().request_repaint();
+        }
+
+        // Resize Circle Select radius with mouse scroll
+        if app.editor_state.circle_select_active && is_pointer_in_viewport {
+            let scroll = input.smooth_scroll_delta.y;
+            if scroll != 0.0 {
+                app.editor_state.circle_select_radius =
+                    (app.editor_state.circle_select_radius + scroll * 0.25).clamp(10.0, 300.0);
+                ui.ctx().request_repaint();
+            }
         }
 
         // Tool Selector (Q, W, E, R, Shift+R)
@@ -1201,6 +1231,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         app.editor_state.pointer_state = PointerInteractionState::Idle;
         app.editor_state.pointer_press_pos = None;
         app.editor_state.box_select_start = None;
+        app.editor_state.lasso_points.clear();
         app.gizmo_state.drag_state = None;
     }
 
@@ -1564,6 +1595,14 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         && !modal_consumed_click
         && !input.modifiers.alt
     {
+        // Support Blender signature Ctrl+RMB to start Lasso Select
+        let ctrl_rmb_pressed = (input.modifiers.ctrl || input.modifiers.command)
+            && input.pointer.button_pressed(PointerButton::Secondary);
+        if ctrl_rmb_pressed && is_pointer_in_viewport && !is_ui_interacting && let Some(pos) = mouse_pos {
+            app.editor_state.pointer_state = PointerInteractionState::LassoSelecting;
+            app.editor_state.lasso_points = vec![Vec2::new(pos.x, pos.y)];
+        }
+
         // A. Pointer Press Transition (Determine interaction state)
         if lmb_pressed
             && is_pointer_in_viewport
@@ -1572,6 +1611,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         {
             if gizmo_consumed {
                 app.editor_state.pointer_state = PointerInteractionState::GizmoDragging;
+            } else if app.editor_state.circle_select_active
+                || app.editor_state.transform_mode == TransformMode::CircleSelect
+            {
+                app.editor_state.pointer_state = PointerInteractionState::CircleSelecting;
+                let deselect = input.modifiers.shift || input.pointer.button_down(PointerButton::Middle);
+                app.circle_select(pos, app.editor_state.circle_select_radius, view_proj, rect, deselect);
+            } else if app.editor_state.transform_mode == TransformMode::LassoSelect {
+                app.editor_state.pointer_state = PointerInteractionState::LassoSelecting;
+                app.editor_state.lasso_points = vec![Vec2::new(pos.x, pos.y)];
             } else if app.editor_state.transform_mode == TransformMode::BoxSelect {
                 app.editor_state.pointer_state = PointerInteractionState::BoxSelecting;
                 app.editor_state.box_select_start = Some(Vec2::new(pos.x, pos.y));
@@ -1893,6 +1941,43 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         }
                     }
                 }
+                PointerInteractionState::LassoSelecting => {
+                    if let Some(curr) = mouse_pos {
+                        let last_p = app.editor_state.lasso_points.last().copied();
+                        if last_p.map_or(true, |lp| lp.distance(Vec2::new(curr.x, curr.y)) > 3.0) {
+                            app.editor_state.lasso_points.push(Vec2::new(curr.x, curr.y));
+                        }
+
+                        if app.editor_state.lasso_points.len() >= 2 {
+                            let pts: Vec<Pos2> = app
+                                .editor_state
+                                .lasso_points
+                                .iter()
+                                .map(|p| Pos2::new(p.x, p.y))
+                                .collect();
+
+                            let stroke = Stroke::new(1.5, Color32::from_rgb(255, 170, 40));
+                            for w in pts.windows(2) {
+                                painter.line_segment([w[0], w[1]], stroke);
+                            }
+                            if pts.len() >= 3 {
+                                painter.line_segment(
+                                    [*pts.last().unwrap(), *pts.first().unwrap()],
+                                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 170, 40, 100)),
+                                );
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                    }
+                }
+                PointerInteractionState::CircleSelecting => {
+                    if let Some(curr) = mouse_pos {
+                        let deselect = input.modifiers.shift || input.pointer.button_down(PointerButton::Middle);
+                        let r = app.editor_state.circle_select_radius;
+                        app.circle_select(curr, r, view_proj, rect, deselect);
+                        ui.ctx().request_repaint();
+                    }
+                }
                 _ => {}
             }
         }
@@ -2044,8 +2129,29 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         }
 
+        // Circle Select Reticle
+        if (app.editor_state.circle_select_active
+            || app.editor_state.transform_mode == TransformMode::CircleSelect)
+            && is_pointer_in_viewport
+            && let Some(pos) = mouse_pos
+        {
+            let radius_px = app.editor_state.circle_select_radius;
+            let fill_color = Color32::from_rgba_unmultiplied(255, 180, 40, 25);
+            let stroke_color = if lmb_down {
+                Color32::from_rgb(255, 130, 20)
+            } else {
+                Color32::from_rgb(255, 190, 40)
+            };
+            painter.circle_filled(pos, radius_px, fill_color);
+            painter.circle_stroke(pos, radius_px, Stroke::new(1.5, stroke_color));
+            painter.circle_filled(pos, 2.0, Color32::from_rgb(255, 210, 60));
+        }
+
         // C. Pointer Release Handling
-        if lmb_released {
+        let secondary_released = input.pointer.button_released(PointerButton::Secondary);
+        if lmb_released
+            || (app.editor_state.pointer_state == PointerInteractionState::LassoSelecting && secondary_released)
+        {
             if app.editor_state.edit_mode == EditMode::Sculpt {
                 if let Some(old_mesh) = app.sculpt_stroke_initial_mesh.take() {
                     if let Some((active_id, edit_mesh)) = &app.active_edit_mesh {
@@ -2112,6 +2218,24 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     }
                     app.editor_state.pointer_state = PointerInteractionState::Idle;
                 }
+                PointerInteractionState::LassoSelecting => {
+                    if app.editor_state.lasso_points.len() >= 3 {
+                        let pts: Vec<Pos2> = app
+                            .editor_state
+                            .lasso_points
+                            .iter()
+                            .map(|p| Pos2::new(p.x, p.y))
+                            .collect();
+                        app.lasso_select(&pts, view_proj, rect, input.modifiers.shift);
+                        ui.ctx().request_repaint();
+                    }
+                    app.editor_state.lasso_points.clear();
+                    app.editor_state.pointer_state = PointerInteractionState::Idle;
+                }
+                PointerInteractionState::CircleSelecting => {
+                    app.editor_state.pointer_state = PointerInteractionState::Idle;
+                    ui.ctx().request_repaint();
+                }
                 _ => {
                     app.object_drag_state = None;
                     app.editor_state.pointer_state = PointerInteractionState::Idle;
@@ -2143,7 +2267,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             )
         }
     };
-    let tool_str = format!("{:?}", app.editor_state.transform_mode);
+    let tool_str = if app.editor_state.circle_select_active {
+        format!("CircleSelect (R: {:.0}px)", app.editor_state.circle_select_radius)
+    } else {
+        format!("{:?}", app.editor_state.transform_mode)
+    };
     let proj_str = match app.camera.projection {
         CameraProjection::Perspective => "Perspective",
         CameraProjection::Orthographic => "Orthographic",
