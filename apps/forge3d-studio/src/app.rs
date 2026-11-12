@@ -2328,6 +2328,12 @@ impl Forge3dStudioApp {
                 initial_offsets.insert(id, obj.local_transform.translation - hit_point);
             }
         }
+        if let Some(aid) = self.selection.active_id {
+            if let Some(obj) = self.scene.get_object(aid) {
+                initial_transforms.insert(aid, obj.local_transform);
+                initial_offsets.insert(aid, obj.local_transform.translation - hit_point);
+            }
+        }
 
         self.object_drag_state = Some(ObjectDragState {
             initial_hit_point: hit_point,
@@ -4862,5 +4868,99 @@ mod tests {
         app.toggle_nav_widget();
         assert!(app.editor_state.show_nav_widget);
         assert_eq!(app.status_message, "Navigation Widget: ON");
+    }
+
+    #[test]
+    fn test_multi_object_box_select_and_drag_manipulation() {
+        use forge_geometry::primitives::generate_capsule;
+        use forge_math::Transform;
+        use forge_scene::{PrimitiveType, SceneObject};
+
+        let mut app = Forge3dStudioApp::new_headless();
+
+        // 1. Add Capsule to scene
+        let capsule_mesh = generate_capsule(0.5, 1.0, 16, 8);
+        let capsule = SceneObject::new("Capsule", PrimitiveType::Capsule, capsule_mesh)
+            .with_transform(Transform::from_translation(Vec3::new(2.0, 1.0, 0.0)));
+        let capsule_id = app.scene.add_object(capsule);
+
+        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        let ground_id = app.scene.objects.values().find(|o| o.name == "Ground Plane").unwrap().id;
+
+        let view_proj = app.camera.view_proj_matrix();
+        let viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
+
+        // 2. Box select covering foreground objects (Cube, Sphere, Capsule)
+        let large_box = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
+        app.box_select(large_box, view_proj, viewport_rect, false);
+
+        // Ground Plane is not selectable; Cube, Sphere, Capsule must all be selected!
+        assert_eq!(app.selection.selected_ids.len(), 3);
+        assert!(app.selection.is_selected(cube_id));
+        assert!(app.selection.is_selected(sphere_id));
+        assert!(app.selection.is_selected(capsule_id));
+        assert!(!app.selection.is_selected(ground_id));
+
+        // 3. Shift-select toggle: deselect sphere
+        app.selection.toggle_selection(sphere_id);
+        assert_eq!(app.selection.selected_ids.len(), 2);
+        assert!(!app.selection.is_selected(sphere_id));
+        assert!(app.selection.is_selected(cube_id));
+        assert!(app.selection.is_selected(capsule_id));
+
+        // Shift-select toggle: re-select sphere
+        app.selection.toggle_selection(sphere_id);
+        assert_eq!(app.selection.selected_ids.len(), 3);
+        assert!(app.selection.is_selected(sphere_id));
+
+        // 4. Test multi-object free drag manipulation
+        let cube_initial_pos = app.scene.get_object(cube_id).unwrap().local_transform.translation;
+        let sphere_initial_pos = app.scene.get_object(sphere_id).unwrap().local_transform.translation;
+        let capsule_initial_pos = app.scene.get_object(capsule_id).unwrap().local_transform.translation;
+
+        let hit_point = Vec3::new(0.0, 0.5, 0.0);
+        app.start_object_drag(hit_point, cube_id, Vec2::new(500.0, 500.0), true);
+
+        let delta = Vec3::new(3.0, 1.5, -2.0);
+        // Apply delta to drag state
+        if let Some(drag) = &mut app.object_drag_state {
+            for (&id, &init_tf) in &drag.initial_transforms {
+                if let Some(obj) = app.scene.get_object_mut(id) {
+                    obj.local_transform.translation = init_tf.translation + delta;
+                }
+            }
+        }
+        let drag_clone = app.object_drag_state.take().unwrap();
+        app.commit_object_drag(&drag_clone);
+
+        // All 3 selected objects must have translated by delta
+        assert_eq!(
+            app.scene.get_object(cube_id).unwrap().local_transform.translation,
+            cube_initial_pos + delta
+        );
+        assert_eq!(
+            app.scene.get_object(sphere_id).unwrap().local_transform.translation,
+            sphere_initial_pos + delta
+        );
+        assert_eq!(
+            app.scene.get_object(capsule_id).unwrap().local_transform.translation,
+            capsule_initial_pos + delta
+        );
+
+        // 5. Test Undo: reverts all 3 objects in a single history step
+        app.undo();
+        assert_eq!(
+            app.scene.get_object(cube_id).unwrap().local_transform.translation,
+            cube_initial_pos
+        );
+        assert_eq!(
+            app.scene.get_object(sphere_id).unwrap().local_transform.translation,
+            sphere_initial_pos
+        );
+        assert_eq!(
+            app.scene.get_object(capsule_id).unwrap().local_transform.translation,
+            capsule_initial_pos
+        );
     }
 }

@@ -1172,8 +1172,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     let lmb_down = input.pointer.button_down(PointerButton::Primary);
     let lmb_released = input.pointer.button_released(PointerButton::Primary);
 
-    // Safety & Focus Loss handling: if primary mouse button is released, reset interaction state
-    if !lmb_down && app.editor_state.pointer_state != PointerInteractionState::Idle {
+    // Safety & Focus Loss handling: if primary mouse button is released without a release event (e.g. window lost focus), reset interaction state
+    if !lmb_down && !lmb_released && app.editor_state.pointer_state != PointerInteractionState::Idle {
         if let Some(drag) = app.object_drag_state.take()
             && drag.is_active_drag
         {
@@ -1320,6 +1320,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     for &id in &app.selection.selected_ids {
                         if let Some(obj) = app.scene.get_object(id) {
                             app.gizmo_initial_transforms.insert(id, obj.local_transform);
+                        }
+                    }
+                    if let Some(aid) = app.selection.active_id {
+                        if let Some(obj) = app.scene.get_object(aid) {
+                            app.gizmo_initial_transforms.insert(aid, obj.local_transform);
                         }
                     }
                 }
@@ -2015,13 +2020,18 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 }
                 PointerInteractionState::ObjectPressed => {
                     if let Some(drag) = app.object_drag_state.take()
-                        && drag.was_already_selected
-                        && !input.modifiers.shift
                         && let Some(pressed_id) = drag.pressed_object_id
                     {
-                        app.selection.select(pressed_id);
-                        if let Some(obj) = app.scene.get_object(pressed_id) {
-                            app.status_message = format!("Selected: {}", obj.name);
+                        if input.modifiers.shift && drag.was_already_selected {
+                            app.selection.toggle_selection(pressed_id);
+                            if let Some(obj) = app.scene.get_object(pressed_id) {
+                                app.status_message = format!("Deselected: {}", obj.name);
+                            }
+                        } else if drag.was_already_selected && !input.modifiers.shift {
+                            app.selection.select(pressed_id);
+                            if let Some(obj) = app.scene.get_object(pressed_id) {
+                                app.status_message = format!("Selected: {}", obj.name);
+                            }
                         }
                     }
                     app.editor_state.pointer_state = PointerInteractionState::Idle;
@@ -2040,15 +2050,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     {
                         let start_pos = Pos2::new(start.x, start.y);
                         let box_rect = Rect::from_two_pos(start_pos, curr);
-                        if box_rect.width() > 5.0 || box_rect.height() > 5.0 {
+                        if box_rect.width() > 3.0 || box_rect.height() > 3.0 {
                             app.box_select(box_rect, view_proj, rect, input.modifiers.shift);
                             ui.ctx().request_repaint();
                         }
                     }
                     app.editor_state.pointer_state = PointerInteractionState::Idle;
-                    if app.editor_state.transform_mode == TransformMode::BoxSelect {
-                        app.editor_state.transform_mode = TransformMode::Translate;
-                    }
                 }
                 _ => {
                     app.object_drag_state = None;
