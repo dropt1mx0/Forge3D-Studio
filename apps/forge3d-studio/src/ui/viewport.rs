@@ -2203,6 +2203,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     if ui.checkbox(&mut app.editor_state.show_origins, "Object Origins").changed() {
                         ui.ctx().request_repaint();
                     }
+                    if ui.checkbox(&mut app.editor_state.show_nav_widget, "Navigation Controls").changed() {
+                        ui.ctx().request_repaint();
+                    }
                     ui.separator();
                     ui.label(egui::RichText::new("Geometry & Shading").color(Color32::from_rgb(180, 190, 210)));
                     if ui.checkbox(&mut app.editor_state.show_wireframe, "Wireframe").changed() {
@@ -2688,53 +2691,16 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     }
 
-    // Quick Navigation Buttons (Zoom, Pan, Camera, Ortho/Persp, X-Ray, Local View)
-    let btn_start_y = compass_center.y + compass_radius + 10.0;
-    let btn_size = egui::vec2(24.0, 24.0);
-    let nav_btn_x = compass_center.x - btn_size.x / 2.0;
+    // Collapsible Viewport Navigation Controls Widget (Zoom, Pan, Camera, Ortho/Persp, X-Ray, Local View)
+    if app.editor_state.show_nav_widget {
+        let toggle_size = egui::vec2(48.0, 20.0);
+        let toggle_x = compass_center.x - toggle_size.x / 2.0;
+        let toggle_y = compass_center.y + compass_radius + 8.0;
+        let toggle_rect = Rect::from_min_size(egui::pos2(toggle_x, toggle_y), toggle_size);
+        let toggle_resp = ui.allocate_rect(toggle_rect, Sense::click());
 
-    let xray_tooltip = if app.editor_state.show_xray {
-        "Toggle X-Ray Mode (Alt+Z) [Active]"
-    } else {
-        "Toggle X-Ray Mode (Alt+Z)"
-    };
-
-    let local_tooltip = if app.is_in_local_view() {
-        "Exit Local View (Numpad / or /) [Active]"
-    } else {
-        "Isolate Selected / Local View (Numpad / or /)"
-    };
-
-    let nav_buttons = [
-        ("🔍", "Zoom View (Drag up/down)"),
-        ("✋", "Pan View (Drag)"),
-        ("🎥", "Toggle Camera View (Numpad 0)"),
-        ("🎯", "Frame Selected (Focus / Numpad .)"),
-        (
-            match app.camera.projection {
-                CameraProjection::Perspective => "◬",
-                CameraProjection::Orthographic => "⊞",
-            },
-            "Toggle Perspective / Orthographic (Numpad 5)",
-        ),
-        ("⛶", xray_tooltip),
-        ("🔲", local_tooltip),
-    ];
-
-    for (idx, (icon, tooltip)) in nav_buttons.iter().enumerate() {
-        let btn_rect = Rect::from_min_size(
-            egui::pos2(nav_btn_x, btn_start_y + idx as f32 * 27.0),
-            btn_size,
-        );
-        let resp = ui.allocate_rect(btn_rect, Sense::click_and_drag());
-        let is_hover = resp.hovered();
-        let is_active_xray = idx == 5 && app.editor_state.show_xray;
-        let is_active_local = idx == 6 && app.is_in_local_view();
-        let bg = if is_active_xray {
-            Color32::from_rgb(45, 115, 225)
-        } else if is_active_local {
-            Color32::from_rgb(215, 120, 20)
-        } else if is_hover {
+        let is_toggle_hover = toggle_resp.hovered();
+        let toggle_bg = if is_toggle_hover {
             if is_light {
                 Color32::from_rgb(220, 226, 240)
             } else {
@@ -2743,76 +2709,170 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         } else if is_light {
             Color32::from_rgb(240, 243, 250)
         } else {
-            Color32::from_rgb(26, 28, 36)
+            Color32::from_rgba_unmultiplied(26, 28, 36, 220)
         };
 
         painter.rect(
-            btn_rect,
-            egui::CornerRadius::same(5),
-            bg,
+            toggle_rect,
+            egui::CornerRadius::same(4),
+            toggle_bg,
             Stroke::new(
                 1.0,
-                if is_active_xray {
-                    Color32::from_rgb(100, 165, 255)
-                } else if is_active_local {
-                    Color32::from_rgb(255, 175, 70)
-                } else if is_light {
+                if is_light {
                     Color32::from_rgb(205, 212, 225)
                 } else {
-                    Color32::from_rgb(45, 50, 62)
+                    Color32::from_rgb(50, 56, 70)
                 },
             ),
             egui::StrokeKind::Inside,
         );
         painter.text(
-            btn_rect.center(),
+            toggle_rect.center(),
             egui::Align2::CENTER_CENTER,
-            *icon,
-            egui::FontId::proportional(11.5),
-            if is_active_xray || is_active_local {
-                Color32::WHITE
-            } else if is_hover {
-                if is_light {
-                    Color32::BLACK
-                } else {
-                    Color32::WHITE
-                }
+            if app.nav_widget_expanded { "Nav ▾" } else { "Nav ▸" },
+            egui::FontId::proportional(10.5),
+            if is_toggle_hover {
+                if is_light { Color32::BLACK } else { Color32::WHITE }
             } else if is_light {
                 Color32::from_rgb(60, 68, 85)
             } else {
-                Color32::from_rgb(180, 185, 200)
+                Color32::from_rgb(180, 190, 210)
             },
         );
 
-        let resp = resp.on_hover_text(*tooltip);
+        let toggle_resp = toggle_resp.on_hover_text("Toggle Viewport Navigation Controls (Also in Left Toolbar)");
+        if toggle_resp.clicked() {
+            app.nav_widget_expanded = !app.nav_widget_expanded;
+            ui.ctx().request_repaint();
+        }
 
-        if idx == 0 && resp.dragged() {
-            let dy = input.pointer.delta().y;
-            app.camera.zoom(1.0 - dy * 0.02);
-            ui.ctx().request_repaint();
-        } else if idx == 1 && resp.dragged() {
-            let delta = input.pointer.delta();
-            app.camera.pan(delta.x, delta.y);
-            ui.ctx().request_repaint();
-        } else if idx == 2 && resp.clicked() {
-            app.toggle_camera_view();
-            ui.ctx().request_repaint();
-        } else if idx == 3 && resp.clicked() {
-            app.frame_selected();
-            ui.ctx().request_repaint();
-        } else if idx == 4 && resp.clicked() {
-            app.camera.projection = match app.camera.projection {
-                CameraProjection::Perspective => CameraProjection::Orthographic,
-                CameraProjection::Orthographic => CameraProjection::Perspective,
+        if app.nav_widget_expanded {
+            let btn_start_y = toggle_y + toggle_size.y + 4.0;
+            let btn_size = egui::vec2(48.0, 20.0);
+            let nav_btn_x = toggle_x;
+
+            let xray_tooltip = if app.editor_state.show_xray {
+                "Toggle X-Ray Mode (Alt+Z) [Active]"
+            } else {
+                "Toggle X-Ray Mode (Alt+Z)"
             };
-            app.status_message = format!("Projection: {:?}", app.camera.projection);
-            ui.ctx().request_repaint();
-        } else if idx == 5 && resp.clicked() {
-            app.toggle_xray();
-            ui.ctx().request_repaint();
-        } else if idx == 6 && resp.clicked() {
-            app.toggle_local_view();
-            ui.ctx().request_repaint();
+
+            let local_tooltip = if app.is_in_local_view() {
+                "Exit Local View (Numpad / or /) [Active]"
+            } else {
+                "Isolate Selected / Local View (Numpad / or /)"
+            };
+
+            let nav_buttons = [
+                ("Zoom", "Zoom View (Drag up/down)"),
+                ("Pan", "Pan View (Drag)"),
+                ("Cam", "Toggle Camera View (Numpad 0)"),
+                ("Focus", "Frame Selected (Focus / F)"),
+                (
+                    match app.camera.projection {
+                        CameraProjection::Perspective => "Ortho",
+                        CameraProjection::Orthographic => "Persp",
+                    },
+                    "Toggle Perspective / Orthographic (Numpad 5)",
+                ),
+                ("X-Ray", xray_tooltip),
+                ("Local", local_tooltip),
+            ];
+
+            for (idx, (label, tooltip)) in nav_buttons.iter().enumerate() {
+                let btn_rect = Rect::from_min_size(
+                    egui::pos2(nav_btn_x, btn_start_y + idx as f32 * 23.0),
+                    btn_size,
+                );
+                let resp = ui.allocate_rect(btn_rect, Sense::click_and_drag());
+                let is_hover = resp.hovered();
+                let is_active_xray = idx == 5 && app.editor_state.show_xray;
+                let is_active_local = idx == 6 && app.is_in_local_view();
+                let bg = if is_active_xray {
+                    Color32::from_rgb(45, 115, 225)
+                } else if is_active_local {
+                    Color32::from_rgb(215, 120, 20)
+                } else if is_hover {
+                    if is_light {
+                        Color32::from_rgb(220, 226, 240)
+                    } else {
+                        Color32::from_rgb(45, 50, 65)
+                    }
+                } else if is_light {
+                    Color32::from_rgb(240, 243, 250)
+                } else {
+                    Color32::from_rgba_unmultiplied(26, 28, 36, 220)
+                };
+
+                painter.rect(
+                    btn_rect,
+                    egui::CornerRadius::same(4),
+                    bg,
+                    Stroke::new(
+                        1.0,
+                        if is_active_xray {
+                            Color32::from_rgb(100, 165, 255)
+                        } else if is_active_local {
+                            Color32::from_rgb(255, 175, 70)
+                        } else if is_light {
+                            Color32::from_rgb(205, 212, 225)
+                        } else {
+                            Color32::from_rgb(45, 50, 62)
+                        },
+                    ),
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    btn_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    *label,
+                    egui::FontId::proportional(10.0),
+                    if is_active_xray || is_active_local {
+                        Color32::WHITE
+                    } else if is_hover {
+                        if is_light {
+                            Color32::BLACK
+                        } else {
+                            Color32::WHITE
+                        }
+                    } else if is_light {
+                        Color32::from_rgb(60, 68, 85)
+                    } else {
+                        Color32::from_rgb(180, 185, 200)
+                    },
+                );
+
+                let resp = resp.on_hover_text(*tooltip);
+
+                if idx == 0 && resp.dragged() {
+                    let dy = input.pointer.delta().y;
+                    app.camera.zoom(1.0 - dy * 0.02);
+                    ui.ctx().request_repaint();
+                } else if idx == 1 && resp.dragged() {
+                    let delta = input.pointer.delta();
+                    app.camera.pan(delta.x, delta.y);
+                    ui.ctx().request_repaint();
+                } else if idx == 2 && resp.clicked() {
+                    app.toggle_camera_view();
+                    ui.ctx().request_repaint();
+                } else if idx == 3 && resp.clicked() {
+                    app.frame_selected();
+                    ui.ctx().request_repaint();
+                } else if idx == 4 && resp.clicked() {
+                    app.camera.projection = match app.camera.projection {
+                        CameraProjection::Perspective => CameraProjection::Orthographic,
+                        CameraProjection::Orthographic => CameraProjection::Perspective,
+                    };
+                    app.status_message = format!("Projection: {:?}", app.camera.projection);
+                    ui.ctx().request_repaint();
+                } else if idx == 5 && resp.clicked() {
+                    app.toggle_xray();
+                    ui.ctx().request_repaint();
+                } else if idx == 6 && resp.clicked() {
+                    app.toggle_local_view();
+                    ui.ctx().request_repaint();
+                }
+            }
         }
     }
 
@@ -3240,7 +3300,7 @@ fn render_pie_menu_overlay(
             vec![
                 PieSlice {
                     angle: -std::f32::consts::FRAC_PI_2,
-                    icon: "✏",
+                    icon: "✎",
                     label: "Edit Mode",
                     subtext: "Tab",
                     action: PieMenuAction::SetEditMode(EditMode::Edit),
@@ -3248,7 +3308,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_2,
-                    icon: "🧊",
+                    icon: "◻",
                     label: "Object Mode",
                     subtext: "4",
                     action: PieMenuAction::SetEditMode(EditMode::Object),
@@ -3256,7 +3316,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::PI,
-                    icon: "🏺",
+                    icon: "✦",
                     label: "Sculpt Mode",
                     subtext: "6",
                     action: PieMenuAction::SetEditMode(EditMode::Sculpt),
@@ -3269,7 +3329,7 @@ fn render_pie_menu_overlay(
             vec![
                 PieSlice {
                     angle: -std::f32::consts::FRAC_PI_2,
-                    icon: "⚪",
+                    icon: "◉",
                     label: "Studio (PBR)",
                     subtext: "8",
                     action: PieMenuAction::SetMatcap(ViewportMatcap::Studio),
@@ -3277,7 +3337,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_2,
-                    icon: "🕸",
+                    icon: "◇",
                     label: "Wireframe",
                     subtext: "4",
                     action: PieMenuAction::SetShadingWireframe(!app.editor_state.show_wireframe),
@@ -3285,7 +3345,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: 0.0,
-                    icon: "🏺",
+                    icon: "◐",
                     label: "Matcap Clay",
                     subtext: "6",
                     action: PieMenuAction::SetMatcap(ViewportMatcap::Clay),
@@ -3293,7 +3353,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::PI,
-                    icon: "🪞",
+                    icon: "◎",
                     label: "Matcap Chrome",
                     subtext: "2",
                     action: PieMenuAction::SetMatcap(ViewportMatcap::Chrome),
@@ -3301,7 +3361,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: -std::f32::consts::FRAC_PI_4,
-                    icon: "🌈",
+                    icon: "◈",
                     label: "Matcap Normal",
                     subtext: "9",
                     action: PieMenuAction::SetMatcap(ViewportMatcap::Normal),
@@ -3309,7 +3369,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_4,
-                    icon: "✨",
+                    icon: "✧",
                     label: "Matcap Pearl",
                     subtext: "3",
                     action: PieMenuAction::SetMatcap(ViewportMatcap::Pearl),
@@ -3317,7 +3377,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: -std::f32::consts::FRAC_PI_4 * 3.0,
-                    icon: "🎨",
+                    icon: "◫",
                     label: "Material Preview",
                     subtext: "7",
                     action: PieMenuAction::OpenMaterialEditor,
@@ -3325,7 +3385,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_4 * 3.0,
-                    icon: "⛶",
+                    icon: "⬚",
                     label: "Toggle X-Ray",
                     subtext: "Alt+Z",
                     action: PieMenuAction::ToggleXRay,
@@ -3346,7 +3406,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: 0.0,
-                    icon: "🔘",
+                    icon: "◉",
                     label: "Active Element",
                     subtext: "6",
                     action: PieMenuAction::SetPivotPoint(PivotPoint::ActiveElement),
@@ -3354,7 +3414,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_2,
-                    icon: "🎯",
+                    icon: "⌖",
                     label: "3D Cursor",
                     subtext: "2",
                     action: PieMenuAction::SetPivotPoint(PivotPoint::Cursor3D),
@@ -3375,7 +3435,7 @@ fn render_pie_menu_overlay(
             vec![
                 PieSlice {
                     angle: -std::f32::consts::FRAC_PI_2,
-                    icon: "🎯",
+                    icon: "⌖",
                     label: "Cursor to Selected",
                     subtext: "8",
                     action: PieMenuAction::CursorToSelected,
@@ -3383,7 +3443,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_2,
-                    icon: "📍",
+                    icon: "⤓",
                     label: "Selection to Cursor",
                     subtext: "2",
                     action: PieMenuAction::SelectionToCursor,
@@ -3391,7 +3451,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::PI,
-                    icon: "🌐",
+                    icon: "⊚",
                     label: "Cursor to Origin",
                     subtext: "4",
                     action: PieMenuAction::CursorToWorldOrigin,
@@ -3399,7 +3459,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: 0.0,
-                    icon: "📐",
+                    icon: "⊞",
                     label: "Selection to Grid",
                     subtext: "6",
                     action: PieMenuAction::SelectionToGrid,
@@ -3407,7 +3467,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: -std::f32::consts::FRAC_PI_4,
-                    icon: "📏",
+                    icon: "▦",
                     label: "Cursor to Grid",
                     subtext: "9",
                     action: PieMenuAction::CursorToGrid,
@@ -3420,7 +3480,7 @@ fn render_pie_menu_overlay(
             vec![
                 PieSlice {
                     angle: -std::f32::consts::FRAC_PI_2,
-                    icon: "🗺",
+                    icon: "◫",
                     label: "Smart UV Project",
                     subtext: "8",
                     action: PieMenuAction::SmartUvProject,
@@ -3428,7 +3488,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: 0.0,
-                    icon: "📦",
+                    icon: "◻",
                     label: "Cube / Box Project",
                     subtext: "6",
                     action: PieMenuAction::BoxUvProject,
@@ -3436,7 +3496,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_2,
-                    icon: "🌐",
+                    icon: "◯",
                     label: "Sphere Project",
                     subtext: "2",
                     action: PieMenuAction::SphereUvProject,
@@ -3444,7 +3504,7 @@ fn render_pie_menu_overlay(
                 },
                 PieSlice {
                     angle: std::f32::consts::PI,
-                    icon: "🛢",
+                    icon: "⌸",
                     label: "Cylinder Project",
                     subtext: "4",
                     action: PieMenuAction::CylinderUvProject,

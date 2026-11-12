@@ -1,4 +1,5 @@
 use egui::Ui;
+use forge_render::CameraProjection;
 use forge_geometry::primitives::{
     generate_capsule, generate_cube, generate_cylinder, generate_monkey, generate_plane,
     generate_uv_sphere,
@@ -605,6 +606,74 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         PivotPoint::IndividualOrigins => PivotPoint::MedianPoint,
                     };
                     app.status_message = format!("Pivot Point: {:?}", app.editor_state.pivot_point);
+                }
+
+                ui.add_space(4.0);
+                ui.separator();
+
+                // --- 6. Navigation & View ---
+                if display_mode == ToolbarDisplayMode::IconAndLabel {
+                    ui.label(egui::RichText::new("Navigation").weak().size(11.0));
+                }
+
+                // Zoom button (drag up/down to zoom view)
+                let zoom_resp = tool_button(ui, false, "Zoom", "Zoom View", "Drag", display_mode);
+                if zoom_resp.dragged() {
+                    let dy = ui.input(|i| i.pointer.delta().y);
+                    app.camera.zoom(1.0 - dy * 0.02);
+                    ui.ctx().request_repaint();
+                }
+
+                // Pan button (drag to pan view)
+                let pan_resp = tool_button(ui, false, "Pan", "Pan View", "Drag", display_mode);
+                if pan_resp.dragged() {
+                    let delta = ui.input(|i| i.pointer.delta());
+                    app.camera.pan(delta.x, delta.y);
+                    ui.ctx().request_repaint();
+                }
+
+                // Camera view toggle
+                if tool_button(ui, false, "Cam", "Camera View", "Num 0", display_mode).clicked() {
+                    app.toggle_camera_view();
+                }
+
+                // Focus / Frame Selected
+                if tool_button(ui, false, "Focus", "Frame Selected", "F", display_mode).clicked() {
+                    app.frame_selected();
+                }
+
+                // Perspective / Orthographic toggle
+                let (proj_icon, proj_label) = match app.camera.projection {
+                    CameraProjection::Perspective => ("Ortho", "Orthographic View"),
+                    CameraProjection::Orthographic => ("Persp", "Perspective View"),
+                };
+                if tool_button(ui, false, proj_icon, proj_label, "Num 5", display_mode).clicked() {
+                    app.camera.projection = match app.camera.projection {
+                        CameraProjection::Perspective => CameraProjection::Orthographic,
+                        CameraProjection::Orthographic => CameraProjection::Perspective,
+                    };
+                    app.status_message = format!("Projection: {:?}", app.camera.projection);
+                }
+
+                // X-Ray Mode
+                let is_xray = app.editor_state.show_xray;
+                if tool_button(ui, is_xray, "X-Ray", "X-Ray Mode", "Alt+Z", display_mode).clicked() {
+                    app.toggle_xray();
+                }
+
+                // Local View / Isolate Selected
+                let is_local = app.is_in_local_view();
+                if tool_button(
+                    ui,
+                    is_local,
+                    "Local",
+                    "Local View (Isolate)",
+                    "Num /",
+                    display_mode,
+                )
+                .clicked()
+                {
+                    app.toggle_local_view();
                 }
             });
         });

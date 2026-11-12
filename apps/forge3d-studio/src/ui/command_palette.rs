@@ -899,7 +899,7 @@ pub fn render_command_palette(app: &mut Forge3dStudioApp, ctx: &egui::Context) {
         .fixed_size(egui::vec2(520.0, 360.0))
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("🔍").size(16.0));
+                ui.label(egui::RichText::new("⌕").size(16.0));
                 let search_input = ui.add(
                     egui::TextEdit::singleline(&mut app.command_palette_query)
                         .hint_text("Search operator or command (e.g. Cube, Bevel, Extrude)...")

@@ -185,6 +185,9 @@ pub struct Forge3dStudioApp {
     /// Viewport Overlays popover dropdown menu open state.
     pub show_overlays_dropdown: bool,
 
+    /// Viewport navigation widget expanded/collapsed state.
+    pub nav_widget_expanded: bool,
+
     /// Blender-style Outliner search, restriction toggles, and filter settings.
     pub outliner_filter: OutlinerFilterSettings,
 
@@ -444,6 +447,7 @@ impl Forge3dStudioApp {
             pending_hover_pick: None,
             local_view_saved_visibility: None,
             show_overlays_dropdown: false,
+            nav_widget_expanded: false,
             outliner_filter: OutlinerFilterSettings::default(),
             interactive_edit_tool: None,
         }
@@ -499,6 +503,7 @@ impl Forge3dStudioApp {
             pending_hover_pick: None,
             local_view_saved_visibility: None,
             show_overlays_dropdown: false,
+            nav_widget_expanded: false,
             outliner_filter: OutlinerFilterSettings::default(),
             interactive_edit_tool: None,
         }
@@ -2527,6 +2532,14 @@ impl Forge3dStudioApp {
         self.status_message = format!(
             "Viewport Overlays: {}",
             if self.editor_state.show_overlays { "ON" } else { "OFF" }
+        );
+    }
+
+    pub fn toggle_nav_widget(&mut self) {
+        self.editor_state.show_nav_widget = !self.editor_state.show_nav_widget;
+        self.status_message = format!(
+            "Navigation Widget: {}",
+            if self.editor_state.show_nav_widget { "ON" } else { "OFF" }
         );
     }
 
@@ -4827,5 +4840,27 @@ mod tests {
             app.scene.get_object(cube_id).unwrap().mesh.indices.len(),
             pre_loop_indices
         );
+    }
+
+    #[test]
+    fn test_navigation_toolbar_and_viewport_collapsible_widget() {
+        let mut app = Forge3dStudioApp::new_headless();
+
+        // Defaults: navigation widget visible in viewport but collapsed into a compact [Nav ▸] header
+        assert!(app.editor_state.show_nav_widget);
+        assert!(!app.nav_widget_expanded);
+
+        // Toggle expanded state
+        app.nav_widget_expanded = true;
+        assert!(app.nav_widget_expanded);
+
+        // Toggle visibility via toggle_nav_widget
+        app.toggle_nav_widget();
+        assert!(!app.editor_state.show_nav_widget);
+        assert_eq!(app.status_message, "Navigation Widget: OFF");
+
+        app.toggle_nav_widget();
+        assert!(app.editor_state.show_nav_widget);
+        assert_eq!(app.status_message, "Navigation Widget: ON");
     }
 }

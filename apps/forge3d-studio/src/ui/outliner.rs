@@ -76,7 +76,7 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         let search_width = (ui.available_width() - 80.0).max(80.0);
         let search_response = ui.add(
             egui::TextEdit::singleline(&mut app.outliner_filter.search_query)
-                .hint_text("🔍 Search...")
+                .hint_text("⌕ Search...")
                 .desired_width(search_width),
         );
         if search_response.on_hover_text("Search objects by name (case-insensitive)").has_focus() {
