@@ -94,11 +94,16 @@ pub fn voxel_remesh(mesh: &Mesh, voxel_size: f32) -> Mesh {
     };
 
     // 2. Track cells near surface: (x, y, z) -> (closest_point_sum, count, min_dist_sq, avg_normal)
-    let mut surface_cells: HashMap<(usize, usize, usize), (Vec3, f32, f32, Vec3)> = HashMap::new();
+    type SurfaceCellData = (Vec3, f32, f32, Vec3);
+    let mut surface_cells: HashMap<(usize, usize, usize), SurfaceCellData> = HashMap::new();
     let threshold_sq = (voxel_size * 0.85) * (voxel_size * 0.85);
 
-    for tri_chunk in mesh.indices.chunks_exact(3) {
-        let (i0, i1, i2) = (tri_chunk[0] as usize, tri_chunk[1] as usize, tri_chunk[2] as usize);
+    for tri_chunk in mesh.indices.as_chunks::<3>().0 {
+        let (i0, i1, i2) = (
+            tri_chunk[0] as usize,
+            tri_chunk[1] as usize,
+            tri_chunk[2] as usize,
+        );
         if i0 >= mesh.vertices.len() || i1 >= mesh.vertices.len() || i2 >= mesh.vertices.len() {
             continue;
         }
@@ -112,12 +117,18 @@ pub fn voxel_remesh(mesh: &Mesh, voxel_size: f32) -> Mesh {
 
         let tri_normal = (p1 - p0).cross(p2 - p0).normalize_or_zero();
 
-        let gx0 = (((tri_min.x - origin.x) / voxel_size).floor() as isize).clamp(0, dim_x as isize - 1) as usize;
-        let gx1 = (((tri_max.x - origin.x) / voxel_size).ceil() as isize).clamp(0, dim_x as isize - 1) as usize;
-        let gy0 = (((tri_min.y - origin.y) / voxel_size).floor() as isize).clamp(0, dim_y as isize - 1) as usize;
-        let gy1 = (((tri_max.y - origin.y) / voxel_size).ceil() as isize).clamp(0, dim_y as isize - 1) as usize;
-        let gz0 = (((tri_min.z - origin.z) / voxel_size).floor() as isize).clamp(0, dim_z as isize - 1) as usize;
-        let gz1 = (((tri_max.z - origin.z) / voxel_size).ceil() as isize).clamp(0, dim_z as isize - 1) as usize;
+        let gx0 = (((tri_min.x - origin.x) / voxel_size).floor() as isize)
+            .clamp(0, dim_x as isize - 1) as usize;
+        let gx1 = (((tri_max.x - origin.x) / voxel_size).ceil() as isize)
+            .clamp(0, dim_x as isize - 1) as usize;
+        let gy0 = (((tri_min.y - origin.y) / voxel_size).floor() as isize)
+            .clamp(0, dim_y as isize - 1) as usize;
+        let gy1 = (((tri_max.y - origin.y) / voxel_size).ceil() as isize)
+            .clamp(0, dim_y as isize - 1) as usize;
+        let gz0 = (((tri_min.z - origin.z) / voxel_size).floor() as isize)
+            .clamp(0, dim_z as isize - 1) as usize;
+        let gz1 = (((tri_max.z - origin.z) / voxel_size).ceil() as isize)
+            .clamp(0, dim_z as isize - 1) as usize;
 
         for z in gz0..=gz1 {
             for y in gy0..=gy1 {
@@ -151,7 +162,8 @@ pub fn voxel_remesh(mesh: &Mesh, voxel_size: f32) -> Mesh {
 
     // 3. Generate vertices from active cells
     let mut out_vertices: Vec<Vertex> = Vec::with_capacity(surface_cells.len());
-    let mut cell_to_vert_idx: HashMap<(usize, usize, usize), u32> = HashMap::with_capacity(surface_cells.len());
+    let mut cell_to_vert_idx: HashMap<(usize, usize, usize), u32> =
+        HashMap::with_capacity(surface_cells.len());
 
     for (&(x, y, z), &(cp_sum, count, _, norm_sum)) in &surface_cells {
         let pos = cp_sum / count.max(1.0);
@@ -180,35 +192,36 @@ pub fn voxel_remesh(mesh: &Mesh, voxel_size: f32) -> Mesh {
     // 4. Generate Quads (as two triangles each) across adjacent 2x2 cell faces
     let mut out_indices: Vec<u32> = Vec::new();
 
-    let add_quad = |v0: u32, v1: u32, v2: u32, v3: u32, indices: &mut Vec<u32>, verts: &[Vertex]| {
-        let p0 = Vec3::from_array(verts[v0 as usize].position);
-        let p1 = Vec3::from_array(verts[v1 as usize].position);
-        let p2 = Vec3::from_array(verts[v2 as usize].position);
+    let add_quad =
+        |v0: u32, v1: u32, v2: u32, v3: u32, indices: &mut Vec<u32>, verts: &[Vertex]| {
+            let p0 = Vec3::from_array(verts[v0 as usize].position);
+            let p1 = Vec3::from_array(verts[v1 as usize].position);
+            let p2 = Vec3::from_array(verts[v2 as usize].position);
 
-        let n = (p1 - p0).cross(p2 - p0);
-        let avg_n = Vec3::from_array(verts[v0 as usize].normal)
-            + Vec3::from_array(verts[v1 as usize].normal)
-            + Vec3::from_array(verts[v2 as usize].normal)
-            + Vec3::from_array(verts[v3 as usize].normal);
+            let n = (p1 - p0).cross(p2 - p0);
+            let avg_n = Vec3::from_array(verts[v0 as usize].normal)
+                + Vec3::from_array(verts[v1 as usize].normal)
+                + Vec3::from_array(verts[v2 as usize].normal)
+                + Vec3::from_array(verts[v3 as usize].normal);
 
-        if n.dot(avg_n) >= 0.0 {
-            indices.push(v0);
-            indices.push(v1);
-            indices.push(v2);
+            if n.dot(avg_n) >= 0.0 {
+                indices.push(v0);
+                indices.push(v1);
+                indices.push(v2);
 
-            indices.push(v0);
-            indices.push(v2);
-            indices.push(v3);
-        } else {
-            indices.push(v0);
-            indices.push(v2);
-            indices.push(v1);
+                indices.push(v0);
+                indices.push(v2);
+                indices.push(v3);
+            } else {
+                indices.push(v0);
+                indices.push(v2);
+                indices.push(v1);
 
-            indices.push(v0);
-            indices.push(v3);
-            indices.push(v2);
-        }
-    };
+                indices.push(v0);
+                indices.push(v3);
+                indices.push(v2);
+            }
+        };
 
     for &(x, y, z) in cell_to_vert_idx.keys() {
         let v000 = cell_to_vert_idx.get(&(x, y, z)).copied();
@@ -249,7 +262,7 @@ pub fn voxel_remesh(mesh: &Mesh, voxel_size: f32) -> Mesh {
 
     // 5. Recompute smooth averaged normals
     let mut smooth_normals = vec![Vec3::ZERO; out_vertices.len()];
-    for chunk in out_indices.chunks_exact(3) {
+    for chunk in out_indices.as_chunks::<3>().0 {
         let (i0, i1, i2) = (chunk[0] as usize, chunk[1] as usize, chunk[2] as usize);
         let p0 = Vec3::from_array(out_vertices[i0].position);
         let p1 = Vec3::from_array(out_vertices[i1].position);

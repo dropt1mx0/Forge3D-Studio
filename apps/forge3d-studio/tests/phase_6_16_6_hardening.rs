@@ -591,9 +591,9 @@ fn benchmark_full_frame_cpu_vs_gpu_10k_50k_100k() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
-        matcap_mode: 0,
-        xray: false,
-        xray_alpha: 0.5,
+            matcap_mode: 0,
+            xray: false,
+            xray_alpha: 0.5,
         };
 
         // Warmup frame
@@ -735,9 +735,15 @@ fn benchmark_full_frame_cpu_vs_gpu_10k_50k_100k() {
         );
 
         // Verification assertions:
+        #[cfg(not(debug_assertions))]
         assert!(
             avg_frame < 35.0,
             "Full frame must sustain >= 30 FPS even on 100k mesh on Intel HD 4000"
+        );
+        #[cfg(debug_assertions)]
+        assert!(
+            avg_frame < 500.0,
+            "Full frame in debug mode must complete under 500ms"
         );
     }
     println!(
@@ -786,9 +792,9 @@ fn test_runtime_stress_scenarios() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
-        matcap_mode: 0,
-        xray: false,
-        xray_alpha: 0.5,
+            matcap_mode: 0,
+            xray: false,
+            xray_alpha: 0.5,
         };
         renderer.render_with_edit_mesh(
             &ctx.device,
@@ -886,9 +892,9 @@ fn test_runtime_stress_scenarios() {
                 draw_vertices: false,
                 is_vertex_mode: false,
                 active_vertex: None,
-        matcap_mode: 0,
-        xray: false,
-        xray_alpha: 0.5,
+                matcap_mode: 0,
+                xray: false,
+                xray_alpha: 0.5,
             },
         );
         assert!(renderer.edit_mesh_buffers.is_none());
@@ -902,9 +908,9 @@ fn test_runtime_stress_scenarios() {
             draw_vertices: !toggle,
             is_vertex_mode: true,
             active_vertex: None,
-        matcap_mode: 0,
-        xray: false,
-        xray_alpha: 0.5,
+            matcap_mode: 0,
+            xray: false,
+            xray_alpha: 0.5,
         };
         renderer.render_with_edit_mesh(
             &ctx.device,

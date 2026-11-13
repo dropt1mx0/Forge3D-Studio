@@ -30,7 +30,11 @@ impl TransformKeyframe {
         }
     }
 
-    pub fn with_interpolation(frame: u32, transform: Transform, interpolation: KeyframeInterpolation) -> Self {
+    pub fn with_interpolation(
+        frame: u32,
+        transform: Transform,
+        interpolation: KeyframeInterpolation,
+    ) -> Self {
         Self {
             frame,
             transform,
@@ -97,9 +101,7 @@ impl ObjectAnimationTrack {
         }
 
         // Find the bracket [k0, k1] where k0.frame <= frame <= k1.frame
-        let idx = self
-            .keyframes
-            .partition_point(|k| (k.frame as f32) < frame);
+        let idx = self.keyframes.partition_point(|k| (k.frame as f32) < frame);
         let k1 = &self.keyframes[idx];
         let k0 = &self.keyframes[idx - 1];
 
@@ -346,9 +348,15 @@ mod tests {
         assert!((half.x - 5.0).abs() < 1e-4);
         assert!((half.y - 10.0).abs() < 1e-4);
         // At end
-        assert_eq!(track.evaluate(10.0).unwrap().translation, Vec3::new(10.0, 20.0, 0.0));
+        assert_eq!(
+            track.evaluate(10.0).unwrap().translation,
+            Vec3::new(10.0, 20.0, 0.0)
+        );
         // After end
-        assert_eq!(track.evaluate(15.0).unwrap().translation, Vec3::new(10.0, 20.0, 0.0));
+        assert_eq!(
+            track.evaluate(15.0).unwrap().translation,
+            Vec3::new(10.0, 20.0, 0.0)
+        );
     }
 
     #[test]

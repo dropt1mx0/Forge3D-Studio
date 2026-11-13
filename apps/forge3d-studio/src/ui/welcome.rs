@@ -1,5 +1,5 @@
-use eframe::egui;
 use crate::app::Forge3dStudioApp;
+use eframe::egui;
 
 fn format_relative_time(timestamp: u64) -> String {
     let now = std::time::SystemTime::now()
@@ -28,7 +28,9 @@ fn format_relative_time(timestamp: u64) -> String {
 fn pill_button(ui: &mut egui::Ui, text: &str, is_light: bool) -> egui::Response {
     let padding = egui::vec2(20.0, 9.0);
     let font_id = egui::FontId::proportional(12.5);
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE);
+    let galley =
+        ui.painter()
+            .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE);
     let desired_size = galley.size() + padding * 2.0;
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
@@ -74,7 +76,9 @@ fn pill_button(ui: &mut egui::Ui, text: &str, is_light: bool) -> egui::Response 
         rect.center().x - galley.size().x / 2.0,
         rect.center().y - galley.size().y / 2.0,
     );
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font_id, text_color);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), font_id, text_color);
     ui.painter().galley(text_pos, galley, text_color);
 
     response
@@ -166,7 +170,9 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                     exit_rect.center().x - text_galley.size().x / 2.0,
                     exit_rect.center().y - text_galley.size().y / 2.0,
                 );
-                let galley = ui.painter().layout_no_wrap(exit_text.to_string(), font_id, exit_fg);
+                let galley = ui
+                    .painter()
+                    .layout_no_wrap(exit_text.to_string(), font_id, exit_fg);
                 ui.painter().galley(text_pos, galley, exit_fg);
 
                 if exit_resp.on_hover_text("Close Forge3D Studio").clicked() {
@@ -187,7 +193,8 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                         egui::Color32::WHITE,
                     );
                     let btn_size = theme_galley.size() + egui::vec2(22.0, 10.0);
-                    let (theme_rect, theme_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+                    let (theme_rect, theme_resp) =
+                        ui.allocate_exact_size(btn_size, egui::Sense::click());
 
                     let (theme_bg, theme_border, theme_fg) = if theme_resp.hovered() {
                         if is_light {
@@ -230,7 +237,9 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                         theme_rect.center().x - theme_galley.size().x / 2.0,
                         theme_rect.center().y - theme_galley.size().y / 2.0,
                     );
-                    let galley = ui.painter().layout_no_wrap(full_theme_text.to_string(), font_id, theme_fg);
+                    let galley =
+                        ui.painter()
+                            .layout_no_wrap(full_theme_text.to_string(), font_id, theme_fg);
                     ui.painter().galley(text_pos, galley, theme_fg);
 
                     if theme_resp
@@ -272,14 +281,12 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                     if let Some(glow_tex) = &app.glow_texture {
                         let glow_size = egui::vec2(220.0, 220.0);
                         let glow_rect = egui::Rect::from_center_size(glow_center, glow_size);
-                        egui::Image::new((glow_tex.id(), glow_size))
-                            .paint_at(ui, glow_rect);
+                        egui::Image::new((glow_tex.id(), glow_size)).paint_at(ui, glow_rect);
                     }
                 }
 
                 if let Some(mascot_tex) = &app.mascot_texture {
-                    egui::Image::new((mascot_tex.id(), mascot_size))
-                        .paint_at(ui, rect);
+                    egui::Image::new((mascot_tex.id(), mascot_size)).paint_at(ui, rect);
                 }
 
                 // Generous, breathable spacing between mascot and first text
@@ -388,7 +395,7 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                                     for item in recent_projects.iter().take(6) {
                                         let item_path = item.path.clone();
                                         let (row_rect, row_resp) = ui.allocate_exact_size(
-                                             egui::vec2(list_width, 36.0),
+                                            egui::vec2(list_width, 36.0),
                                             egui::Sense::click(),
                                         );
 
@@ -429,7 +436,8 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                                         );
 
                                         // Left: project name
-                                        let name_pos = row_rect.left_center() + egui::vec2(14.0, -7.0);
+                                        let name_pos =
+                                            row_rect.left_center() + egui::vec2(14.0, -7.0);
                                         let name_galley = ui.painter().layout_no_wrap(
                                             item.name.clone(),
                                             egui::FontId::proportional(12.5),
@@ -476,10 +484,14 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
 
                                         // Remove button (✕)
                                         let remove_rect = egui::Rect::from_center_size(
-                                            egui::pos2(row_rect.right() - 18.0, row_rect.center().y),
+                                            egui::pos2(
+                                                row_rect.right() - 18.0,
+                                                row_rect.center().y,
+                                            ),
                                             egui::vec2(18.0, 18.0),
                                         );
-                                        let remove_resp = ui.allocate_rect(remove_rect, egui::Sense::click());
+                                        let remove_resp =
+                                            ui.allocate_rect(remove_rect, egui::Sense::click());
                                         if remove_resp.hovered() {
                                             ui.painter().rect_filled(
                                                 remove_rect,
@@ -508,7 +520,8 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
                                                 }
                                             },
                                         );
-                                        let remove_text_pos = remove_rect.center() - remove_galley.size() / 2.0;
+                                        let remove_text_pos =
+                                            remove_rect.center() - remove_galley.size() / 2.0;
                                         ui.painter().galley(
                                             remove_text_pos,
                                             remove_galley,
@@ -579,7 +592,10 @@ pub fn render_welcome_hub(app: &mut Forge3dStudioApp, ui: &mut egui::Ui) {
 
     if action_import {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("3D Models (OBJ, glTF, STL, PLY)", &["obj", "gltf", "glb", "stl", "ply"])
+            .add_filter(
+                "3D Models (OBJ, glTF, STL, PLY)",
+                &["obj", "gltf", "glb", "stl", "ply"],
+            )
             .set_title("Import 3D Model")
             .pick_file()
         {

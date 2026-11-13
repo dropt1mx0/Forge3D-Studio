@@ -121,27 +121,33 @@ pub fn render_and_interact_gizmo(
     // Dynamic 3D world-space length that scales in perspective together with the object and camera zoom
     let base_world_len = (1.15 * base_scale.clamp(0.2, 50.0)).clamp(0.4, 50.0);
 
-    let up_hint = if (camera_eye - pivot_world).normalize_or_zero().dot(Vec3::Y).abs() > 0.9 {
+    let up_hint = if (camera_eye - pivot_world)
+        .normalize_or_zero()
+        .dot(Vec3::Y)
+        .abs()
+        > 0.9
+    {
         Vec3::X
     } else {
         Vec3::Y
     };
     let test_pos = pivot_world + up_hint * base_world_len;
-    let gizmo_3d_len = if let Some(s_test) = world_to_screen_pos(test_pos, camera_view_proj, viewport_rect) {
-        let current_screen_len = (s_test - center_screen).length();
-        if current_screen_len < 26.0 {
-            // Far distance fallback: maintain at least 26px on screen so user can still easily hit-test and click it
-            base_world_len * (26.0 / current_screen_len.max(0.01))
-        } else if current_screen_len > 340.0 {
-            // Extreme close-up clamp: cap at 340px so handles stay within screen bounds
-            base_world_len * (340.0 / current_screen_len)
+    let gizmo_3d_len =
+        if let Some(s_test) = world_to_screen_pos(test_pos, camera_view_proj, viewport_rect) {
+            let current_screen_len = (s_test - center_screen).length();
+            if current_screen_len < 26.0 {
+                // Far distance fallback: maintain at least 26px on screen so user can still easily hit-test and click it
+                base_world_len * (26.0 / current_screen_len.max(0.01))
+            } else if current_screen_len > 340.0 {
+                // Extreme close-up clamp: cap at 340px so handles stay within screen bounds
+                base_world_len * (340.0 / current_screen_len)
+            } else {
+                // 1:1 true 3D world-space scaling with camera zoom
+                base_world_len
+            }
         } else {
-            // 1:1 true 3D world-space scaling with camera zoom
             base_world_len
-        }
-    } else {
-        base_world_len
-    };
+        };
 
     // Orientation basis vectors
     let (axis_x, axis_y, axis_z) = match orientation {

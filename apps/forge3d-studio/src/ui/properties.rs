@@ -4,7 +4,9 @@ use forge_modifiers::{
     ArrayModifier, BevelModifier, DecimateModifier, DisplaceModifier, MirrorModifier, ModifierType,
     SolidifyModifier, SubdivisionModifier, WeightedNormalModifier,
 };
-use forge_scene::{CameraData, CameraProjectionType, EditMode, PrimitiveType, TransformOrientation};
+use forge_scene::{
+    CameraData, CameraProjectionType, EditMode, PrimitiveType, TransformOrientation,
+};
 
 use crate::app::Forge3dStudioApp;
 
@@ -41,10 +43,16 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.label("Name:");
                 ui.text_edit_singleline(&mut obj.name);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let sel_label = if obj.selectable { "[Selectable]" } else { "[Unselectable]" };
+                    let sel_label = if obj.selectable {
+                        "[Selectable]"
+                    } else {
+                        "[Unselectable]"
+                    };
                     if ui
                         .selectable_label(obj.selectable, sel_label)
-                        .on_hover_text("Toggle Viewport Selectability (Exclude from Box Select / Click)")
+                        .on_hover_text(
+                            "Toggle Viewport Selectability (Exclude from Box Select / Click)",
+                        )
                         .clicked()
                     {
                         obj.selectable = !obj.selectable;
@@ -610,7 +618,10 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             add_modifier_type =
                                 Some(ModifierType::Mirror(MirrorModifier::default()));
                         }
-                        if ui.selectable_label(false, "▦ Subdivision Surface").clicked() {
+                        if ui
+                            .selectable_label(false, "▦ Subdivision Surface")
+                            .clicked()
+                        {
                             add_modifier_type =
                                 Some(ModifierType::Subdivide(SubdivisionModifier::default()));
                         }
@@ -641,12 +652,21 @@ pub fn render_properties(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                 if !obj.modifiers.is_empty() {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Clear All").on_hover_text("Remove all modifiers from stack").clicked() {
+                        if ui
+                            .button("Clear All")
+                            .on_hover_text("Remove all modifiers from stack")
+                            .clicked()
+                        {
                             clear_all_mods = true;
                         }
                         let in_edit = app.editor_state.edit_mode == EditMode::Edit;
-                        if ui.add_enabled(!in_edit, egui::Button::new("Apply All"))
-                            .on_hover_text(if in_edit { "Cannot apply modifiers in Edit Mode" } else { "Bake all active modifiers sequentially into base mesh" })
+                        if ui
+                            .add_enabled(!in_edit, egui::Button::new("Apply All"))
+                            .on_hover_text(if in_edit {
+                                "Cannot apply modifiers in Edit Mode"
+                            } else {
+                                "Bake all active modifiers sequentially into base mesh"
+                            })
                             .clicked()
                         {
                             apply_all_mods = true;

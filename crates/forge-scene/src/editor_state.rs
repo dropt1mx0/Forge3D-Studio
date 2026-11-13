@@ -288,7 +288,9 @@ impl PanelSettings {
         {
             if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
                 if !xdg.trim().is_empty() {
-                    return std::path::PathBuf::from(xdg).join("forge3d").join(Self::SETTINGS_FILE);
+                    return std::path::PathBuf::from(xdg)
+                        .join("forge3d")
+                        .join(Self::SETTINGS_FILE);
                 }
             }
             if let Ok(home) = std::env::var("HOME") {
@@ -301,7 +303,9 @@ impl PanelSettings {
 
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         if let Ok(home) = std::env::var("HOME") {
-            let dir = std::path::PathBuf::from(home).join(".config").join("forge3d");
+            let dir = std::path::PathBuf::from(home)
+                .join(".config")
+                .join("forge3d");
             return dir.join(Self::SETTINGS_FILE);
         }
 

@@ -238,12 +238,24 @@ fn render_canvas(
     let grid_stroke = Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 12));
     let mut x = start_x;
     while x < canvas_rect.max.x {
-        painter.line_segment([Pos2::new(x, canvas_rect.min.y), Pos2::new(x, canvas_rect.max.y)], grid_stroke);
+        painter.line_segment(
+            [
+                Pos2::new(x, canvas_rect.min.y),
+                Pos2::new(x, canvas_rect.max.y),
+            ],
+            grid_stroke,
+        );
         x += grid_spacing;
     }
     let mut y = start_y;
     while y < canvas_rect.max.y {
-        painter.line_segment([Pos2::new(canvas_rect.min.x, y), Pos2::new(canvas_rect.max.x, y)], grid_stroke);
+        painter.line_segment(
+            [
+                Pos2::new(canvas_rect.min.x, y),
+                Pos2::new(canvas_rect.max.x, y),
+            ],
+            grid_stroke,
+        );
         y += grid_spacing;
     }
 
@@ -423,15 +435,21 @@ fn render_canvas(
             // Interaction on input socket pin
             if let Some(pos) = pointer_pos {
                 if pos.distance(socket_center) <= 10.0 * zoom {
-                    painter.circle_stroke(socket_center, pin_radius + 2.0, Stroke::new(1.5, Color32::WHITE));
+                    painter.circle_stroke(
+                        socket_center,
+                        pin_radius + 2.0,
+                        Stroke::new(1.5, Color32::WHITE),
+                    );
 
                     // Click to connect or disconnect
                     if ui.input(|i| i.pointer.primary_clicked() || i.pointer.primary_released()) {
                         if let Some(from) = &app.shader_editor_state.connecting_from {
-                            pending_connect = Some((from.clone(), NodeSocketRef::new(node_id, input.id.clone())));
+                            pending_connect =
+                                Some((from.clone(), NodeSocketRef::new(node_id, input.id.clone())));
                         } else if has_conn {
                             // Disconnect input
-                            pending_disconnect = Some(NodeSocketRef::new(node_id, input.id.clone()));
+                            pending_disconnect =
+                                Some(NodeSocketRef::new(node_id, input.id.clone()));
                         }
                     }
                 }
@@ -464,10 +482,15 @@ fn render_canvas(
             // Interaction on output socket pin
             if let Some(pos) = pointer_pos {
                 if pos.distance(socket_center) <= 10.0 * zoom {
-                    painter.circle_stroke(socket_center, pin_radius + 2.0, Stroke::new(1.5, Color32::WHITE));
+                    painter.circle_stroke(
+                        socket_center,
+                        pin_radius + 2.0,
+                        Stroke::new(1.5, Color32::WHITE),
+                    );
 
                     if ui.input(|i| i.pointer.primary_clicked()) {
-                        app.shader_editor_state.connecting_from = Some(NodeSocketRef::new(node_id, output.id.clone()));
+                        app.shader_editor_state.connecting_from =
+                            Some(NodeSocketRef::new(node_id, output.id.clone()));
                     }
                 }
             }
@@ -674,13 +697,7 @@ fn find_socket_pos(
     Some(Pos2::new(x, y))
 }
 
-fn draw_bezier_wire(
-    painter: &egui::Painter,
-    p1: Pos2,
-    p2: Pos2,
-    color: Color32,
-    width: f32,
-) {
+fn draw_bezier_wire(painter: &egui::Painter, p1: Pos2, p2: Pos2, color: Color32, width: f32) {
     let dx = (p2.x - p1.x).abs().max(40.0) * 0.5;
     let c1 = p1 + Vec2::new(dx, 0.0);
     let c2 = p2 - Vec2::new(dx, 0.0);
@@ -694,11 +711,7 @@ fn draw_bezier_wire(
     painter.add(bezier);
 }
 
-fn render_wgsl_drawer(
-    app: &mut crate::app::Forge3dStudioApp,
-    ui: &mut egui::Ui,
-    height: f32,
-) {
+fn render_wgsl_drawer(app: &mut crate::app::Forge3dStudioApp, ui: &mut egui::Ui, height: f32) {
     if app.shader_editor_state.wgsl_dirty || app.shader_editor_state.cached_wgsl.is_empty() {
         app.shader_editor_state.cached_wgsl = app.active_shader_graph.compile_to_wgsl();
         app.shader_editor_state.wgsl_dirty = false;
@@ -718,7 +731,8 @@ fn render_wgsl_drawer(
         };
 
         if ui.button(copy_label).clicked() {
-            ui.ctx().copy_text(app.shader_editor_state.cached_wgsl.clone());
+            ui.ctx()
+                .copy_text(app.shader_editor_state.cached_wgsl.clone());
             app.shader_editor_state.last_copied_time = Some(Instant::now());
             app.status_message = "WGSL shader code copied to clipboard".into();
         }

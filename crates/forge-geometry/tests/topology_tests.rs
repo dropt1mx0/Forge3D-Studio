@@ -1,5 +1,5 @@
 use forge_geometry::topology::*;
-use forge_geometry::{generate_cube, EditableMesh};
+use forge_geometry::{EditableMesh, generate_cube};
 use forge_math::Vec3;
 
 #[test]
@@ -167,16 +167,13 @@ fn test_non_manifold_mesh_builder_rejection() {
 fn test_non_manifold_vertex_detection() {
     // Hourglass configuration: two triangles touching at apex vertex 0
     let positions = vec![
-        Vec3::new(0.0, 0.0, 0.0),  // 0 shared apex
-        Vec3::new(-1.0, 1.0, 0.0), // 1
+        Vec3::new(0.0, 0.0, 0.0),   // 0 shared apex
+        Vec3::new(-1.0, 1.0, 0.0),  // 1
         Vec3::new(-1.0, -1.0, 0.0), // 2
-        Vec3::new(1.0, 1.0, 0.0),  // 3
-        Vec3::new(1.0, -1.0, 0.0), // 4
+        Vec3::new(1.0, 1.0, 0.0),   // 3
+        Vec3::new(1.0, -1.0, 0.0),  // 4
     ];
-    let faces = vec![
-        vec![0, 1, 2],
-        vec![0, 3, 4],
-    ];
+    let faces = vec![vec![0, 1, 2], vec![0, 3, 4]];
 
     let mesh = TopologyBuilder::build(&positions, &faces).expect("Built hourglass mesh");
     let report = mesh.validate_topology();
@@ -254,12 +251,7 @@ fn test_vertex_adjacency() {
         Vec3::new(-1.0, 1.0, -1.0),
         Vec3::new(1.0, -1.0, -1.0),
     ];
-    let faces = vec![
-        vec![0, 1, 2],
-        vec![0, 2, 3],
-        vec![0, 3, 1],
-        vec![1, 3, 2],
-    ];
+    let faces = vec![vec![0, 1, 2], vec![0, 2, 3], vec![0, 3, 1], vec![1, 3, 2]];
     let mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
     let v0 = mesh.vertices().next().unwrap();
@@ -303,9 +295,15 @@ fn test_face_adjacency_and_geometry() {
 fn test_edge_loop_traversal() {
     // 2x2 quad plane: 9 vertices, 4 quads
     let positions = vec![
-        Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0),
-        Vec3::new(0.0, 1.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(2.0, 1.0, 0.0),
-        Vec3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 2.0, 0.0), Vec3::new(2.0, 2.0, 0.0),
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(2.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(1.0, 1.0, 0.0),
+        Vec3::new(2.0, 1.0, 0.0),
+        Vec3::new(0.0, 2.0, 0.0),
+        Vec3::new(1.0, 2.0, 0.0),
+        Vec3::new(2.0, 2.0, 0.0),
     ];
     let faces = vec![
         vec![0, 1, 4, 3],
@@ -316,10 +314,13 @@ fn test_edge_loop_traversal() {
     let mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
     // Edge between (3, 4)
-    let e = mesh.edges().find(|&eh| {
-        let (v0, v1) = mesh.edge_vertices(eh).unwrap();
-        (v0.index() == 3 && v1.index() == 4) || (v0.index() == 4 && v1.index() == 3)
-    }).unwrap();
+    let e = mesh
+        .edges()
+        .find(|&eh| {
+            let (v0, v1) = mesh.edge_vertices(eh).unwrap();
+            (v0.index() == 3 && v1.index() == 4) || (v0.index() == 4 && v1.index() == 3)
+        })
+        .unwrap();
 
     let loop_edges = mesh.edge_loop(e);
     assert!(loop_edges.len() >= 2);
@@ -329,9 +330,15 @@ fn test_edge_loop_traversal() {
 fn test_edge_ring_traversal() {
     // 2x2 quad plane
     let positions = vec![
-        Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0),
-        Vec3::new(0.0, 1.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(2.0, 1.0, 0.0),
-        Vec3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 2.0, 0.0), Vec3::new(2.0, 2.0, 0.0),
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(2.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(1.0, 1.0, 0.0),
+        Vec3::new(2.0, 1.0, 0.0),
+        Vec3::new(0.0, 2.0, 0.0),
+        Vec3::new(1.0, 2.0, 0.0),
+        Vec3::new(2.0, 2.0, 0.0),
     ];
     let faces = vec![
         vec![0, 1, 4, 3],
@@ -355,22 +362,21 @@ fn test_shortest_edge_and_vertex_path() {
         Vec3::new(-1.0, 1.0, -1.0),
         Vec3::new(1.0, -1.0, -1.0),
     ];
-    let faces = vec![
-        vec![0, 1, 2],
-        vec![0, 2, 3],
-        vec![0, 3, 1],
-        vec![1, 3, 2],
-    ];
+    let faces = vec![vec![0, 1, 2], vec![0, 2, 3], vec![0, 3, 1], vec![1, 3, 2]];
     let mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
     let v_list: Vec<_> = mesh.vertices().collect();
     let v_start = v_list[0];
     let v_goal = v_list[1];
 
-    let edge_path = mesh.shortest_edge_path(v_start, v_goal).expect("Path exists");
+    let edge_path = mesh
+        .shortest_edge_path(v_start, v_goal)
+        .expect("Path exists");
     assert_eq!(edge_path.len(), 1);
 
-    let vert_path = mesh.shortest_vertex_path(v_start, v_goal).expect("Path exists");
+    let vert_path = mesh
+        .shortest_vertex_path(v_start, v_goal)
+        .expect("Path exists");
     assert_eq!(vert_path.len(), 2);
     assert_eq!(vert_path[0], v_start);
     assert_eq!(vert_path[1], v_goal);
@@ -469,9 +475,10 @@ fn test_edge_flip() {
     let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
     // Find the interior shared edge (0, 2)
-    let shared_edge = mesh.edges().find(|&eh| {
-        !mesh.is_edge_boundary(eh)
-    }).expect("Shared edge exists");
+    let shared_edge = mesh
+        .edges()
+        .find(|&eh| !mesh.is_edge_boundary(eh))
+        .expect("Shared edge exists");
 
     mesh.flip_edge(shared_edge).expect("Flip edge failed");
 
@@ -521,10 +528,7 @@ fn test_face_merge() {
         Vec3::new(2.0, 2.0, 0.0),
         Vec3::new(0.0, 2.0, 0.0),
     ];
-    let faces = vec![
-        vec![0, 1, 2],
-        vec![0, 2, 3],
-    ];
+    let faces = vec![vec![0, 1, 2], vec![0, 2, 3]];
     let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
     let shared_edge = mesh.edges().find(|&eh| !mesh.is_edge_boundary(eh)).unwrap();
@@ -547,10 +551,7 @@ fn test_remove_face_topological() {
         Vec3::new(2.0, 2.0, 0.0),
         Vec3::new(0.0, 2.0, 0.0),
     ];
-    let faces = vec![
-        vec![0, 1, 2],
-        vec![0, 2, 3],
-    ];
+    let faces = vec![vec![0, 1, 2], vec![0, 2, 3]];
     let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
     let f_to_remove = mesh.faces().next().unwrap();
@@ -578,7 +579,8 @@ fn test_remove_isolated_vertex() {
     assert_eq!(report.isolated_vertices.len(), 1);
 
     let v_isolated = report.isolated_vertices[0];
-    mesh.remove_isolated_vertex(v_isolated).expect("Remove isolated vertex failed");
+    mesh.remove_isolated_vertex(v_isolated)
+        .expect("Remove isolated vertex failed");
 
     assert_eq!(mesh.num_vertices(), 3);
     let report_after = mesh.validate_topology();
@@ -627,8 +629,14 @@ fn test_preservation_of_uv_seams_and_hard_normals() {
     for he_h in half_edge_mesh.half_edges() {
         let he = half_edge_mesh.half_edge(he_h).unwrap();
         if he.face.is_some() {
-            assert!(he.uv.is_some(), "Corner UV should be preserved on face half-edge");
-            assert!(he.normal.is_some(), "Corner normal should be preserved on face half-edge");
+            assert!(
+                he.uv.is_some(),
+                "Corner UV should be preserved on face half-edge"
+            );
+            assert!(
+                he.normal.is_some(),
+                "Corner normal should be preserved on face half-edge"
+            );
         }
     }
 }
@@ -644,7 +652,10 @@ fn test_invalid_handles_and_generation() {
     let faces = vec![vec![0, 1, 2]];
     let mut mesh = TopologyBuilder::build(&positions, &faces).unwrap();
 
-    let isolated_v = mesh.vertices().find(|&v| mesh.vertex(v).unwrap().half_edge.is_none()).unwrap();
+    let isolated_v = mesh
+        .vertices()
+        .find(|&v| mesh.vertex(v).unwrap().half_edge.is_none())
+        .unwrap();
     let stale_handle = isolated_v;
 
     // Delete vertex, generation counter increments

@@ -59,7 +59,9 @@ pub fn render_status_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             exit_rect.center().x - text_galley.size().x / 2.0,
             exit_rect.center().y - text_galley.size().y / 2.0,
         );
-        let galley = ui.painter().layout_no_wrap(exit_text.to_string(), font_id, exit_fg);
+        let galley = ui
+            .painter()
+            .layout_no_wrap(exit_text.to_string(), font_id, exit_fg);
         ui.painter().galley(text_pos, galley, exit_fg);
 
         let mut action_project_hub = false;

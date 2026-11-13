@@ -19,8 +19,7 @@ fn test_welcome_hub_theme_and_exit() {
     // 2. Toggle Theme
     app.toggle_theme(&ctx);
     assert_eq!(
-        app.editor_state.panel_settings.is_light_theme,
-        !initial_theme,
+        app.editor_state.panel_settings.is_light_theme, !initial_theme,
         "Theme flag must be flipped after toggle_theme"
     );
 
@@ -33,8 +32,7 @@ fn test_welcome_hub_theme_and_exit() {
     // 4. Toggle back
     app.toggle_theme(&ctx);
     assert_eq!(
-        app.editor_state.panel_settings.is_light_theme,
-        initial_theme,
+        app.editor_state.panel_settings.is_light_theme, initial_theme,
         "Theme flag must flip back to original"
     );
 

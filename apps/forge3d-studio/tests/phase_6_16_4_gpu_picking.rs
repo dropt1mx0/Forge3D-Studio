@@ -599,9 +599,15 @@ fn test_gpu_picking_latency_benchmark() {
         avg_latency_ms
     );
 
+    #[cfg(not(debug_assertions))]
     assert!(
         avg_latency_ms < 15.0,
         "GPU Picking round-trip latency must be under 15ms on Intel HD 4000 (measured: {avg_latency_ms:.3}ms)"
+    );
+    #[cfg(debug_assertions)]
+    assert!(
+        avg_latency_ms < 250.0,
+        "GPU Picking round-trip latency in debug mode must be under 250ms (measured: {avg_latency_ms:.3}ms)"
     );
 }
 

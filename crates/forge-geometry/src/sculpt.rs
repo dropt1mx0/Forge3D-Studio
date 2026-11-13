@@ -364,7 +364,10 @@ mod tests {
             .iter()
             .find(|v| v.position.y > 0.1)
             .unwrap();
-        assert!(displaced_v.position.y > 0.1, "Snake Hook must pull vertices along delta");
+        assert!(
+            displaced_v.position.y > 0.1,
+            "Snake Hook must pull vertices along delta"
+        );
 
         // Test ElasticDeform
         let elastic_settings = SculptSettings {
@@ -373,8 +376,13 @@ mod tests {
             strength: 0.5,
             ..Default::default()
         };
-        let affected_elastic =
-            apply_sculpt_stroke(&mut edit_mesh, hit_pt, hit_norm, Vec3::new(0.0, 0.5, 0.0), &elastic_settings);
+        let affected_elastic = apply_sculpt_stroke(
+            &mut edit_mesh,
+            hit_pt,
+            hit_norm,
+            Vec3::new(0.0, 0.5, 0.0),
+            &elastic_settings,
+        );
         assert!(affected_elastic > 0);
     }
 }

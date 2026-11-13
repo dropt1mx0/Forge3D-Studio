@@ -338,7 +338,12 @@ fn test_simulation_selection_tools_all_none_invert_box() {
     let view_proj = app.camera.view_proj_matrix();
     let viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
     // Full screen box must select all visible selectable objects
-    let total_selectable = app.scene.objects.values().filter(|o| o.visible && o.selectable).count();
+    let total_selectable = app
+        .scene
+        .objects
+        .values()
+        .filter(|o| o.visible && o.selectable)
+        .count();
     app.box_select(viewport_rect, view_proj, viewport_rect, false);
     assert_eq!(app.selection.selected_ids.len(), total_selectable);
 }

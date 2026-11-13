@@ -79,7 +79,10 @@ pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 .hint_text("⌕ Search...")
                 .desired_width(search_width),
         );
-        if search_response.on_hover_text("Search objects by name (case-insensitive)").has_focus() {
+        if search_response
+            .on_hover_text("Search objects by name (case-insensitive)")
+            .has_focus()
+        {
             ui.ctx().request_repaint();
         }
 

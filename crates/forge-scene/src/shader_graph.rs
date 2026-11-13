@@ -855,7 +855,8 @@ impl ShaderGraph {
 
     /// Removes a specific connection if it exists.
     pub fn disconnect(&mut self, from: &NodeSocketRef, to: &NodeSocketRef) {
-        self.connections.retain(|c| !(c.from == *from && c.to == *to));
+        self.connections
+            .retain(|c| !(c.from == *from && c.to == *to));
     }
 
     /// Disconnects any wires plugged into the given input socket.
@@ -915,8 +916,10 @@ impl ShaderGraph {
     /// Synchronizes the shader graph's surface values into a standard `PbrMaterial`
     /// for live viewport rendering.
     pub fn evaluate_to_pbr_material(&self) -> PbrMaterial {
-        let mut mat = PbrMaterial::default();
-        mat.name = self.name.clone();
+        let mut mat = PbrMaterial {
+            name: self.name.clone(),
+            ..Default::default()
+        };
 
         // Find MaterialOutput node
         let output_node = self
@@ -953,41 +956,44 @@ impl ShaderGraph {
                             _ => mat.base_color_factor = [0.85, 0.45, 0.2, 1.0],
                         }
                     }
-                } else if let Some(input) = surface_node.inputs.iter().find(|i| i.id == "base_color")
+                } else if let Some(input) =
+                    surface_node.inputs.iter().find(|i| i.id == "base_color")
+                    && let SocketDefaultValue::Color(c) = input.default_value
                 {
-                    if let SocketDefaultValue::Color(c) = input.default_value {
-                        mat.base_color_factor = c;
-                    }
+                    mat.base_color_factor = c;
                 }
 
                 // Metallic
-                if let Some(input) = surface_node.inputs.iter().find(|i| i.id == "metallic") {
-                    if let SocketDefaultValue::Float(v) = input.default_value {
-                        mat.metallic_factor = v;
-                    }
+                if let Some(input) = surface_node.inputs.iter().find(|i| i.id == "metallic")
+                    && let SocketDefaultValue::Float(v) = input.default_value
+                {
+                    mat.metallic_factor = v;
                 }
 
                 // Roughness
-                if let Some(input) = surface_node.inputs.iter().find(|i| i.id == "roughness") {
-                    if let SocketDefaultValue::Float(v) = input.default_value {
-                        mat.roughness_factor = v;
-                    }
+                if let Some(input) = surface_node.inputs.iter().find(|i| i.id == "roughness")
+                    && let SocketDefaultValue::Float(v) = input.default_value
+                {
+                    mat.roughness_factor = v;
                 }
 
                 // Emission
-                if let Some(input) = surface_node.inputs.iter().find(|i| i.id == "emission_color") {
-                    if let SocketDefaultValue::Color(c) = input.default_value {
-                        let strength = surface_node
-                            .inputs
-                            .iter()
-                            .find(|i| i.id == "emission_strength")
-                            .and_then(|i| match i.default_value {
-                                SocketDefaultValue::Float(s) => Some(s),
-                                _ => None,
-                            })
-                            .unwrap_or(0.0);
-                        mat.emissive_factor = [c[0] * strength, c[1] * strength, c[2] * strength];
-                    }
+                if let Some(input) = surface_node
+                    .inputs
+                    .iter()
+                    .find(|i| i.id == "emission_color")
+                    && let SocketDefaultValue::Color(c) = input.default_value
+                {
+                    let strength = surface_node
+                        .inputs
+                        .iter()
+                        .find(|i| i.id == "emission_strength")
+                        .and_then(|i| match i.default_value {
+                            SocketDefaultValue::Float(s) => Some(s),
+                            _ => None,
+                        })
+                        .unwrap_or(0.0);
+                    mat.emissive_factor = [c[0] * strength, c[1] * strength, c[2] * strength];
                 }
             }
             NodeKind::Emission => {
@@ -1027,11 +1033,19 @@ impl ShaderGraph {
         let mut code = String::new();
 
         // 1. Header & Structures
-        code.push_str("// ==========================================================================\n");
-        code.push_str(&format!("// Forge3D Generated WGSL Shader Graph: {}\n", self.name));
-        code.push_str("// ==========================================================================\n\n");
+        code.push_str(
+            "// ==========================================================================\n",
+        );
+        code.push_str(&format!(
+            "// Forge3D Generated WGSL Shader Graph: {}\n",
+            self.name
+        ));
+        code.push_str(
+            "// ==========================================================================\n\n",
+        );
 
-        code.push_str(r#"struct CameraUniform {
+        code.push_str(
+            r#"struct CameraUniform {
     view_proj: mat4x4<f32>,
     camera_pos: vec4<f32>,
 };
@@ -1147,7 +1161,8 @@ fn geometry_smith(n_dot_v: f32, n_dot_l: f32, roughness: f32) -> f32 {
 fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
     return f0 + (1.0 - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }
-"#);
+"#,
+        );
 
         // 2. Fragment entry point with node graph evaluation
         code.push_str("\n@fragment\nfn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {\n");
@@ -1166,7 +1181,12 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
         };
 
         let fmt_vec3 = |v: [f32; 3]| -> String {
-            format!("vec3<f32>({}, {}, {})", fmt_f(v[0]), fmt_f(v[1]), fmt_f(v[2]))
+            format!(
+                "vec3<f32>({}, {}, {})",
+                fmt_f(v[0]),
+                fmt_f(v[1]),
+                fmt_f(v[2])
+            )
         };
 
         let fmt_vec4 = |v: [f32; 4]| -> String {
@@ -1227,7 +1247,11 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
                 }
             };
 
-            code.push_str(&format!("    // Node {}: {}\n", node.id, node.kind.display_name()));
+            code.push_str(&format!(
+                "    // Node {}: {}\n",
+                node.id,
+                node.kind.display_name()
+            ));
 
             match &node.kind {
                 NodeKind::UvMap => {
@@ -1237,14 +1261,8 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
                     ));
                 }
                 NodeKind::Geometry => {
-                    code.push_str(&format!(
-                        "    let node_{}_position = frag_pos;\n",
-                        node.id
-                    ));
-                    code.push_str(&format!(
-                        "    let node_{}_normal = frag_normal;\n",
-                        node.id
-                    ));
+                    code.push_str(&format!("    let node_{}_position = frag_pos;\n", node.id));
+                    code.push_str(&format!("    let node_{}_normal = frag_normal;\n", node.id));
                     code.push_str(&format!(
                         "    let node_{}_uv = vec3<f32>(frag_uv.x, frag_uv.y, 0.0);\n",
                         node.id
@@ -1365,10 +1383,7 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
                         MathOp::Minimum => format!("min({}, {})", a, b),
                         MathOp::Maximum => format!("max({}, {})", a, b),
                     };
-                    code.push_str(&format!(
-                        "    let node_{}_value = {};\n",
-                        node.id, expr
-                    ));
+                    code.push_str(&format!("    let node_{}_value = {};\n", node.id, expr));
                 }
                 NodeKind::VectorMath { op } => {
                     let a = get_input_vector("a");
@@ -1590,18 +1605,18 @@ mod tests {
         assert_eq!(order.len(), 5);
 
         // UvMap must come before NoiseTexture
-        let uv_idx = order.iter().position(|&id| {
-            matches!(graph.find_node(id).unwrap().kind, NodeKind::UvMap)
-        });
-        let noise_idx = order.iter().position(|&id| {
-            matches!(graph.find_node(id).unwrap().kind, NodeKind::NoiseTexture)
-        });
-        let bsdf_idx = order.iter().position(|&id| {
-            matches!(graph.find_node(id).unwrap().kind, NodeKind::PrincipledBsdf)
-        });
-        let output_idx = order.iter().position(|&id| {
-            matches!(graph.find_node(id).unwrap().kind, NodeKind::MaterialOutput)
-        });
+        let uv_idx = order
+            .iter()
+            .position(|&id| matches!(graph.find_node(id).unwrap().kind, NodeKind::UvMap));
+        let noise_idx = order
+            .iter()
+            .position(|&id| matches!(graph.find_node(id).unwrap().kind, NodeKind::NoiseTexture));
+        let bsdf_idx = order
+            .iter()
+            .position(|&id| matches!(graph.find_node(id).unwrap().kind, NodeKind::PrincipledBsdf));
+        let output_idx = order
+            .iter()
+            .position(|&id| matches!(graph.find_node(id).unwrap().kind, NodeKind::MaterialOutput));
 
         assert!(uv_idx < noise_idx);
         assert!(noise_idx < bsdf_idx);
@@ -1645,11 +1660,13 @@ mod tests {
     #[test]
     fn test_connect_and_disconnect() {
         let mut graph = ShaderGraph::default();
-        let math_id = graph.add_node(
-            NodeKind::Math { op: MathOp::Add },
-            [0.0, 0.0],
+        let math_id = graph.add_node(NodeKind::Math { op: MathOp::Add }, [0.0, 0.0]);
+        let val_id = graph.add_node(
+            NodeKind::Value {
+                value: std::f32::consts::PI,
+            },
+            [-100.0, 0.0],
         );
-        let val_id = graph.add_node(NodeKind::Value { value: 3.14 }, [-100.0, 0.0]);
 
         graph.connect(
             NodeSocketRef::new(val_id, "value"),

@@ -17,7 +17,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Forge3D Contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/forge3d/forge3d"
+repository = "https://github.com/dropt1mx0/Forge3D-Studio"
 
 [workspace.dependencies]
 # Internal workspace crates

@@ -62,11 +62,11 @@ impl Scene {
 
         let mut changed = false;
         for (id, animated_tf) in updates {
-            if let Some(obj) = self.objects.get_mut(&id) {
-                if obj.local_transform != animated_tf {
-                    obj.local_transform = animated_tf;
-                    changed = true;
-                }
+            if let Some(obj) = self.objects.get_mut(&id)
+                && obj.local_transform != animated_tf
+            {
+                obj.local_transform = animated_tf;
+                changed = true;
             }
         }
 

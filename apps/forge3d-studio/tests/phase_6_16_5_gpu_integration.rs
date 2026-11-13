@@ -140,9 +140,9 @@ fn test_unified_gpu_resource_lifecycle() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
-        matcap_mode: 0,
-        xray: false,
-        xray_alpha: 0.5,
+            matcap_mode: 0,
+            xray: false,
+            xray_alpha: 0.5,
         };
 
         renderer.render_with_edit_mesh(
@@ -629,9 +629,9 @@ fn benchmark_gpu_vs_cpu_edit_pipeline_10k_50k_100k() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
-        matcap_mode: 0,
-        xray: false,
-        xray_alpha: 0.5,
+            matcap_mode: 0,
+            xray: false,
+            xray_alpha: 0.5,
         };
         let t_upload_start = Instant::now();
         renderer.render_with_edit_mesh(
@@ -658,9 +658,9 @@ fn benchmark_gpu_vs_cpu_edit_pipeline_10k_50k_100k() {
                 draw_vertices: true,
                 is_vertex_mode: true,
                 active_vertex: None,
-        matcap_mode: 0,
-        xray: false,
-        xray_alpha: 0.5,
+                matcap_mode: 0,
+                xray: false,
+                xray_alpha: 0.5,
             };
             let t_cam_start = Instant::now();
             renderer.render_with_edit_mesh(
@@ -690,9 +690,9 @@ fn benchmark_gpu_vs_cpu_edit_pipeline_10k_50k_100k() {
             draw_vertices: true,
             is_vertex_mode: true,
             active_vertex: None,
-        matcap_mode: 0,
-        xray: false,
-        xray_alpha: 0.5,
+            matcap_mode: 0,
+            xray: false,
+            xray_alpha: 0.5,
         };
         let t_deform_start = Instant::now();
         renderer.render_with_edit_mesh(

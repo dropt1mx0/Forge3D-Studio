@@ -223,7 +223,10 @@ mod tests {
     fn test_modifier_stack_duplicate_and_apply_all() {
         let mut cube = generate_cube(1.0);
         let mut stack = ModifierStack::new();
-        stack.add(ModifierType::Array(ArrayModifier::new(2, forge_math::Vec3::new(2.0, 0.0, 0.0))));
+        stack.add(ModifierType::Array(ArrayModifier::new(
+            2,
+            forge_math::Vec3::new(2.0, 0.0, 0.0),
+        )));
         assert_eq!(stack.len(), 1);
 
         // Duplicate

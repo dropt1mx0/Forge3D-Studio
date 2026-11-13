@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use eframe::egui;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
