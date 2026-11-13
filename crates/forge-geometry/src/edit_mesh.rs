@@ -880,6 +880,14 @@ impl EditableMesh {
         self.recalculate_normals();
     }
 
+    /// Merges vertices that are within `distance` of each other (Blender "Merge by Distance").
+    /// Returns the number of vertices removed.
+    pub fn merge_by_distance(&mut self, distance: f32) -> usize {
+        let initial_count = self.vertices.len();
+        self.weld_colocated_vertices(distance);
+        initial_count.saturating_sub(self.vertices.len())
+    }
+
     /// Merges adjacent coplanar triangle pairs sharing an edge into quad faces (Tris to Quads).
     pub fn tris_to_quads(&mut self) {
         let mut i = 0;
@@ -2551,5 +2559,40 @@ mod tests {
         for &e_idx in &loop_edges {
             assert!(!edit_mesh.edges[e_idx].selected);
         }
+    }
+
+    #[test]
+    fn test_merge_by_distance() {
+        let mut edit_mesh = EditableMesh::default();
+        // Add 2 colocated vertices and 1 distant vertex
+        edit_mesh.vertices.push(EditVertex::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::Y,
+            Vec2::ZERO,
+        ));
+        edit_mesh.vertices.push(EditVertex::new(
+            Vec3::new(0.0001, 0.0, 0.0),
+            Vec3::Y,
+            Vec2::ZERO,
+        ));
+        edit_mesh.vertices.push(EditVertex::new(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::Y,
+            Vec2::ZERO,
+        ));
+        let v0 = 0;
+        let v1 = 1;
+        let v2 = 2;
+
+        edit_mesh.edges.push(EditEdge::new(v0, v2));
+        edit_mesh.edges.push(EditEdge::new(v1, v2));
+        edit_mesh
+            .faces
+            .push(EditFace::new(vec![v0, v1, v2], Vec3::Y));
+
+        assert_eq!(edit_mesh.vertices.len(), 3);
+        let merged_count = edit_mesh.merge_by_distance(0.01);
+        assert_eq!(merged_count, 1, "One duplicate vertex should be merged");
+        assert_eq!(edit_mesh.vertices.len(), 2, "2 vertices should remain");
     }
 }

@@ -737,7 +737,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 );
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::M) {
-                app.merge_selected_geometry();
+                if input.modifiers.alt {
+                    app.merge_by_distance_geometry(0.001);
+                } else {
+                    app.merge_selected_geometry();
+                }
             } else if input.key_pressed(Key::F) {
                 app.fill_selected_geometry();
             } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::B)

@@ -176,6 +176,12 @@ pub fn get_all_commands() -> Vec<CommandItem> {
         },
         CommandItem {
             category: "Mesh",
+            title: "Merge by Distance",
+            shortcut: "Alt+M",
+            action_id: "mesh_merge_by_distance",
+        },
+        CommandItem {
+            category: "Mesh",
             title: "Subdivide Mesh",
             shortcut: "",
             action_id: "mesh_subdivide",
@@ -677,6 +683,12 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
                 app.toggle_edit_mode();
             }
             app.merge_selected_geometry();
+        }
+        "mesh_merge_by_distance" => {
+            if app.editor_state.edit_mode != EditMode::Edit {
+                app.toggle_edit_mode();
+            }
+            app.merge_by_distance_geometry(0.001);
         }
         "mesh_subdivide" => {
             if app.editor_state.edit_mode != EditMode::Edit {

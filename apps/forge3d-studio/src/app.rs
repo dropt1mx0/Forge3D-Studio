@@ -1199,6 +1199,24 @@ impl Forge3dStudioApp {
         }
     }
 
+    pub fn merge_by_distance_geometry(&mut self, distance: f32) {
+        if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
+            let obj_id = *obj_id;
+            let old_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+            let removed = edit_mesh.merge_by_distance(distance);
+            let new_mesh = std::sync::Arc::new(edit_mesh.to_render_mesh());
+            self.sync_edit_mesh_to_scene();
+            self.history.push(Action::modify_mesh(
+                obj_id,
+                old_mesh,
+                new_mesh,
+                format!("Merge by Distance ({removed} vertices removed)"),
+            ));
+            self.status_message =
+                format!("Merged by distance {distance:.4} m ({removed} vertices removed)");
+        }
+    }
+
     pub fn fill_selected_geometry(&mut self) {
         if let Some((obj_id, edit_mesh)) = &mut self.active_edit_mesh {
             let obj_id = *obj_id;

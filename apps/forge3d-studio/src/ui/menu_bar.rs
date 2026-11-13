@@ -723,6 +723,14 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 ui.close();
             }
 
+            if ui.button("Merge by Distance (Alt+M)").clicked() {
+                if app.editor_state.edit_mode != EditMode::Edit {
+                    app.toggle_edit_mode();
+                }
+                app.merge_by_distance_geometry(0.001);
+                ui.close();
+            }
+
             if ui.button("Fill Face/Edge (F)").clicked() {
                 if app.editor_state.edit_mode != EditMode::Edit {
                     app.toggle_edit_mode();
