@@ -1772,7 +1772,30 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 app.editor_state.pointer_state =
                                     PointerInteractionState::ObjectPressed;
                                 app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
-                                if input.modifiers.shift {
+                                if input.modifiers.alt {
+                                    let incident_edge = edit_mesh
+                                        .edges
+                                        .iter()
+                                        .position(|e| e.v0 == v_idx || e.v1 == v_idx);
+                                    if let Some(e_idx) = incident_edge {
+                                        let loop_edges = edit_mesh.find_edge_loop(e_idx);
+                                        if !input.modifiers.shift {
+                                            edit_mesh.deselect_all(EditSelectionMode::Vertex);
+                                        }
+                                        for e in loop_edges {
+                                            if e < edit_mesh.edges.len() {
+                                                edit_mesh.vertices[edit_mesh.edges[e].v0]
+                                                    .selected = true;
+                                                edit_mesh.vertices[edit_mesh.edges[e].v1]
+                                                    .selected = true;
+                                            }
+                                        }
+                                        app.status_message = format!(
+                                            "Selected Vertex Loop passing Vertex #{}",
+                                            v_idx
+                                        );
+                                    }
+                                } else if input.modifiers.shift {
                                     edit_mesh.vertices[v_idx].selected =
                                         !edit_mesh.vertices[v_idx].selected;
                                     if edit_mesh.vertices[v_idx].selected {
@@ -1784,8 +1807,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                     edit_mesh.deselect_all(EditSelectionMode::Vertex);
                                     edit_mesh.vertices[v_idx].selected = true;
                                     app.editor_state.active_vertex = Some(v_idx);
+                                    app.status_message = format!("Selected Vertex #{}", v_idx);
                                 }
-                                app.status_message = format!("Selected Vertex #{}", v_idx);
                                 app.sync_edit_mesh_to_scene();
                                 ui.ctx().request_repaint();
                             }
@@ -1797,7 +1820,19 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 app.editor_state.pointer_state =
                                     PointerInteractionState::ObjectPressed;
                                 app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
-                                if input.modifiers.shift {
+                                if input.modifiers.alt {
+                                    let is_ring = input.modifiers.command || input.modifiers.ctrl;
+                                    let additive = input.modifiers.shift;
+                                    if is_ring {
+                                        edit_mesh.select_edge_ring(e_idx, additive);
+                                        app.status_message =
+                                            format!("Selected Edge Ring from Edge #{}", e_idx);
+                                    } else {
+                                        edit_mesh.select_edge_loop(e_idx, additive);
+                                        app.status_message =
+                                            format!("Selected Edge Loop from Edge #{}", e_idx);
+                                    }
+                                } else if input.modifiers.shift {
                                     edit_mesh.edges[e_idx].selected =
                                         !edit_mesh.edges[e_idx].selected;
                                 } else {
@@ -1816,7 +1851,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 app.editor_state.pointer_state =
                                     PointerInteractionState::ObjectPressed;
                                 app.editor_state.pointer_press_pos = Some(Vec2::new(pos.x, pos.y));
-                                if input.modifiers.shift {
+                                if input.modifiers.alt {
+                                    let additive = input.modifiers.shift;
+                                    edit_mesh.select_face_loop(f_idx, additive);
+                                    app.status_message =
+                                        format!("Selected Face Loop from Face #{}", f_idx);
+                                } else if input.modifiers.shift {
                                     edit_mesh.faces[f_idx].selected =
                                         !edit_mesh.faces[f_idx].selected;
                                 } else {

@@ -987,7 +987,9 @@ impl EditableMesh {
                 // Duplicate edges where both vertices were duplicated
                 let mut new_edges = Vec::new();
                 for edge in &mut self.edges {
-                    if let (Some(&n0), Some(&n1)) = (old_to_new.get(&edge.v0), old_to_new.get(&edge.v1)) {
+                    if let (Some(&n0), Some(&n1)) =
+                        (old_to_new.get(&edge.v0), old_to_new.get(&edge.v1))
+                    {
                         edge.selected = false;
                         let mut new_edge = EditEdge::new(n0, n1);
                         new_edge.selected = true;
@@ -1379,6 +1381,286 @@ impl EditableMesh {
         }
 
         Ok(dissolved_count)
+    }
+
+    /// Finds all edge indices belonging to the topological edge loop passing through `start_edge_idx`.
+    pub fn find_edge_loop(&self, start_edge_idx: usize) -> Vec<usize> {
+        if start_edge_idx >= self.edges.len() {
+            return Vec::new();
+        }
+
+        let mut loop_edges = Vec::new();
+        let mut visited_edges = HashSet::new();
+
+        loop_edges.push(start_edge_idx);
+        visited_edges.insert(start_edge_idx);
+
+        let start_e = self.edges[start_edge_idx];
+
+        // Traverse in two directions: from v0 and from v1
+        for start_vert in [start_e.v0, start_e.v1] {
+            let mut curr_edge = start_e;
+            let mut curr_v = start_vert;
+
+            for _ in 0..self.edges.len() {
+                // Find faces sharing curr_edge
+                let mut incident_faces = Vec::new();
+                for (f_idx, face) in self.faces.iter().enumerate() {
+                    if face_contains_edge(face, curr_edge.v0, curr_edge.v1) {
+                        incident_faces.push(f_idx);
+                    }
+                }
+
+                // If boundary edge, follow boundary
+                if incident_faces.len() == 1 {
+                    let mut next_boundary_edge = None;
+                    for (e_idx, e) in self.edges.iter().enumerate() {
+                        if e_idx != start_edge_idx
+                            && !visited_edges.contains(&e_idx)
+                            && (e.v0 == curr_v || e.v1 == curr_v)
+                            && is_boundary_edge(&self.faces, e.v0, e.v1)
+                        {
+                            next_boundary_edge = Some((e_idx, *e));
+                            break;
+                        }
+                    }
+                    if let Some((next_idx, next_e)) = next_boundary_edge {
+                        visited_edges.insert(next_idx);
+                        loop_edges.push(next_idx);
+                        curr_v = if next_e.v0 == curr_v {
+                            next_e.v1
+                        } else {
+                            next_e.v0
+                        };
+                        curr_edge = next_e;
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+
+                // For interior edge at curr_v, find adjacent edges meeting at curr_v
+                let mut edges_at_v = Vec::new();
+                for (e_idx, e) in self.edges.iter().enumerate() {
+                    if e.v0 == curr_v || e.v1 == curr_v {
+                        edges_at_v.push((e_idx, *e));
+                    }
+                }
+
+                // Standard quad manifold vertex has valence 4
+                if edges_at_v.len() == 4 && incident_faces.len() == 2 {
+                    let f0 = &self.faces[incident_faces[0]];
+                    let f1 = &self.faces[incident_faces[1]];
+
+                    let mut opp_edge = None;
+                    for (e_idx, e) in edges_at_v {
+                        let other_v = if e.v0 == curr_v { e.v1 } else { e.v0 };
+                        let in_f0 = face_contains_edge(f0, curr_v, other_v);
+                        let in_f1 = face_contains_edge(f1, curr_v, other_v);
+                        if !in_f0 && !in_f1 {
+                            opp_edge = Some((e_idx, e, other_v));
+                            break;
+                        }
+                    }
+
+                    if let Some((next_idx, next_e, next_v)) = opp_edge {
+                        if visited_edges.contains(&next_idx) {
+                            break;
+                        }
+                        visited_edges.insert(next_idx);
+                        loop_edges.push(next_idx);
+                        curr_edge = next_e;
+                        curr_v = next_v;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+
+        loop_edges
+    }
+
+    /// Selects all edges in the topological loop passing through `start_edge_idx`.
+    pub fn select_edge_loop(&mut self, start_edge_idx: usize, additive: bool) {
+        let loop_edges = self.find_edge_loop(start_edge_idx);
+        if !additive {
+            self.deselect_all(EditSelectionMode::Edge);
+        }
+        for e_idx in loop_edges {
+            if e_idx < self.edges.len() {
+                self.edges[e_idx].selected = true;
+            }
+        }
+    }
+
+    /// Finds all edge indices belonging to the topological edge ring passing through `start_edge_idx`.
+    pub fn find_edge_ring(&self, start_edge_idx: usize) -> Vec<usize> {
+        if start_edge_idx >= self.edges.len() {
+            return Vec::new();
+        }
+
+        let mut ring_edges = Vec::new();
+        let mut visited_edges = HashSet::new();
+
+        ring_edges.push(start_edge_idx);
+        visited_edges.insert(start_edge_idx);
+
+        let start_e = self.edges[start_edge_idx];
+
+        let mut start_faces = Vec::new();
+        for (f_idx, face) in self.faces.iter().enumerate() {
+            if face.vertices.len() == 4 && face_contains_edge(face, start_e.v0, start_e.v1) {
+                start_faces.push(f_idx);
+            }
+        }
+
+        for initial_face in start_faces {
+            let mut curr_face_idx = initial_face;
+            let mut curr_edge = (start_e.v0, start_e.v1);
+            let mut visited_faces = HashSet::new();
+
+            for _ in 0..self.faces.len() {
+                if visited_faces.contains(&curr_face_idx) {
+                    break;
+                }
+                visited_faces.insert(curr_face_idx);
+
+                let face = &self.faces[curr_face_idx];
+                if face.vertices.len() != 4 {
+                    break;
+                }
+
+                let Some(edge_pos) = face_edge_index(face, curr_edge.0, curr_edge.1) else {
+                    break;
+                };
+
+                let opp_pos = (edge_pos + 2) % 4;
+                let opp_v0 = face.vertices[opp_pos];
+                let opp_v1 = face.vertices[(opp_pos + 1) % 4];
+
+                let opp_edge_idx = self.edges.iter().position(|e| {
+                    (e.v0 == opp_v0 && e.v1 == opp_v1) || (e.v0 == opp_v1 && e.v1 == opp_v0)
+                });
+
+                if let Some(opp_idx) = opp_edge_idx {
+                    if visited_edges.contains(&opp_idx) {
+                        break;
+                    }
+                    visited_edges.insert(opp_idx);
+                    ring_edges.push(opp_idx);
+                } else {
+                    break;
+                }
+
+                let mut next_face = None;
+                for (f_idx, f) in self.faces.iter().enumerate() {
+                    if f_idx != curr_face_idx
+                        && f.vertices.len() == 4
+                        && face_contains_edge(f, opp_v0, opp_v1)
+                    {
+                        next_face = Some(f_idx);
+                        break;
+                    }
+                }
+
+                if let Some(nf) = next_face {
+                    curr_face_idx = nf;
+                    curr_edge = (opp_v0, opp_v1);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        ring_edges
+    }
+
+    /// Selects all edges in the topological ring passing through `start_edge_idx`.
+    pub fn select_edge_ring(&mut self, start_edge_idx: usize, additive: bool) {
+        let ring_edges = self.find_edge_ring(start_edge_idx);
+        if !additive {
+            self.deselect_all(EditSelectionMode::Edge);
+        }
+        for e_idx in ring_edges {
+            if e_idx < self.edges.len() {
+                self.edges[e_idx].selected = true;
+            }
+        }
+    }
+
+    /// Finds all face indices belonging to the topological face loop starting from `start_face_idx`.
+    pub fn find_face_loop(&self, start_face_idx: usize) -> Vec<usize> {
+        if start_face_idx >= self.faces.len() || self.faces[start_face_idx].vertices.len() != 4 {
+            return Vec::new();
+        }
+
+        let mut face_loop = Vec::new();
+        let mut visited_faces = HashSet::new();
+
+        let f = &self.faces[start_face_idx];
+        let e0_v0 = f.vertices[0];
+        let e0_v1 = f.vertices[1];
+
+        for start_pair in [(e0_v0, e0_v1), (f.vertices[2], f.vertices[3])] {
+            let mut curr_f_idx = start_face_idx;
+            let mut curr_edge = start_pair;
+
+            for _ in 0..self.faces.len() {
+                if visited_faces.contains(&curr_f_idx) {
+                    break;
+                }
+                visited_faces.insert(curr_f_idx);
+                face_loop.push(curr_f_idx);
+
+                let face = &self.faces[curr_f_idx];
+                if face.vertices.len() != 4 {
+                    break;
+                }
+
+                let Some(edge_pos) = face_edge_index(face, curr_edge.0, curr_edge.1) else {
+                    break;
+                };
+                let opp_pos = (edge_pos + 2) % 4;
+                let opp_v0 = face.vertices[opp_pos];
+                let opp_v1 = face.vertices[(opp_pos + 1) % 4];
+
+                let mut next_f_idx = None;
+                for (f_idx, f) in self.faces.iter().enumerate() {
+                    if f_idx != curr_f_idx
+                        && f.vertices.len() == 4
+                        && face_contains_edge(f, opp_v0, opp_v1)
+                    {
+                        next_f_idx = Some(f_idx);
+                        break;
+                    }
+                }
+
+                if let Some(nf) = next_f_idx {
+                    curr_f_idx = nf;
+                    curr_edge = (opp_v0, opp_v1);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        face_loop
+    }
+
+    /// Selects all faces in the topological loop passing through `start_face_idx`.
+    pub fn select_face_loop(&mut self, start_face_idx: usize, additive: bool) {
+        let faces = self.find_face_loop(start_face_idx);
+        if !additive {
+            self.deselect_all(EditSelectionMode::Face);
+        }
+        for f_idx in faces {
+            if f_idx < self.faces.len() {
+                self.faces[f_idx].selected = true;
+            }
+        }
     }
 
     /// Bridges two selected boundary edge loops by creating a strip of quad faces.
@@ -2190,11 +2472,15 @@ mod tests {
             edit_mesh.vertices.push(v);
         }
         for e in edit_b.edges {
-            edit_mesh.edges.push(EditEdge::new(e.v0 + v_offset, e.v1 + v_offset));
+            edit_mesh
+                .edges
+                .push(EditEdge::new(e.v0 + v_offset, e.v1 + v_offset));
         }
         for f in edit_b.faces {
             let remapped_verts: Vec<usize> = f.vertices.iter().map(|&idx| idx + v_offset).collect();
-            edit_mesh.faces.push(EditFace::new(remapped_verts, f.normal));
+            edit_mesh
+                .faces
+                .push(EditFace::new(remapped_verts, f.normal));
         }
 
         assert_eq!(edit_mesh.vertices.len(), cube_a_vert_count * 2);
@@ -2229,6 +2515,41 @@ mod tests {
         }
         for i in cube_a_face_count..edit_mesh.faces.len() {
             assert!(edit_mesh.faces[i].selected);
+        }
+    }
+
+    #[test]
+    fn test_find_edge_loop_and_ring() {
+        let cube = generate_cube(1.0);
+        let mut edit_mesh = EditableMesh::from_mesh(&cube);
+        edit_mesh.weld_colocated_vertices(1e-4);
+
+        // Test loop selection from edge 0
+        let loop_edges = edit_mesh.find_edge_loop(0);
+        assert!(
+            !loop_edges.is_empty(),
+            "Edge loop on welded cube should find edges"
+        );
+        assert!(loop_edges.contains(&0));
+
+        // Test ring selection from edge 0
+        let ring_edges = edit_mesh.find_edge_ring(0);
+        assert!(
+            !ring_edges.is_empty(),
+            "Edge ring on welded cube should find parallel edges"
+        );
+        assert!(ring_edges.contains(&0));
+
+        // Test selecting edge loop
+        edit_mesh.select_edge_loop(0, false);
+        for &e_idx in &loop_edges {
+            assert!(edit_mesh.edges[e_idx].selected);
+        }
+
+        // Test deselecting all edges
+        edit_mesh.deselect_all(EditSelectionMode::Edge);
+        for &e_idx in &loop_edges {
+            assert!(!edit_mesh.edges[e_idx].selected);
         }
     }
 }
