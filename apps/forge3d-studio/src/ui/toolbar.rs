@@ -1,10 +1,10 @@
 use egui::Ui;
-use forge_render::CameraProjection;
 use forge_geometry::primitives::{
     generate_capsule, generate_cube, generate_cylinder, generate_monkey, generate_plane,
     generate_uv_sphere,
 };
 use forge_math::{Transform, Vec3};
+use forge_render::CameraProjection;
 use forge_scene::{
     Action, EditMode, GizmoMode, PivotPoint, PrimitiveType, SceneObject, SelectionElement,
     ToolbarDisplayMode, TransformMode, TransformOrientation,
@@ -235,13 +235,24 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 }
 
                 let lasso_active = app.editor_state.transform_mode == TransformMode::LassoSelect;
-                if tool_button(ui, lasso_active, "Las", "Lasso Select", "Ctrl+RMB", display_mode).clicked() {
+                if tool_button(
+                    ui,
+                    lasso_active,
+                    "Las",
+                    "Lasso Select",
+                    "Ctrl+RMB",
+                    display_mode,
+                )
+                .clicked()
+                {
                     app.editor_state.transform_mode = TransformMode::LassoSelect;
                     app.status_message = "Tool: Lasso Select (Ctrl+RMB)".to_string();
                 }
 
                 let circle_active = app.editor_state.transform_mode == TransformMode::CircleSelect;
-                if tool_button(ui, circle_active, "Cir", "Circle Select", "C", display_mode).clicked() {
+                if tool_button(ui, circle_active, "Cir", "Circle Select", "C", display_mode)
+                    .clicked()
+                {
                     app.editor_state.transform_mode = TransformMode::CircleSelect;
                     app.editor_state.circle_select_active = true;
                     app.status_message = "Tool: Circle Select (C)".to_string();
@@ -335,7 +346,11 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     }
 
                     if tool_button(ui, false, "Bev", "Bevel", "Ctrl+B", display_mode).clicked() {
-                        app.bevel_selected_geometry(0.1);
+                        let center = forge_math::Vec2::new(400.0, 300.0);
+                        app.begin_interactive_edit_tool(
+                            crate::app::InteractiveEditToolType::Bevel,
+                            center,
+                        );
                     }
 
                     if tool_button(ui, false, "Loop", "Loop Cut", "Ctrl+R", display_mode).clicked()
@@ -457,7 +472,9 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             app.voxel_remesh_active(app.sculpt_settings.voxel_size);
                         }
                     } else {
-                        if tool_button(ui, false, "Rmsh", "Voxel Remesh", "Ctrl+R", display_mode).clicked() {
+                        if tool_button(ui, false, "Rmsh", "Voxel Remesh", "Ctrl+R", display_mode)
+                            .clicked()
+                        {
                             app.voxel_remesh_active(app.sculpt_settings.voxel_size);
                         }
                     }
@@ -591,9 +608,14 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                 // Snapping toggle (LMB: toggle on/off, RMB: switch between Grid and Vertex snap)
                 let snap = app.editor_state.snap_settings.enabled;
-                let snap_kind = if app.editor_state.snap_settings.snap_to_vertex { "Vertex" } else { "Grid" };
+                let snap_kind = if app.editor_state.snap_settings.snap_to_vertex {
+                    "Vertex"
+                } else {
+                    "Grid"
+                };
                 let snap_title = format!("Snap ({})", snap_kind);
-                let snap_btn = tool_button(ui, snap, "Snap", &snap_title, "Shift+Tab", display_mode);
+                let snap_btn =
+                    tool_button(ui, snap, "Snap", &snap_title, "Shift+Tab", display_mode);
                 if snap_btn.clicked() {
                     app.editor_state.snap_settings.enabled = !snap;
                     app.status_message = format!(
@@ -603,11 +625,17 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     );
                 }
                 if snap_btn.secondary_clicked() {
-                    app.editor_state.snap_settings.snap_to_vertex = !app.editor_state.snap_settings.snap_to_vertex;
-                    app.editor_state.snap_settings.snap_to_grid = !app.editor_state.snap_settings.snap_to_vertex;
+                    app.editor_state.snap_settings.snap_to_vertex =
+                        !app.editor_state.snap_settings.snap_to_vertex;
+                    app.editor_state.snap_settings.snap_to_grid =
+                        !app.editor_state.snap_settings.snap_to_vertex;
                     app.status_message = format!(
                         "Snap Element: {}",
-                        if app.editor_state.snap_settings.snap_to_vertex { "Vertex" } else { "Grid Increment" }
+                        if app.editor_state.snap_settings.snap_to_vertex {
+                            "Vertex"
+                        } else {
+                            "Grid Increment"
+                        }
                     );
                 }
 
@@ -695,7 +723,8 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                 // X-Ray Mode
                 let is_xray = app.editor_state.show_xray;
-                if tool_button(ui, is_xray, "X-Ray", "X-Ray Mode", "Alt+Z", display_mode).clicked() {
+                if tool_button(ui, is_xray, "X-Ray", "X-Ray Mode", "Alt+Z", display_mode).clicked()
+                {
                     app.toggle_xray();
                 }
 

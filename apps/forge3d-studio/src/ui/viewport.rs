@@ -742,7 +742,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.fill_selected_geometry();
             } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::B)
             {
-                app.bevel_selected_geometry(0.1);
+                app.begin_interactive_edit_tool(
+                    crate::app::InteractiveEditToolType::Bevel,
+                    mouse_vec2,
+                );
+                ui.ctx().request_repaint();
             } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::R)
             {
                 app.begin_interactive_edit_tool(
@@ -2630,6 +2634,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             crate::app::InteractiveEditToolType::LoopCut => (
                 format!("LOOP CUT: {:.0}%", tool.current_value * 100.0),
                 "Slide mouse | Shift: Fine | Ctrl: Snap | LMB/Enter: Confirm | RMB/Esc: Cancel",
+            ),
+            crate::app::InteractiveEditToolType::Bevel => (
+                format!("BEVEL: {:.2} m", tool.current_value),
+                "Move mouse | Shift: Fine | Ctrl: Snap | LMB/Enter: Confirm | RMB/Esc: Cancel",
             ),
         };
 

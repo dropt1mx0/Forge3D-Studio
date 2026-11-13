@@ -14,7 +14,7 @@ use forge_scene::{
 
 use crate::ui::gizmo::GizmoState;
 use crate::ui::menu_bar::render_menu_bar;
-use crate::ui::outliner::{render_outliner, OutlinerFilterSettings, OutlinerTypeFilter};
+use crate::ui::outliner::{OutlinerFilterSettings, OutlinerTypeFilter, render_outliner};
 use crate::ui::properties::render_properties;
 use crate::ui::status_bar::render_status_bar;
 use crate::ui::toolbar::render_toolbar;
@@ -205,6 +205,7 @@ pub enum InteractiveEditToolType {
     Extrude,
     Inset,
     LoopCut,
+    Bevel,
 }
 
 /// Active interactive modeling tool state (modal execution with mouse sliding).
@@ -310,8 +311,7 @@ pub fn dark_visuals() -> egui::Visuals {
     visuals.widgets.inactive.bg_stroke =
         egui::Stroke::new(1.0, egui::Color32::from_rgb(72, 72, 72));
     visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(75, 75, 75);
-    visuals.widgets.hovered.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 90, 90));
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 90, 90));
     visuals.widgets.active.bg_fill = egui::Color32::from_rgb(74, 137, 220);
     visuals.widgets.active.bg_stroke =
         egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 160, 235));
@@ -533,7 +533,9 @@ impl Forge3dStudioApp {
 
         match target_mode {
             EditMode::Object => {
-                if self.editor_state.edit_mode == EditMode::Edit || self.editor_state.edit_mode == EditMode::Sculpt {
+                if self.editor_state.edit_mode == EditMode::Edit
+                    || self.editor_state.edit_mode == EditMode::Sculpt
+                {
                     self.commit_edit_mesh_to_scene();
                     self.active_edit_mesh = None;
                     self.edit_overlay_cache.clear();
@@ -670,14 +672,25 @@ impl Forge3dStudioApp {
                                 .iter_mut()
                                 .find(|n| matches!(n.kind, forge_scene::NodeKind::PrincipledBsdf))
                             {
-                                if let Some(inp) = bsdf.inputs.iter_mut().find(|i| i.id == "base_color") {
-                                    inp.default_value = forge_scene::SocketDefaultValue::Color(mat.base_color_factor);
+                                if let Some(inp) =
+                                    bsdf.inputs.iter_mut().find(|i| i.id == "base_color")
+                                {
+                                    inp.default_value = forge_scene::SocketDefaultValue::Color(
+                                        mat.base_color_factor,
+                                    );
                                 }
-                                if let Some(inp) = bsdf.inputs.iter_mut().find(|i| i.id == "metallic") {
-                                    inp.default_value = forge_scene::SocketDefaultValue::Float(mat.metallic_factor);
+                                if let Some(inp) =
+                                    bsdf.inputs.iter_mut().find(|i| i.id == "metallic")
+                                {
+                                    inp.default_value =
+                                        forge_scene::SocketDefaultValue::Float(mat.metallic_factor);
                                 }
-                                if let Some(inp) = bsdf.inputs.iter_mut().find(|i| i.id == "roughness") {
-                                    inp.default_value = forge_scene::SocketDefaultValue::Float(mat.roughness_factor);
+                                if let Some(inp) =
+                                    bsdf.inputs.iter_mut().find(|i| i.id == "roughness")
+                                {
+                                    inp.default_value = forge_scene::SocketDefaultValue::Float(
+                                        mat.roughness_factor,
+                                    );
                                 }
                             }
                             self.active_shader_graph = graph;
@@ -809,7 +822,9 @@ impl Forge3dStudioApp {
         }
 
         // If in Edit or Sculpt Mode, update active_edit_mesh
-        if self.editor_state.edit_mode == EditMode::Edit || self.editor_state.edit_mode == EditMode::Sculpt {
+        if self.editor_state.edit_mode == EditMode::Edit
+            || self.editor_state.edit_mode == EditMode::Sculpt
+        {
             let edit_mesh = forge_geometry::EditableMesh::from_mesh(&new_mesh);
             self.active_edit_mesh = Some((active_id, edit_mesh));
             self.edit_overlay_cache.reset();
@@ -824,10 +839,7 @@ impl Forge3dStudioApp {
 
         self.status_message = format!(
             "Voxel Remeshed '{}' with size {:.2} ({} vertices, {} triangles)",
-            obj_name,
-            voxel_size,
-            vert_count,
-            tri_count
+            obj_name, voxel_size, vert_count, tri_count
         );
     }
 
@@ -915,7 +927,8 @@ impl Forge3dStudioApp {
     /// Pushes an undo step (`Action::ModifyMesh`) for full rollback.
     pub fn apply_modifier(&mut self, id: ObjectId, index: usize) -> bool {
         if self.editor_state.edit_mode == EditMode::Edit {
-            self.status_message = "Cannot apply modifier in Edit Mode. Switch to Object Mode first.".into();
+            self.status_message =
+                "Cannot apply modifier in Edit Mode. Switch to Object Mode first.".into();
             return false;
         }
 
@@ -954,7 +967,8 @@ impl Forge3dStudioApp {
     /// Pushes an undo step (`Action::ModifyMesh`).
     pub fn apply_all_modifiers(&mut self, id: ObjectId) -> bool {
         if self.editor_state.edit_mode == EditMode::Edit {
-            self.status_message = "Cannot apply modifiers in Edit Mode. Switch to Object Mode first.".into();
+            self.status_message =
+                "Cannot apply modifiers in Edit Mode. Switch to Object Mode first.".into();
             return false;
         }
 
@@ -1279,13 +1293,24 @@ impl Forge3dStudioApp {
             InteractiveEditToolType::Inset => {
                 if edit_mesh.selected_faces().is_empty() {
                     self.status_message =
-                        "Select at least one face to inset (Press 3 for Face selection)".to_string();
+                        "Select at least one face to inset (Press 3 for Face selection)"
+                            .to_string();
                     return false;
                 }
             }
             InteractiveEditToolType::LoopCut => {
                 if edit_mesh.edges.is_empty() {
                     self.status_message = "No edges available for Loop Cut".to_string();
+                    return false;
+                }
+            }
+            InteractiveEditToolType::Bevel => {
+                let has_edges = edit_mesh.edges.iter().any(|e| e.selected);
+                let has_faces = !edit_mesh.selected_faces().is_empty();
+                if !has_edges && !has_faces {
+                    self.status_message =
+                        "Select at least one edge or face to bevel (Press 2 for Edge selection)"
+                            .to_string();
                     return false;
                 }
             }
@@ -1299,6 +1324,7 @@ impl Forge3dStudioApp {
             InteractiveEditToolType::Extrude => 0.0,
             InteractiveEditToolType::Inset => 0.05,
             InteractiveEditToolType::LoopCut => 0.5,
+            InteractiveEditToolType::Bevel => 0.05,
         };
 
         self.interactive_edit_tool = Some(InteractiveEditToolState {
@@ -1312,13 +1338,18 @@ impl Forge3dStudioApp {
 
         self.status_message = match tool {
             InteractiveEditToolType::Extrude => {
-                "Interactive Extrude: Move mouse to extrude | LMB: Confirm | Esc: Cancel".to_string()
+                "Interactive Extrude: Move mouse to extrude | LMB: Confirm | Esc: Cancel"
+                    .to_string()
             }
             InteractiveEditToolType::Inset => {
                 "Interactive Inset: Move mouse to inset | LMB: Confirm | Esc: Cancel".to_string()
             }
             InteractiveEditToolType::LoopCut => {
                 "Interactive Loop Cut: Slide mouse to position | LMB: Confirm | Esc: Cancel"
+                    .to_string()
+            }
+            InteractiveEditToolType::Bevel => {
+                "Interactive Bevel: Move mouse to adjust width | LMB: Confirm | Esc: Cancel"
                     .to_string()
             }
         };
@@ -1366,6 +1397,14 @@ impl Forge3dStudioApp {
                 }
                 tool_state.current_value = val;
             }
+            InteractiveEditToolType::Bevel => {
+                let rate = if shift_held { 0.001 } else { 0.005 };
+                let mut val = (delta_y * rate).clamp(0.001, 2.0);
+                if ctrl_held {
+                    val = (val * 20.0).round() / 20.0;
+                }
+                tool_state.current_value = val;
+            }
         }
 
         let val = tool_state.current_value;
@@ -1384,6 +1423,9 @@ impl Forge3dStudioApp {
                 }
                 InteractiveEditToolType::LoopCut => {
                     let _ = edit_mesh.loop_cut(target_edge, val);
+                }
+                InteractiveEditToolType::Bevel => {
+                    let _ = edit_mesh.bevel_selected_edges(val);
                 }
             }
             self.sync_edit_mesh_to_scene();
@@ -1408,6 +1450,9 @@ impl Forge3dStudioApp {
                 }
                 InteractiveEditToolType::LoopCut => {
                     format!("Loop Cut {:.0}%", tool_state.current_value * 100.0)
+                }
+                InteractiveEditToolType::Bevel => {
+                    format!("Bevel {:.2} m", tool_state.current_value)
                 }
             };
 
@@ -2366,14 +2411,17 @@ impl Forge3dStudioApp {
         if self.editor_state.edit_mode == EditMode::Edit {
             if let Some((_active_id, edit_mesh)) = &mut self.active_edit_mesh {
                 let edit_sel_mode = match self.editor_state.selection_element {
-                    forge_scene::SelectionElement::Vertex => forge_geometry::EditSelectionMode::Vertex,
+                    forge_scene::SelectionElement::Vertex => {
+                        forge_geometry::EditSelectionMode::Vertex
+                    }
                     forge_scene::SelectionElement::Edge => forge_geometry::EditSelectionMode::Edge,
                     forge_scene::SelectionElement::Face => forge_geometry::EditSelectionMode::Face,
                 };
                 let new_indices = edit_mesh.duplicate_selected(edit_sel_mode);
                 if !new_indices.is_empty() {
                     self.sync_edit_mesh_to_scene();
-                    self.status_message = format!("Duplicated {} elements in Edit Mode", new_indices.len());
+                    self.status_message =
+                        format!("Duplicated {} elements in Edit Mode", new_indices.len());
                     return;
                 }
             }
@@ -2413,7 +2461,11 @@ impl Forge3dStudioApp {
             self.status_message = format!(
                 "Duplicated {} object{} (Shift+D)",
                 self.selection.selected_ids.len(),
-                if self.selection.selected_ids.len() == 1 { "" } else { "s" }
+                if self.selection.selected_ids.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
             );
         }
     }
@@ -2511,9 +2563,11 @@ impl Forge3dStudioApp {
                     forge_scene::SelectionElement::Vertex => {
                         for v in &mut edit_mesh.vertices {
                             let world_p = model_mat.transform_point3(v.position);
-                            if let Some(screen_p) =
-                                crate::ui::gizmo::world_to_screen_pos(world_p, view_proj, viewport_rect)
-                            {
+                            if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                world_p,
+                                view_proj,
+                                viewport_rect,
+                            ) {
                                 if box_rect.contains(screen_p) {
                                     if toggle {
                                         v.selected = !v.selected;
@@ -2530,12 +2584,16 @@ impl Forge3dStudioApp {
                     forge_scene::SelectionElement::Edge => {
                         for e in &mut edit_mesh.edges {
                             if e.v0 < edit_mesh.vertices.len() && e.v1 < edit_mesh.vertices.len() {
-                                let p0 = model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
-                                let p1 = model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
+                                let p0 =
+                                    model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
+                                let p1 =
+                                    model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
                                 let mid = (p0 + p1) * 0.5;
-                                if let Some(screen_p) =
-                                    crate::ui::gizmo::world_to_screen_pos(mid, view_proj, viewport_rect)
-                                {
+                                if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                    mid,
+                                    view_proj,
+                                    viewport_rect,
+                                ) {
                                     if box_rect.contains(screen_p) {
                                         if toggle {
                                             e.selected = !e.selected;
@@ -2556,15 +2614,18 @@ impl Forge3dStudioApp {
                             let mut v_count = 0.0;
                             for &v_idx in &f.vertices {
                                 if v_idx < edit_mesh.vertices.len() {
-                                    face_center += model_mat.transform_point3(edit_mesh.vertices[v_idx].position);
+                                    face_center += model_mat
+                                        .transform_point3(edit_mesh.vertices[v_idx].position);
                                     v_count += 1.0;
                                 }
                             }
                             if v_count > 0.0 {
                                 face_center /= v_count;
-                                if let Some(screen_p) =
-                                    crate::ui::gizmo::world_to_screen_pos(face_center, view_proj, viewport_rect)
-                                {
+                                if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                    face_center,
+                                    view_proj,
+                                    viewport_rect,
+                                ) {
                                     if box_rect.contains(screen_p) {
                                         if toggle {
                                             f.selected = !f.selected;
@@ -2596,9 +2657,11 @@ impl Forge3dStudioApp {
             let mut screen_points = Vec::new();
 
             // 1. Pivot / Center
-            if let Some(screen_p) =
-                crate::ui::gizmo::world_to_screen_pos(world_tf.translation, view_proj, viewport_rect)
-            {
+            if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                world_tf.translation,
+                view_proj,
+                viewport_rect,
+            ) {
                 screen_points.push(screen_p);
             }
 
@@ -2606,17 +2669,35 @@ impl Forge3dStudioApp {
             let aabb = obj.mesh.aabb;
             if !aabb.is_empty() {
                 let corners = [
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.min.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.min.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.max.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.max.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.min.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.min.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.max.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.max.y, aabb.max.z,
+                    )),
                 ];
                 for c in &corners {
-                    if let Some(sp) = crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect) {
+                    if let Some(sp) =
+                        crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect)
+                    {
                         screen_points.push(sp);
                     }
                 }
@@ -2637,10 +2718,8 @@ impl Forge3dStudioApp {
                     min_y = min_y.min(p.y);
                     max_y = max_y.max(p.y);
                 }
-                let screen_aabb = egui::Rect::from_min_max(
-                    egui::pos2(min_x, min_y),
-                    egui::pos2(max_x, max_y),
-                );
+                let screen_aabb =
+                    egui::Rect::from_min_max(egui::pos2(min_x, min_y), egui::pos2(max_x, max_y));
                 if screen_aabb.intersects(box_rect) {
                     is_hit = true;
                 }
@@ -2696,10 +2775,14 @@ impl Forge3dStudioApp {
                     forge_scene::SelectionElement::Vertex => {
                         for v in &mut edit_mesh.vertices {
                             let world_p = model_mat.transform_point3(v.position);
-                            if let Some(screen_p) =
-                                crate::ui::gizmo::world_to_screen_pos(world_p, view_proj, viewport_rect)
-                            {
-                                if poly_bbox.contains(screen_p) && point_in_polygon(screen_p, polygon) {
+                            if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                world_p,
+                                view_proj,
+                                viewport_rect,
+                            ) {
+                                if poly_bbox.contains(screen_p)
+                                    && point_in_polygon(screen_p, polygon)
+                                {
                                     if toggle {
                                         v.selected = !v.selected;
                                     } else {
@@ -2715,13 +2798,19 @@ impl Forge3dStudioApp {
                     forge_scene::SelectionElement::Edge => {
                         for e in &mut edit_mesh.edges {
                             if e.v0 < edit_mesh.vertices.len() && e.v1 < edit_mesh.vertices.len() {
-                                let p0 = model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
-                                let p1 = model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
+                                let p0 =
+                                    model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
+                                let p1 =
+                                    model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
                                 let mid = (p0 + p1) * 0.5;
-                                if let Some(screen_p) =
-                                    crate::ui::gizmo::world_to_screen_pos(mid, view_proj, viewport_rect)
-                                {
-                                    if poly_bbox.contains(screen_p) && point_in_polygon(screen_p, polygon) {
+                                if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                    mid,
+                                    view_proj,
+                                    viewport_rect,
+                                ) {
+                                    if poly_bbox.contains(screen_p)
+                                        && point_in_polygon(screen_p, polygon)
+                                    {
                                         if toggle {
                                             e.selected = !e.selected;
                                         } else {
@@ -2741,16 +2830,21 @@ impl Forge3dStudioApp {
                             let mut v_count = 0.0;
                             for &v_idx in &f.vertices {
                                 if v_idx < edit_mesh.vertices.len() {
-                                    face_center += model_mat.transform_point3(edit_mesh.vertices[v_idx].position);
+                                    face_center += model_mat
+                                        .transform_point3(edit_mesh.vertices[v_idx].position);
                                     v_count += 1.0;
                                 }
                             }
                             if v_count > 0.0 {
                                 face_center /= v_count;
-                                if let Some(screen_p) =
-                                    crate::ui::gizmo::world_to_screen_pos(face_center, view_proj, viewport_rect)
-                                {
-                                    if poly_bbox.contains(screen_p) && point_in_polygon(screen_p, polygon) {
+                                if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                    face_center,
+                                    view_proj,
+                                    viewport_rect,
+                                ) {
+                                    if poly_bbox.contains(screen_p)
+                                        && point_in_polygon(screen_p, polygon)
+                                    {
                                         if toggle {
                                             f.selected = !f.selected;
                                         } else {
@@ -2780,32 +2874,54 @@ impl Forge3dStudioApp {
             let model_mat = world_tf.to_matrix();
             let mut screen_points = Vec::new();
 
-            if let Some(screen_p) =
-                crate::ui::gizmo::world_to_screen_pos(world_tf.translation, view_proj, viewport_rect)
-            {
+            if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                world_tf.translation,
+                view_proj,
+                viewport_rect,
+            ) {
                 screen_points.push(screen_p);
             }
 
             let aabb = obj.mesh.aabb;
             if !aabb.is_empty() {
                 let corners = [
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.min.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.min.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.max.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.max.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.min.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.min.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.max.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.max.y, aabb.max.z,
+                    )),
                 ];
                 for c in &corners {
-                    if let Some(sp) = crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect) {
+                    if let Some(sp) =
+                        crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect)
+                    {
                         screen_points.push(sp);
                     }
                 }
             }
 
-            let is_hit = screen_points.iter().any(|p| poly_bbox.contains(*p) && point_in_polygon(*p, polygon));
+            let is_hit = screen_points
+                .iter()
+                .any(|p| poly_bbox.contains(*p) && point_in_polygon(*p, polygon));
             if is_hit {
                 hit_ids.insert(id);
             }
@@ -2848,9 +2964,11 @@ impl Forge3dStudioApp {
                     forge_scene::SelectionElement::Vertex => {
                         for v in &mut edit_mesh.vertices {
                             let world_p = model_mat.transform_point3(v.position);
-                            if let Some(screen_p) =
-                                crate::ui::gizmo::world_to_screen_pos(world_p, view_proj, viewport_rect)
-                            {
+                            if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                world_p,
+                                view_proj,
+                                viewport_rect,
+                            ) {
                                 if screen_p.distance(center) <= radius {
                                     v.selected = !deselect;
                                     modified_count += 1;
@@ -2861,12 +2979,16 @@ impl Forge3dStudioApp {
                     forge_scene::SelectionElement::Edge => {
                         for e in &mut edit_mesh.edges {
                             if e.v0 < edit_mesh.vertices.len() && e.v1 < edit_mesh.vertices.len() {
-                                let p0 = model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
-                                let p1 = model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
+                                let p0 =
+                                    model_mat.transform_point3(edit_mesh.vertices[e.v0].position);
+                                let p1 =
+                                    model_mat.transform_point3(edit_mesh.vertices[e.v1].position);
                                 let mid = (p0 + p1) * 0.5;
-                                if let Some(screen_p) =
-                                    crate::ui::gizmo::world_to_screen_pos(mid, view_proj, viewport_rect)
-                                {
+                                if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                    mid,
+                                    view_proj,
+                                    viewport_rect,
+                                ) {
                                     if screen_p.distance(center) <= radius {
                                         e.selected = !deselect;
                                         modified_count += 1;
@@ -2881,15 +3003,18 @@ impl Forge3dStudioApp {
                             let mut v_count = 0.0;
                             for &v_idx in &f.vertices {
                                 if v_idx < edit_mesh.vertices.len() {
-                                    face_center += model_mat.transform_point3(edit_mesh.vertices[v_idx].position);
+                                    face_center += model_mat
+                                        .transform_point3(edit_mesh.vertices[v_idx].position);
                                     v_count += 1.0;
                                 }
                             }
                             if v_count > 0.0 {
                                 face_center /= v_count;
-                                if let Some(screen_p) =
-                                    crate::ui::gizmo::world_to_screen_pos(face_center, view_proj, viewport_rect)
-                                {
+                                if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                                    face_center,
+                                    view_proj,
+                                    viewport_rect,
+                                ) {
                                     if screen_p.distance(center) <= radius {
                                         f.selected = !deselect;
                                         modified_count += 1;
@@ -2914,26 +3039,46 @@ impl Forge3dStudioApp {
             let model_mat = world_tf.to_matrix();
             let mut screen_points = Vec::new();
 
-            if let Some(screen_p) =
-                crate::ui::gizmo::world_to_screen_pos(world_tf.translation, view_proj, viewport_rect)
-            {
+            if let Some(screen_p) = crate::ui::gizmo::world_to_screen_pos(
+                world_tf.translation,
+                view_proj,
+                viewport_rect,
+            ) {
                 screen_points.push(screen_p);
             }
 
             let aabb = obj.mesh.aabb;
             if !aabb.is_empty() {
                 let corners = [
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z)),
-                    model_mat.transform_point3(forge_math::Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z)),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.min.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.min.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.max.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.min.x, aabb.max.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.min.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.min.y, aabb.max.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.max.y, aabb.min.z,
+                    )),
+                    model_mat.transform_point3(forge_math::Vec3::new(
+                        aabb.max.x, aabb.max.y, aabb.max.z,
+                    )),
                 ];
                 for c in &corners {
-                    if let Some(sp) = crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect) {
+                    if let Some(sp) =
+                        crate::ui::gizmo::world_to_screen_pos(*c, view_proj, viewport_rect)
+                    {
                         screen_points.push(sp);
                     }
                 }
@@ -3210,7 +3355,11 @@ impl Forge3dStudioApp {
         self.editor_state.show_xray = !self.editor_state.show_xray;
         self.status_message = format!(
             "X-Ray: {}",
-            if self.editor_state.show_xray { "ON (Alt+Z)" } else { "OFF" }
+            if self.editor_state.show_xray {
+                "ON (Alt+Z)"
+            } else {
+                "OFF"
+            }
         );
     }
 
@@ -3281,7 +3430,11 @@ impl Forge3dStudioApp {
         self.editor_state.show_overlays = !self.editor_state.show_overlays;
         self.status_message = format!(
             "Viewport Overlays: {}",
-            if self.editor_state.show_overlays { "ON" } else { "OFF" }
+            if self.editor_state.show_overlays {
+                "ON"
+            } else {
+                "OFF"
+            }
         );
     }
 
@@ -3289,7 +3442,11 @@ impl Forge3dStudioApp {
         self.editor_state.show_nav_widget = !self.editor_state.show_nav_widget;
         self.status_message = format!(
             "Navigation Widget: {}",
-            if self.editor_state.show_nav_widget { "ON" } else { "OFF" }
+            if self.editor_state.show_nav_widget {
+                "ON"
+            } else {
+                "OFF"
+            }
         );
     }
 
@@ -3503,11 +3660,15 @@ impl Forge3dStudioApp {
     pub fn cursor_to_selected(&mut self) {
         if self.editor_state.edit_mode == EditMode::Edit {
             if let Some((_, edit_mesh)) = &self.active_edit_mesh {
-                if let Some(center_local) = edit_mesh.selection_center(forge_geometry::EditSelectionMode::Vertex) {
+                if let Some(center_local) =
+                    edit_mesh.selection_center(forge_geometry::EditSelectionMode::Vertex)
+                {
                     let center_world = if let Some(aid) = self.selection.active_id
                         && let Some(obj) = self.scene.get_object(aid)
                     {
-                        obj.local_transform.to_matrix().transform_point3(center_local)
+                        obj.local_transform
+                            .to_matrix()
+                            .transform_point3(center_local)
                     } else {
                         center_local
                     };
@@ -3526,7 +3687,9 @@ impl Forge3dStudioApp {
             self.editor_state.cursor_3d = bbox.center();
             self.status_message = format!(
                 "Cursor to Selected: ({:.2}, {:.2}, {:.2})",
-                bbox.center().x, bbox.center().y, bbox.center().z
+                bbox.center().x,
+                bbox.center().y,
+                bbox.center().z
             );
         } else if let Some(aid) = self.selection.active_id
             && let Some(obj) = self.scene.get_object(aid)
@@ -3575,7 +3738,9 @@ impl Forge3dStudioApp {
             let bbox = self.scene.selected_aabb(&self.selection);
             let center = if !bbox.is_empty() {
                 bbox.center()
-            } else if let Some(aid) = self.selection.active_id && let Some(obj) = self.scene.get_object(aid) {
+            } else if let Some(aid) = self.selection.active_id
+                && let Some(obj) = self.scene.get_object(aid)
+            {
                 obj.local_transform.translation
             } else {
                 target_cursor
@@ -3689,7 +3854,8 @@ impl Forge3dStudioApp {
                 if !sel_pts.is_empty() {
                     let aabb = forge_math::Aabb::from_points(&sel_pts);
                     self.camera.frame_box(&aabb);
-                    self.status_message = format!("Framed {} Selected Vertex/Vertices", sel_pts.len());
+                    self.status_message =
+                        format!("Framed {} Selected Vertex/Vertices", sel_pts.len());
                     self.pending_hover_pick = None;
                     if let Some(r) = &mut self.renderer {
                         r.invalidate_picking();
@@ -3706,12 +3872,21 @@ impl Forge3dStudioApp {
                 if let Some(obj) = self.scene.get_object(aid) {
                     if !obj.mesh.aabb.is_empty() {
                         let corners = [
-                            tf.transform_point(Vec3::new(obj.mesh.aabb.min.x, obj.mesh.aabb.min.y, obj.mesh.aabb.min.z)),
-                            tf.transform_point(Vec3::new(obj.mesh.aabb.max.x, obj.mesh.aabb.max.y, obj.mesh.aabb.max.z)),
+                            tf.transform_point(Vec3::new(
+                                obj.mesh.aabb.min.x,
+                                obj.mesh.aabb.min.y,
+                                obj.mesh.aabb.min.z,
+                            )),
+                            tf.transform_point(Vec3::new(
+                                obj.mesh.aabb.max.x,
+                                obj.mesh.aabb.max.y,
+                                obj.mesh.aabb.max.z,
+                            )),
                         ];
                         bbox = forge_math::Aabb::from_points(&corners);
                     } else {
-                        bbox = forge_math::Aabb::from_center_extents(tf.translation, Vec3::splat(1.0));
+                        bbox =
+                            forge_math::Aabb::from_center_extents(tf.translation, Vec3::splat(1.0));
                     }
                 }
             } else {
@@ -3860,10 +4035,7 @@ impl Forge3dStudioApp {
     }
 
     /// Opens or imports a file based on its extension (.forge, .obj, .gltf, .glb, .stl, .ply).
-    pub fn open_or_import_file(
-        &mut self,
-        path: impl AsRef<std::path::Path>,
-    ) -> Result<(), String> {
+    pub fn open_or_import_file(&mut self, path: impl AsRef<std::path::Path>) -> Result<(), String> {
         self.pending_hover_pick = None;
         let path_ref = path.as_ref();
         let ext = path_ref
@@ -3873,11 +4045,17 @@ impl Forge3dStudioApp {
             .to_lowercase();
 
         let res = match ext.as_str() {
-            "forge" => self.open_project_from_path(path_ref).map_err(|e| e.to_string()),
+            "forge" => self
+                .open_project_from_path(path_ref)
+                .map_err(|e| e.to_string()),
             "obj" => self.import_obj_from_path(path_ref),
             "gltf" | "glb" => self.import_gltf_from_path(path_ref),
-            "stl" => self.import_stl_from_path(path_ref).map_err(|e| e.to_string()),
-            "ply" => self.import_ply_from_path(path_ref).map_err(|e| e.to_string()),
+            "stl" => self
+                .import_stl_from_path(path_ref)
+                .map_err(|e| e.to_string()),
+            "ply" => self
+                .import_ply_from_path(path_ref)
+                .map_err(|e| e.to_string()),
             _ => Err(format!("Unsupported file extension: .{ext}")),
         };
 
@@ -4068,13 +4246,25 @@ impl Forge3dStudioApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
 
-                        if ui.button("⏮ Key").on_hover_text("Jump to Previous Keyframe (Down)").clicked() {
+                        if ui
+                            .button("⏮ Key")
+                            .on_hover_text("Jump to Previous Keyframe (Down)")
+                            .clicked()
+                        {
                             self.jump_to_prev_keyframe();
                         }
-                        if ui.button("|<").on_hover_text("Jump to Start Frame (Shift+Left)").clicked() {
+                        if ui
+                            .button("|<")
+                            .on_hover_text("Jump to Start Frame (Shift+Left)")
+                            .clicked()
+                        {
                             self.set_timeline_frame(start_frame);
                         }
-                        if ui.button("◀").on_hover_text("Step Back 1 Frame (Left)").clicked() {
+                        if ui
+                            .button("◀")
+                            .on_hover_text("Step Back 1 Frame (Left)")
+                            .clicked()
+                        {
                             self.step_timeline_frame(-1);
                         }
 
@@ -4089,20 +4279,34 @@ impl Forge3dStudioApp {
                             egui::Color32::from_rgb(34, 197, 94)
                         };
                         if ui
-                            .add(egui::Button::new(egui::RichText::new(play_text).strong().color(play_col)))
+                            .add(egui::Button::new(
+                                egui::RichText::new(play_text).strong().color(play_col),
+                            ))
                             .on_hover_text("Play / Pause Animation (Space)")
                             .clicked()
                         {
                             self.toggle_timeline_playback();
                         }
 
-                        if ui.button("▶").on_hover_text("Step Forward 1 Frame (Right)").clicked() {
+                        if ui
+                            .button("▶")
+                            .on_hover_text("Step Forward 1 Frame (Right)")
+                            .clicked()
+                        {
                             self.step_timeline_frame(1);
                         }
-                        if ui.button(">|").on_hover_text("Jump to End Frame (Shift+Right)").clicked() {
+                        if ui
+                            .button(">|")
+                            .on_hover_text("Jump to End Frame (Shift+Right)")
+                            .clicked()
+                        {
                             self.set_timeline_frame(end_frame);
                         }
-                        if ui.button("⏭ Key").on_hover_text("Jump to Next Keyframe (Up)").clicked() {
+                        if ui
+                            .button("⏭ Key")
+                            .on_hover_text("Jump to Next Keyframe (Up)")
+                            .clicked()
+                        {
                             self.jump_to_next_keyframe();
                         }
 
@@ -4111,7 +4315,10 @@ impl Forge3dStudioApp {
 
                         ui.separator();
                         ui.label("Start:");
-                        ui.add(egui::DragValue::new(&mut self.scene.animation.timeline.start_frame).range(0..=1000));
+                        ui.add(
+                            egui::DragValue::new(&mut self.scene.animation.timeline.start_frame)
+                                .range(0..=1000),
+                        );
 
                         ui.label("Frame:");
                         let mut curr_f = current_frame;
@@ -4127,10 +4334,16 @@ impl Forge3dStudioApp {
                         }
 
                         ui.label("End:");
-                        ui.add(egui::DragValue::new(&mut self.scene.animation.timeline.end_frame).range(1..=10000));
+                        ui.add(
+                            egui::DragValue::new(&mut self.scene.animation.timeline.end_frame)
+                                .range(1..=10000),
+                        );
 
                         ui.label("FPS:");
-                        ui.add(egui::DragValue::new(&mut self.scene.animation.timeline.fps).range(1..=120));
+                        ui.add(
+                            egui::DragValue::new(&mut self.scene.animation.timeline.fps)
+                                .range(1..=120),
+                        );
 
                         ui.separator();
                         // Keyframe buttons
@@ -4140,7 +4353,9 @@ impl Forge3dStudioApp {
                                     .strong()
                                     .color(egui::Color32::from_rgb(255, 215, 0)),
                             )
-                            .on_hover_text("Insert Transform Keyframe for active object at current frame (I)")
+                            .on_hover_text(
+                                "Insert Transform Keyframe for active object at current frame (I)",
+                            )
                             .clicked()
                         {
                             self.insert_keyframe_active();
@@ -4165,7 +4380,8 @@ impl Forge3dStudioApp {
                     );
 
                     let progress = if total_frames > 0.0 {
-                        ((current_frame.saturating_sub(start_frame)) as f32 / total_frames).clamp(0.0, 1.0)
+                        ((current_frame.saturating_sub(start_frame)) as f32 / total_frames)
+                            .clamp(0.0, 1.0)
                     } else {
                         0.0
                     };
@@ -4256,8 +4472,7 @@ impl Forge3dStudioApp {
                     if (bar_resp.clicked() || bar_resp.dragged())
                         && let Some(mouse) = bar_resp.interact_pointer_pos()
                     {
-                        let norm =
-                            ((mouse.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
+                        let norm = ((mouse.x - bar_rect.min.x) / bar_rect.width()).clamp(0.0, 1.0);
                         let target_f = start_frame + (norm * total_frames).round() as u32;
                         self.set_timeline_frame(target_f);
                     }
@@ -4532,8 +4747,10 @@ impl Forge3dStudioApp {
                     };
 
                     let edit_options = forge_render::EditRenderOptions {
-                        draw_edges: self.editor_state.show_overlays && self.editor_state.use_gpu_wireframe,
-                        draw_vertices: self.editor_state.show_overlays && self.editor_state.use_gpu_vertex_handles,
+                        draw_edges: self.editor_state.show_overlays
+                            && self.editor_state.use_gpu_wireframe,
+                        draw_vertices: self.editor_state.show_overlays
+                            && self.editor_state.use_gpu_vertex_handles,
                         is_vertex_mode: self.editor_state.selection_element
                             == forge_scene::SelectionElement::Vertex,
                         active_vertex: self.editor_state.active_vertex,
@@ -5136,7 +5353,10 @@ mod tests {
 
         // Set active snap target and verify cancel clears it
         app.editor_state.active_snap_target = Some(Vec3::new(1.0, 2.0, 3.0));
-        assert_eq!(app.editor_state.active_snap_target, Some(Vec3::new(1.0, 2.0, 3.0)));
+        assert_eq!(
+            app.editor_state.active_snap_target,
+            Some(Vec3::new(1.0, 2.0, 3.0))
+        );
 
         app.cancel_modal_transform();
         assert_eq!(app.editor_state.active_snap_target, None);
@@ -5161,7 +5381,12 @@ mod tests {
             .unwrap()
             .id;
         app.selection.select(cube_id);
-        let obj_pos = app.scene.get_object(cube_id).unwrap().local_transform.translation;
+        let obj_pos = app
+            .scene
+            .get_object(cube_id)
+            .unwrap()
+            .local_transform
+            .translation;
 
         // 1. Cursor to Selected
         app.cursor_to_selected();
@@ -5174,7 +5399,12 @@ mod tests {
         // 3. Move 3D Cursor and Selection to Cursor
         app.editor_state.cursor_3d = Vec3::new(5.0, 10.0, 15.0);
         app.selection_to_cursor();
-        let new_pos = app.scene.get_object(cube_id).unwrap().local_transform.translation;
+        let new_pos = app
+            .scene
+            .get_object(cube_id)
+            .unwrap()
+            .local_transform
+            .translation;
         assert!((new_pos - Vec3::new(5.0, 10.0, 15.0)).length() < 1e-4);
 
         // 4. Cursor to Grid
@@ -5185,7 +5415,12 @@ mod tests {
 
         // 5. Selection to Grid
         app.selection_to_grid();
-        let grid_pos = app.scene.get_object(cube_id).unwrap().local_transform.translation;
+        let grid_pos = app
+            .scene
+            .get_object(cube_id)
+            .unwrap()
+            .local_transform
+            .translation;
         assert_eq!(grid_pos, Vec3::new(5.0, 10.0, 15.0));
 
         // 6. Pie Menu Kind SnapCursor state
@@ -5230,7 +5465,10 @@ mod tests {
         assert!(app.status_message.contains("Sphere UV Projection complete"));
 
         app.cylinder_project_selected_geometry(2.0);
-        assert!(app.status_message.contains("Cylinder UV Projection complete"));
+        assert!(
+            app.status_message
+                .contains("Cylinder UV Projection complete")
+        );
     }
 
     #[test]
@@ -5265,12 +5503,30 @@ mod tests {
         let mut app = Forge3dStudioApp::new_headless();
 
         // Verify Ground Plane is not selectable by default in viewport
-        let ground_id = app.scene.objects.values().find(|o| o.name == "Ground Plane").unwrap().id;
+        let ground_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Ground Plane")
+            .unwrap()
+            .id;
         assert!(!app.scene.get_object(ground_id).unwrap().selectable);
 
         // Verify Cube and Sphere are selectable
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
-        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        let sphere_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Sphere")
+            .unwrap()
+            .id;
         assert!(app.scene.get_object(cube_id).unwrap().selectable);
         assert!(app.scene.get_object(sphere_id).unwrap().selectable);
 
@@ -5304,7 +5560,13 @@ mod tests {
         use forge_geometry::{SculptBrush, SculptSettings};
 
         let mut app = Forge3dStudioApp::new_headless();
-        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        let sphere_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Sphere")
+            .unwrap()
+            .id;
         app.selection.select(sphere_id);
 
         // Enter Sculpt Mode
@@ -5381,7 +5643,13 @@ mod tests {
     #[test]
     fn test_frame_selected_object_and_edit_mode() {
         let mut app = Forge3dStudioApp::new_headless();
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
         app.selection.select(cube_id);
 
         let initial_eye = app.camera.eye;
@@ -5427,8 +5695,20 @@ mod tests {
         assert!(app.status_message.contains("Select at least one object"));
 
         // Select cube
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
-        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        let sphere_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Sphere")
+            .unwrap()
+            .id;
         app.selection.select(cube_id);
 
         // Enter Local View
@@ -5449,8 +5729,20 @@ mod tests {
     #[test]
     fn test_duplicate_selected_multi_object_and_edit_mode() {
         let mut app = Forge3dStudioApp::new_headless();
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
-        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        let sphere_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Sphere")
+            .unwrap()
+            .id;
 
         // Multi-select Cube + Sphere
         app.selection.select(cube_id);
@@ -5515,9 +5807,27 @@ mod tests {
         assert!(!app.outliner_filter.only_selected);
         assert!(!app.outliner_filter.only_visible);
 
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
-        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
-        let cam_id = app.scene.objects.values().find(|o| o.name == "Camera").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        let sphere_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Sphere")
+            .unwrap()
+            .id;
+        let cam_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Camera")
+            .unwrap()
+            .id;
 
         // Default state: all match
         assert!(app.object_matches_outliner_filter(cube_id));
@@ -5582,7 +5892,13 @@ mod tests {
     #[test]
     fn test_interactive_edit_mode_extrude_inset_loop_cut_and_undo() {
         let mut app = Forge3dStudioApp::new_headless();
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
         app.selection.select(cube_id);
 
         // Enter Edit Mode
@@ -5600,10 +5916,8 @@ mod tests {
         };
 
         // 1. Interactive Extrude
-        let started = app.begin_interactive_edit_tool(
-            InteractiveEditToolType::Extrude,
-            Vec2::new(100.0, 100.0),
-        );
+        let started = app
+            .begin_interactive_edit_tool(InteractiveEditToolType::Extrude, Vec2::new(100.0, 100.0));
         assert!(started);
         assert!(app.interactive_edit_tool.is_some());
 
@@ -5643,8 +5957,8 @@ mod tests {
             edit_mesh.faces[0].selected = true;
         }
         let pre_inset_indices = app.scene.get_object(cube_id).unwrap().mesh.indices.len();
-        let started_inset =
-            app.begin_interactive_edit_tool(InteractiveEditToolType::Inset, Vec2::new(200.0, 200.0));
+        let started_inset = app
+            .begin_interactive_edit_tool(InteractiveEditToolType::Inset, Vec2::new(200.0, 200.0));
         assert!(started_inset);
 
         // Drag mouse
@@ -5662,10 +5976,8 @@ mod tests {
         if let Some((_, edit_mesh)) = &mut app.active_edit_mesh {
             edit_mesh.edges[0].selected = true;
         }
-        let started_loop = app.begin_interactive_edit_tool(
-            InteractiveEditToolType::LoopCut,
-            Vec2::new(300.0, 300.0),
-        );
+        let started_loop = app
+            .begin_interactive_edit_tool(InteractiveEditToolType::LoopCut, Vec2::new(300.0, 300.0));
         assert!(started_loop);
 
         // Slide along X
@@ -5722,9 +6034,27 @@ mod tests {
             .with_transform(Transform::from_translation(Vec3::new(2.0, 1.0, 0.0)));
         let capsule_id = app.scene.add_object(capsule);
 
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
-        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
-        let ground_id = app.scene.objects.values().find(|o| o.name == "Ground Plane").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        let sphere_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Sphere")
+            .unwrap()
+            .id;
+        let ground_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Ground Plane")
+            .unwrap()
+            .id;
 
         let view_proj = app.camera.view_proj_matrix();
         let viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
@@ -5753,9 +6083,24 @@ mod tests {
         assert!(app.selection.is_selected(sphere_id));
 
         // 4. Test multi-object free drag manipulation
-        let cube_initial_pos = app.scene.get_object(cube_id).unwrap().local_transform.translation;
-        let sphere_initial_pos = app.scene.get_object(sphere_id).unwrap().local_transform.translation;
-        let capsule_initial_pos = app.scene.get_object(capsule_id).unwrap().local_transform.translation;
+        let cube_initial_pos = app
+            .scene
+            .get_object(cube_id)
+            .unwrap()
+            .local_transform
+            .translation;
+        let sphere_initial_pos = app
+            .scene
+            .get_object(sphere_id)
+            .unwrap()
+            .local_transform
+            .translation;
+        let capsule_initial_pos = app
+            .scene
+            .get_object(capsule_id)
+            .unwrap()
+            .local_transform
+            .translation;
 
         let hit_point = Vec3::new(0.0, 0.5, 0.0);
         app.start_object_drag(hit_point, cube_id, Vec2::new(500.0, 500.0), true);
@@ -5774,30 +6119,54 @@ mod tests {
 
         // All 3 selected objects must have translated by delta
         assert_eq!(
-            app.scene.get_object(cube_id).unwrap().local_transform.translation,
+            app.scene
+                .get_object(cube_id)
+                .unwrap()
+                .local_transform
+                .translation,
             cube_initial_pos + delta
         );
         assert_eq!(
-            app.scene.get_object(sphere_id).unwrap().local_transform.translation,
+            app.scene
+                .get_object(sphere_id)
+                .unwrap()
+                .local_transform
+                .translation,
             sphere_initial_pos + delta
         );
         assert_eq!(
-            app.scene.get_object(capsule_id).unwrap().local_transform.translation,
+            app.scene
+                .get_object(capsule_id)
+                .unwrap()
+                .local_transform
+                .translation,
             capsule_initial_pos + delta
         );
 
         // 5. Test Undo: reverts all 3 objects in a single history step
         app.undo();
         assert_eq!(
-            app.scene.get_object(cube_id).unwrap().local_transform.translation,
+            app.scene
+                .get_object(cube_id)
+                .unwrap()
+                .local_transform
+                .translation,
             cube_initial_pos
         );
         assert_eq!(
-            app.scene.get_object(sphere_id).unwrap().local_transform.translation,
+            app.scene
+                .get_object(sphere_id)
+                .unwrap()
+                .local_transform
+                .translation,
             sphere_initial_pos
         );
         assert_eq!(
-            app.scene.get_object(capsule_id).unwrap().local_transform.translation,
+            app.scene
+                .get_object(capsule_id)
+                .unwrap()
+                .local_transform
+                .translation,
             capsule_initial_pos
         );
     }
@@ -5842,8 +6211,15 @@ mod tests {
         app.sync_active_shader_graph_to_material();
 
         let obj = app.scene.get_object(cube_id).unwrap();
-        let mat_id = obj.material_id.as_ref().expect("Material ID should be assigned");
-        let mat = app.scene.materials.get(mat_id).expect("Material should be in scene");
+        let mat_id = obj
+            .material_id
+            .as_ref()
+            .expect("Material ID should be assigned");
+        let mat = app
+            .scene
+            .materials
+            .get(mat_id)
+            .expect("Material should be in scene");
 
         assert_eq!(mat.metallic_factor, 0.9);
         assert_eq!(mat.roughness_factor, 0.12);
@@ -5873,9 +6249,27 @@ mod tests {
         assert!(!point_in_polygon(egui::pos2(-10.0, 30.0), &triangle));
 
         // 2. Lasso select in Object Mode
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
-        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
-        let ground_id = app.scene.objects.values().find(|o| o.name == "Ground Plane").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        let sphere_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Sphere")
+            .unwrap()
+            .id;
+        let ground_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Ground Plane")
+            .unwrap()
+            .id;
 
         let view_proj = app.camera.view_proj_matrix();
         let viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
@@ -5898,8 +6292,9 @@ mod tests {
         assert_eq!(app.selection.selected_ids.len(), 0);
 
         let cube_tf = app.scene.world_transform(cube_id);
-        let cube_screen_p = crate::ui::gizmo::world_to_screen_pos(cube_tf.translation, view_proj, viewport_rect)
-            .expect("Cube should project to screen");
+        let cube_screen_p =
+            crate::ui::gizmo::world_to_screen_pos(cube_tf.translation, view_proj, viewport_rect)
+                .expect("Cube should project to screen");
 
         app.circle_select(cube_screen_p, 100.0, view_proj, viewport_rect, false);
         assert!(app.selection.selected_ids.contains(&cube_id));
@@ -5928,20 +6323,38 @@ mod tests {
     fn test_select_linked_edit_mode() {
         let mut app = Forge3dStudioApp::new_headless();
 
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
-        let sphere_id = app.scene.objects.values().find(|o| o.name == "Sphere").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
+        let sphere_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Sphere")
+            .unwrap()
+            .id;
 
         // Join Sphere into Cube to create a two-island mesh
         app.selection.select(cube_id);
         app.selection.add_to_selection(sphere_id);
         app.join_selected();
 
-        let joined_id = app.selection.active_id.expect("Joined object should be active");
+        let joined_id = app
+            .selection
+            .active_id
+            .expect("Joined object should be active");
 
         // Enter Edit Mode
         app.set_edit_mode(EditMode::Edit);
         assert!(app.active_edit_mesh.is_some());
-        assert_eq!(app.active_edit_mesh.as_ref().map(|(id, _)| *id), Some(joined_id));
+        assert_eq!(
+            app.active_edit_mesh.as_ref().map(|(id, _)| *id),
+            Some(joined_id)
+        );
 
         let total_verts = app.active_edit_mesh.as_ref().unwrap().1.vertices.len();
 
@@ -5975,7 +6388,13 @@ mod tests {
     fn test_voxel_remesh_lifecycle_and_undo() {
         let mut app = Forge3dStudioApp::new_headless();
 
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
         app.selection.select(cube_id);
 
         let initial_vert_count = app.scene.get_object(cube_id).unwrap().mesh.vertices.len();
@@ -6004,14 +6423,23 @@ mod tests {
         app.voxel_remesh_active(0.4);
         let (active_mesh_id, ref edit_mesh) = *app.active_edit_mesh.as_ref().unwrap();
         assert_eq!(active_mesh_id, cube_id);
-        assert_eq!(edit_mesh.vertices.len(), app.scene.get_object(cube_id).unwrap().mesh.vertices.len());
+        assert_eq!(
+            edit_mesh.vertices.len(),
+            app.scene.get_object(cube_id).unwrap().mesh.vertices.len()
+        );
     }
 
     #[test]
     fn test_modifier_stack_lifecycle_and_undo() {
         let mut app = Forge3dStudioApp::new_headless();
 
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
         app.selection.select(cube_id);
 
         let initial_base_verts = app.scene.get_object(cube_id).unwrap().mesh.vertices.len();
@@ -6030,12 +6458,18 @@ mod tests {
         app.duplicate_modifier(cube_id, 0);
         let obj = app.scene.get_object(cube_id).unwrap();
         assert_eq!(obj.modifiers.len(), 2);
-        assert_eq!(obj.modifiers.modifiers[1].name, "Subdivision Surface (Copy)");
+        assert_eq!(
+            obj.modifiers.modifiers[1].name,
+            "Subdivision Surface (Copy)"
+        );
 
         // 3. Move modifiers up / down
         app.move_modifier_up(cube_id, 1);
         let obj = app.scene.get_object(cube_id).unwrap();
-        assert_eq!(obj.modifiers.modifiers[0].name, "Subdivision Surface (Copy)");
+        assert_eq!(
+            obj.modifiers.modifiers[0].name,
+            "Subdivision Surface (Copy)"
+        );
 
         // 4. In Edit Mode, applying modifier is disallowed
         app.set_edit_mode(EditMode::Edit);
@@ -6060,13 +6494,19 @@ mod tests {
         assert_eq!(obj.mesh.vertices.len(), baked_verts);
 
         // 7. Apply All Modifiers
-        app.add_modifier(cube_id, ModifierType::Solidify(forge_modifiers::SolidifyModifier::default()));
+        app.add_modifier(
+            cube_id,
+            ModifierType::Solidify(forge_modifiers::SolidifyModifier::default()),
+        );
         assert!(app.apply_all_modifiers(cube_id));
         let obj = app.scene.get_object(cube_id).unwrap();
         assert_eq!(obj.modifiers.len(), 0);
 
         // 8. Clear all
-        app.add_modifier(cube_id, ModifierType::Mirror(forge_modifiers::MirrorModifier::default()));
+        app.add_modifier(
+            cube_id,
+            ModifierType::Mirror(forge_modifiers::MirrorModifier::default()),
+        );
         assert_eq!(app.scene.get_object(cube_id).unwrap().modifiers.len(), 1);
         app.clear_all_modifiers(cube_id);
         assert_eq!(app.scene.get_object(cube_id).unwrap().modifiers.len(), 0);
@@ -6076,7 +6516,13 @@ mod tests {
     fn test_timeline_and_keyframe_lifecycle() {
         let mut app = Forge3dStudioApp::new_headless();
 
-        let cube_id = app.scene.objects.values().find(|o| o.name == "Cube").unwrap().id;
+        let cube_id = app
+            .scene
+            .objects
+            .values()
+            .find(|o| o.name == "Cube")
+            .unwrap()
+            .id;
         app.selection.select(cube_id);
 
         assert!(!app.scene.animation.has_keyframe(cube_id, 0));
