@@ -182,6 +182,12 @@ pub fn get_all_commands() -> Vec<CommandItem> {
         },
         CommandItem {
             category: "Mesh",
+            title: "Toggle Proportional Editing",
+            shortcut: "O",
+            action_id: "toggle_proportional_editing",
+        },
+        CommandItem {
+            category: "Mesh",
             title: "Subdivide Mesh",
             shortcut: "",
             action_id: "mesh_subdivide",
@@ -593,7 +599,8 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
                 app.toggle_edit_mode();
             }
             let center = forge_math::Vec2::new(400.0, 300.0);
-            if !app.begin_interactive_edit_tool(crate::app::InteractiveEditToolType::Extrude, center)
+            if !app
+                .begin_interactive_edit_tool(crate::app::InteractiveEditToolType::Extrude, center)
             {
                 app.extrude_selected_geometry(0.5);
             }
@@ -619,7 +626,8 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
                 app.toggle_edit_mode();
             }
             let center = forge_math::Vec2::new(400.0, 300.0);
-            if !app.begin_interactive_edit_tool(crate::app::InteractiveEditToolType::LoopCut, center)
+            if !app
+                .begin_interactive_edit_tool(crate::app::InteractiveEditToolType::LoopCut, center)
             {
                 app.loop_cut_selected_geometry(0.5);
             }
@@ -689,6 +697,15 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
                 app.toggle_edit_mode();
             }
             app.merge_by_distance_geometry(0.001);
+        }
+        "toggle_proportional_editing" => {
+            app.editor_state.proportional_editing = !app.editor_state.proportional_editing;
+            let state_str = if app.editor_state.proportional_editing {
+                "ON"
+            } else {
+                "OFF"
+            };
+            app.status_message = format!("Proportional Editing (O): {}", state_str);
         }
         "mesh_subdivide" => {
             if app.editor_state.edit_mode != EditMode::Edit {

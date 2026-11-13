@@ -6,8 +6,7 @@ use forge_geometry::primitives::{
 use forge_math::{Transform, Vec3};
 use forge_render::{CameraProjection, ViewPreset};
 use forge_scene::{
-    Action, EditMode, ForgeProject, LightData, LightKind, PrimitiveType, SceneObject,
-    WorkspaceMode,
+    Action, EditMode, ForgeProject, LightData, LightKind, PrimitiveType, SceneObject, WorkspaceMode,
 };
 
 use crate::app::Forge3dStudioApp;
@@ -809,6 +808,23 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
 
             ui.separator();
+            ui.checkbox(
+                &mut app.editor_state.proportional_editing,
+                "Proportional Editing (O)",
+            );
+            if app.editor_state.proportional_editing {
+                ui.horizontal(|ui| {
+                    ui.label("Radius:");
+                    ui.add(
+                        egui::DragValue::new(&mut app.editor_state.proportional_radius)
+                            .speed(0.1)
+                            .range(0.01..=50.0)
+                            .suffix(" m"),
+                    );
+                });
+            }
+
+            ui.separator();
 
             if ui.button("Tris to Quads").clicked() {
                 if app.editor_state.edit_mode != EditMode::Edit {
@@ -1000,14 +1016,37 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 "Show Viewport Debug Telemetry",
             );
             ui.checkbox(&mut app.editor_state.walk_mode, "Walk Mode (Lock Ground Y)");
-            if ui.checkbox(&mut app.editor_state.show_overlays, "Show Viewport Overlays (Shift+Alt+Z)").changed() {
-                app.status_message = format!("Viewport Overlays: {}", if app.editor_state.show_overlays { "ON" } else { "OFF" });
+            if ui
+                .checkbox(
+                    &mut app.editor_state.show_overlays,
+                    "Show Viewport Overlays (Shift+Alt+Z)",
+                )
+                .changed()
+            {
+                app.status_message = format!(
+                    "Viewport Overlays: {}",
+                    if app.editor_state.show_overlays {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
+                );
             }
             ui.checkbox(&mut app.editor_state.show_grid, "Show Ground Grid");
             ui.checkbox(&mut app.editor_state.show_axes, "Show Coordinate Axes");
             ui.checkbox(&mut app.editor_state.show_wireframe, "Show Wireframe");
-            if ui.checkbox(&mut app.editor_state.show_xray, "X-Ray Mode (Alt+Z)").changed() {
-                app.status_message = format!("X-Ray: {}", if app.editor_state.show_xray { "ON" } else { "OFF" });
+            if ui
+                .checkbox(&mut app.editor_state.show_xray, "X-Ray Mode (Alt+Z)")
+                .changed()
+            {
+                app.status_message = format!(
+                    "X-Ray: {}",
+                    if app.editor_state.show_xray {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
+                );
             }
             let local_label = if app.is_in_local_view() {
                 "Exit Local View (Numpad /)"

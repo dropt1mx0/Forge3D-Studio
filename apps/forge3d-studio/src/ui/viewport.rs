@@ -300,12 +300,22 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 let mut best_target_pos = None;
 
                                 for (&id, obj) in &app.scene.objects {
-                                    if !app.editor_state.modal_transform.initial_transforms.contains_key(&id) && obj.visible {
+                                    if !app
+                                        .editor_state
+                                        .modal_transform
+                                        .initial_transforms
+                                        .contains_key(&id)
+                                        && obj.visible
+                                    {
                                         let model_mat = obj.local_transform.to_matrix();
                                         for v in &obj.mesh.vertices {
-                                            let world_pos = model_mat.transform_point3(Vec3::from(v.position));
-                                            if let Some(screen_pos) = world_to_screen_pos(world_pos, view_proj, rect) {
-                                                let d_sq = (screen_pos.x - mouse.x).powi(2) + (screen_pos.y - mouse.y).powi(2);
+                                            let world_pos =
+                                                model_mat.transform_point3(Vec3::from(v.position));
+                                            if let Some(screen_pos) =
+                                                world_to_screen_pos(world_pos, view_proj, rect)
+                                            {
+                                                let d_sq = (screen_pos.x - mouse.x).powi(2)
+                                                    + (screen_pos.y - mouse.y).powi(2);
                                                 if d_sq < best_dist_sq {
                                                     best_dist_sq = d_sq;
                                                     best_target_pos = Some(world_pos);
@@ -319,12 +329,24 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                     snap_target_found = Some(target_pos);
                                     let mut delta = target_pos - pivot;
                                     match app.editor_state.modal_transform.constraint {
-                                        Some(AxisConstraint::X) => delta = Vec3::new(delta.x, 0.0, 0.0),
-                                        Some(AxisConstraint::Y) => delta = Vec3::new(0.0, delta.y, 0.0),
-                                        Some(AxisConstraint::Z) => delta = Vec3::new(0.0, 0.0, delta.z),
-                                        Some(AxisConstraint::PlaneXY) => delta = Vec3::new(delta.x, delta.y, 0.0),
-                                        Some(AxisConstraint::PlaneXZ) => delta = Vec3::new(delta.x, 0.0, delta.z),
-                                        Some(AxisConstraint::PlaneYZ) => delta = Vec3::new(0.0, delta.y, delta.z),
+                                        Some(AxisConstraint::X) => {
+                                            delta = Vec3::new(delta.x, 0.0, 0.0)
+                                        }
+                                        Some(AxisConstraint::Y) => {
+                                            delta = Vec3::new(0.0, delta.y, 0.0)
+                                        }
+                                        Some(AxisConstraint::Z) => {
+                                            delta = Vec3::new(0.0, 0.0, delta.z)
+                                        }
+                                        Some(AxisConstraint::PlaneXY) => {
+                                            delta = Vec3::new(delta.x, delta.y, 0.0)
+                                        }
+                                        Some(AxisConstraint::PlaneXZ) => {
+                                            delta = Vec3::new(delta.x, 0.0, delta.z)
+                                        }
+                                        Some(AxisConstraint::PlaneYZ) => {
+                                            delta = Vec3::new(0.0, delta.y, delta.z)
+                                        }
                                         None => {}
                                     }
                                     translate_delta = delta;
@@ -458,19 +480,33 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         if input.key_pressed(Key::Tab) {
             if input.modifiers.shift && input.modifiers.ctrl {
                 // Shift + Ctrl + Tab: Cycle Snap Element (Grid vs Vertex)
-                app.editor_state.snap_settings.snap_to_vertex = !app.editor_state.snap_settings.snap_to_vertex;
-                app.editor_state.snap_settings.snap_to_grid = !app.editor_state.snap_settings.snap_to_vertex;
+                app.editor_state.snap_settings.snap_to_vertex =
+                    !app.editor_state.snap_settings.snap_to_vertex;
+                app.editor_state.snap_settings.snap_to_grid =
+                    !app.editor_state.snap_settings.snap_to_vertex;
                 app.status_message = format!(
                     "Snap Element: {}",
-                    if app.editor_state.snap_settings.snap_to_vertex { "Vertex" } else { "Grid Increment" }
+                    if app.editor_state.snap_settings.snap_to_vertex {
+                        "Vertex"
+                    } else {
+                        "Grid Increment"
+                    }
                 );
             } else if input.modifiers.shift {
                 // Shift + Tab: Toggle Snapping (Magnet)
                 app.editor_state.snap_settings.enabled = !app.editor_state.snap_settings.enabled;
                 app.status_message = format!(
                     "Snapping: {} ({})",
-                    if app.editor_state.snap_settings.enabled { "ON" } else { "OFF" },
-                    if app.editor_state.snap_settings.snap_to_vertex { "Vertex" } else { "Grid" }
+                    if app.editor_state.snap_settings.enabled {
+                        "ON"
+                    } else {
+                        "OFF"
+                    },
+                    if app.editor_state.snap_settings.snap_to_vertex {
+                        "Vertex"
+                    } else {
+                        "Grid"
+                    }
                 );
             } else if input.modifiers.ctrl {
                 app.active_pie_menu = Some(PieMenuState {
@@ -545,7 +581,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
 
         // Framing: 'F' (Object Mode), Alt+Period / Ctrl+Period / Delete (Blender Numpad . compatible), or Home
-        let trigger_frame_selected = (input.key_pressed(Key::F) && app.editor_state.edit_mode == EditMode::Object)
+        let trigger_frame_selected = (input.key_pressed(Key::F)
+            && app.editor_state.edit_mode == EditMode::Object)
             || (input.modifiers.alt && input.key_pressed(Key::Period))
             || (input.modifiers.ctrl && input.key_pressed(Key::Period))
             || input.key_pressed(Key::Delete);
@@ -660,6 +697,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.status_message = "Exited Circle Select".to_string();
                 }
                 ui.ctx().request_repaint();
+            } else if input.key_pressed(Key::O) {
+                app.editor_state.proportional_editing = !app.editor_state.proportional_editing;
+                let state_str = if app.editor_state.proportional_editing {
+                    "ON"
+                } else {
+                    "OFF"
+                };
+                app.status_message = format!("Proportional Editing (O): {}", state_str);
+                ui.ctx().request_repaint();
             }
         } else if input.modifiers.alt && input.key_pressed(Key::A) {
             app.deselect_all();
@@ -667,6 +713,24 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         } else if (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(Key::I) {
             app.invert_selection();
             ui.ctx().request_repaint();
+        }
+
+        // Resize Proportional Editing radius with mouse scroll during active gizmo
+        if app.editor_state.proportional_editing
+            && is_pointer_in_viewport
+            && app.editor_state.pointer_state == PointerInteractionState::GizmoDragging
+        {
+            let scroll = input.smooth_scroll_delta.y;
+            if scroll != 0.0 {
+                let factor = if scroll > 0.0 { 1.1 } else { 0.9 };
+                app.editor_state.proportional_radius =
+                    (app.editor_state.proportional_radius * factor).clamp(0.01, 100.0);
+                app.status_message = format!(
+                    "Proportional Radius: {:.2} m",
+                    app.editor_state.proportional_radius
+                );
+                ui.ctx().request_repaint();
+            }
         }
 
         // Exit Circle Select on Escape or RMB
@@ -831,27 +895,39 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 app.sculpt_settings.brush = forge_geometry::SculptBrush::Crease;
                 app.status_message = "Sculpt Brush: Crease (C)".to_string();
                 ui.ctx().request_repaint();
-            } else if input.key_pressed(Key::X) && !input.modifiers.ctrl && !input.modifiers.command {
+            } else if input.key_pressed(Key::X) && !input.modifiers.ctrl && !input.modifiers.command
+            {
                 app.sculpt_settings.symmetry_x = !app.sculpt_settings.symmetry_x;
                 app.status_message = format!(
                     "Sculpt Symmetry X: {}",
-                    if app.sculpt_settings.symmetry_x { "ON" } else { "OFF" }
+                    if app.sculpt_settings.symmetry_x {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
                 );
                 ui.ctx().request_repaint();
-            } else if input.key_pressed(Key::Y) && !input.modifiers.ctrl && !input.modifiers.command {
+            } else if input.key_pressed(Key::Y) && !input.modifiers.ctrl && !input.modifiers.command
+            {
                 app.sculpt_settings.symmetry_y = !app.sculpt_settings.symmetry_y;
                 app.status_message = format!(
                     "Sculpt Symmetry Y: {}",
-                    if app.sculpt_settings.symmetry_y { "ON" } else { "OFF" }
+                    if app.sculpt_settings.symmetry_y {
+                        "ON"
+                    } else {
+                        "OFF"
+                    }
                 );
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::OpenBracket) {
                 app.sculpt_settings.radius = (app.sculpt_settings.radius - 0.05).max(0.05);
-                app.status_message = format!("Sculpt Radius: {:.2} ([)", app.sculpt_settings.radius);
+                app.status_message =
+                    format!("Sculpt Radius: {:.2} ([)", app.sculpt_settings.radius);
                 ui.ctx().request_repaint();
             } else if input.key_pressed(Key::CloseBracket) {
                 app.sculpt_settings.radius = (app.sculpt_settings.radius + 0.05).min(3.0);
-                app.status_message = format!("Sculpt Radius: {:.2} (])", app.sculpt_settings.radius);
+                app.status_message =
+                    format!("Sculpt Radius: {:.2} (])", app.sculpt_settings.radius);
                 ui.ctx().request_repaint();
             } else if input.modifiers.shift && input.key_pressed(Key::F) {
                 app.sculpt_settings.strength = if app.sculpt_settings.strength < 0.95 {
@@ -859,7 +935,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 } else {
                     0.2
                 };
-                app.status_message = format!("Sculpt Strength: {:.2} (Shift+F)", app.sculpt_settings.strength);
+                app.status_message = format!(
+                    "Sculpt Strength: {:.2} (Shift+F)",
+                    app.sculpt_settings.strength
+                );
                 ui.ctx().request_repaint();
             } else if !input.modifiers.any() && input.key_pressed(Key::F) {
                 app.sculpt_settings.radius = if app.sculpt_settings.radius < 1.8 {
@@ -867,9 +946,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 } else {
                     0.25
                 };
-                app.status_message = format!("Sculpt Radius: {:.2} (F)", app.sculpt_settings.radius);
+                app.status_message =
+                    format!("Sculpt Radius: {:.2} (F)", app.sculpt_settings.radius);
                 ui.ctx().request_repaint();
-            } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::R) {
+            } else if (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(Key::R)
+            {
                 app.voxel_remesh_active(app.sculpt_settings.voxel_size);
                 ui.ctx().request_repaint();
             }
@@ -1010,10 +1091,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             let new_vis = !app.editor_state.panel_settings.sidebar_visible;
             app.editor_state.panel_settings.sidebar_visible = new_vis;
             let _ = app.editor_state.panel_settings.save();
-            app.status_message = format!(
-                "Sidebar: {}",
-                if new_vis { "Shown" } else { "Hidden" }
-            );
+            app.status_message = format!("Sidebar: {}", if new_vis { "Shown" } else { "Hidden" });
             ui.ctx().request_repaint();
         }
 
@@ -1095,7 +1173,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     // =========================================================================
     // 4. MOUSE CAMERA NAVIGATION: ORBIT, PAN, ZOOM, DOLLY
     // =========================================================================
-    if !app.editor_state.fly_nav_active && !app.editor_state.modal_transform.active && app.active_pie_menu.is_none() {
+    if !app.editor_state.fly_nav_active
+        && !app.editor_state.modal_transform.active
+        && app.active_pie_menu.is_none()
+    {
         let mmb_down = input.pointer.button_down(PointerButton::Middle);
         let alt_lmb_down = input.modifiers.alt && input.pointer.button_down(PointerButton::Primary);
 
@@ -1278,7 +1359,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     let lmb_released = input.pointer.button_released(PointerButton::Primary);
 
     // Safety & Focus Loss handling: if primary mouse button is released without a release event (e.g. window lost focus), reset interaction state
-    if !lmb_down && !lmb_released && app.editor_state.pointer_state != PointerInteractionState::Idle {
+    if !lmb_down && !lmb_released && app.editor_state.pointer_state != PointerInteractionState::Idle
+    {
         if let Some(drag) = app.object_drag_state.take()
             && drag.is_active_drag
         {
@@ -1430,7 +1512,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     }
                     if let Some(aid) = app.selection.active_id {
                         if let Some(obj) = app.scene.get_object(aid) {
-                            app.gizmo_initial_transforms.insert(aid, obj.local_transform);
+                            app.gizmo_initial_transforms
+                                .insert(aid, obj.local_transform);
                         }
                     }
                 }
@@ -1560,10 +1643,33 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     app.editor_state.pointer_state = PointerInteractionState::GizmoDragging;
                 }
 
-                if let Some(crate::ui::gizmo::GizmoDelta::Translate(delta)) = gizmo_res.delta {
-                    edit_mesh.translate_selection(delta, edit_mode_sel);
-                    app.sync_edit_mesh_to_scene();
-                    ui.ctx().request_repaint();
+                match gizmo_res.delta {
+                    Some(crate::ui::gizmo::GizmoDelta::Translate(delta)) => {
+                        if app.editor_state.proportional_editing {
+                            edit_mesh.proportional_translate(
+                                delta,
+                                app.editor_state.proportional_radius,
+                                edit_mode_sel,
+                                forge_geometry::ProportionalFalloff::Smooth,
+                            );
+                        } else {
+                            edit_mesh.translate_selection(delta, edit_mode_sel);
+                        }
+                        app.sync_edit_mesh_to_scene();
+                        ui.ctx().request_repaint();
+                    }
+                    Some(crate::ui::gizmo::GizmoDelta::Rotate(quat)) => {
+                        let (axis, angle_rad) = quat.to_axis_angle();
+                        edit_mesh.rotate_selection(axis, angle_rad, pivot, edit_mode_sel);
+                        app.sync_edit_mesh_to_scene();
+                        ui.ctx().request_repaint();
+                    }
+                    Some(crate::ui::gizmo::GizmoDelta::Scale(factor)) => {
+                        edit_mesh.scale_selection(factor, pivot, edit_mode_sel);
+                        app.sync_edit_mesh_to_scene();
+                        ui.ctx().request_repaint();
+                    }
+                    None => {}
                 }
             }
         }
@@ -1654,7 +1760,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // Support Blender signature Ctrl+RMB to start Lasso Select
         let ctrl_rmb_pressed = (input.modifiers.ctrl || input.modifiers.command)
             && input.pointer.button_pressed(PointerButton::Secondary);
-        if ctrl_rmb_pressed && is_pointer_in_viewport && !is_ui_interacting && let Some(pos) = mouse_pos {
+        if ctrl_rmb_pressed
+            && is_pointer_in_viewport
+            && !is_ui_interacting
+            && let Some(pos) = mouse_pos
+        {
             app.editor_state.pointer_state = PointerInteractionState::LassoSelecting;
             app.editor_state.lasso_points = vec![Vec2::new(pos.x, pos.y)];
         }
@@ -1671,8 +1781,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 || app.editor_state.transform_mode == TransformMode::CircleSelect
             {
                 app.editor_state.pointer_state = PointerInteractionState::CircleSelecting;
-                let deselect = input.modifiers.shift || input.pointer.button_down(PointerButton::Middle);
-                app.circle_select(pos, app.editor_state.circle_select_radius, view_proj, rect, deselect);
+                let deselect =
+                    input.modifiers.shift || input.pointer.button_down(PointerButton::Middle);
+                app.circle_select(
+                    pos,
+                    app.editor_state.circle_select_radius,
+                    view_proj,
+                    rect,
+                    deselect,
+                );
             } else if app.editor_state.transform_mode == TransformMode::LassoSelect {
                 app.editor_state.pointer_state = PointerInteractionState::LassoSelecting;
                 app.editor_state.lasso_points = vec![Vec2::new(pos.x, pos.y)];
@@ -1843,11 +1960,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 } else if input.modifiers.shift {
                                     edit_mesh.edges[e_idx].selected =
                                         !edit_mesh.edges[e_idx].selected;
+                                    app.status_message = format!("Toggled Edge #{}", e_idx);
                                 } else {
                                     edit_mesh.deselect_all(EditSelectionMode::Edge);
                                     edit_mesh.edges[e_idx].selected = true;
+                                    app.status_message = format!("Selected Edge #{}", e_idx);
                                 }
-                                app.status_message = format!("Selected Edge #{}", e_idx);
                                 app.sync_edit_mesh_to_scene();
                                 ui.ctx().request_repaint();
                             }
@@ -1867,11 +1985,12 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                                 } else if input.modifiers.shift {
                                     edit_mesh.faces[f_idx].selected =
                                         !edit_mesh.faces[f_idx].selected;
+                                    app.status_message = format!("Toggled Face #{}", f_idx);
                                 } else {
                                     edit_mesh.deselect_all(EditSelectionMode::Face);
                                     edit_mesh.faces[f_idx].selected = true;
+                                    app.status_message = format!("Selected Face #{}", f_idx);
                                 }
-                                app.status_message = format!("Selected Face #{}", f_idx);
                                 app.sync_edit_mesh_to_scene();
                                 ui.ctx().request_repaint();
                             }
@@ -2040,8 +2159,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 PointerInteractionState::LassoSelecting => {
                     if let Some(curr) = mouse_pos {
                         let last_p = app.editor_state.lasso_points.last().copied();
-                        if last_p.map_or(true, |lp| lp.distance(Vec2::new(curr.x, curr.y)) > 3.0) {
-                            app.editor_state.lasso_points.push(Vec2::new(curr.x, curr.y));
+                        if last_p.is_none_or(|lp| lp.distance(Vec2::new(curr.x, curr.y)) > 3.0) {
+                            app.editor_state
+                                .lasso_points
+                                .push(Vec2::new(curr.x, curr.y));
                         }
 
                         if app.editor_state.lasso_points.len() >= 2 {
@@ -2059,7 +2180,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             if pts.len() >= 3 {
                                 painter.line_segment(
                                     [*pts.last().unwrap(), *pts.first().unwrap()],
-                                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 170, 40, 100)),
+                                    Stroke::new(
+                                        1.0,
+                                        Color32::from_rgba_unmultiplied(255, 170, 40, 100),
+                                    ),
                                 );
                             }
                             ui.ctx().request_repaint();
@@ -2068,7 +2192,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 }
                 PointerInteractionState::CircleSelecting => {
                     if let Some(curr) = mouse_pos {
-                        let deselect = input.modifiers.shift || input.pointer.button_down(PointerButton::Middle);
+                        let deselect = input.modifiers.shift
+                            || input.pointer.button_down(PointerButton::Middle);
                         let r = app.editor_state.circle_select_radius;
                         app.circle_select(curr, r, view_proj, rect, deselect);
                         ui.ctx().request_repaint();
@@ -2085,7 +2210,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             && app.sculpt_stroke_initial_mesh.is_none()
         {
             if let Some((_, edit_mesh)) = &app.active_edit_mesh {
-                app.sculpt_stroke_initial_mesh = Some(std::sync::Arc::new(edit_mesh.to_render_mesh()));
+                app.sculpt_stroke_initial_mesh =
+                    Some(std::sync::Arc::new(edit_mesh.to_render_mesh()));
             }
         }
 
@@ -2170,7 +2296,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
                 let fov_rad = app.camera.fov_y_deg.to_radians();
                 let screen_h = rect.height();
-                let radius_px = ((app.sculpt_settings.radius / (cam_dist * (fov_rad * 0.5).tan())) * (screen_h * 0.5)).clamp(8.0, 400.0);
+                let radius_px = ((app.sculpt_settings.radius / (cam_dist * (fov_rad * 0.5).tan()))
+                    * (screen_h * 0.5))
+                    .clamp(8.0, 400.0);
 
                 let ring_color = if lmb_down {
                     Color32::from_rgb(255, 120, 20)
@@ -2184,13 +2312,21 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     if let Some((_, hit_local, tf)) = hit_info {
                         let symm_local = Vec3::new(-hit_local.x, hit_local.y, hit_local.z);
                         let symm_world = tf.transform_point(symm_local);
-                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect) {
+                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect)
+                        {
                             painter.circle_stroke(
                                 symm_screen,
                                 radius_px,
-                                Stroke::new(1.3, Color32::from_rgba_unmultiplied(100, 200, 255, 180)),
+                                Stroke::new(
+                                    1.3,
+                                    Color32::from_rgba_unmultiplied(100, 200, 255, 180),
+                                ),
                             );
-                            painter.circle_filled(symm_screen, 2.0, Color32::from_rgb(120, 220, 255));
+                            painter.circle_filled(
+                                symm_screen,
+                                2.0,
+                                Color32::from_rgb(120, 220, 255),
+                            );
                         }
                     }
                 }
@@ -2198,13 +2334,21 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     if let Some((_, hit_local, tf)) = hit_info {
                         let symm_local = Vec3::new(hit_local.x, -hit_local.y, hit_local.z);
                         let symm_world = tf.transform_point(symm_local);
-                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect) {
+                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect)
+                        {
                             painter.circle_stroke(
                                 symm_screen,
                                 radius_px,
-                                Stroke::new(1.3, Color32::from_rgba_unmultiplied(100, 255, 180, 180)),
+                                Stroke::new(
+                                    1.3,
+                                    Color32::from_rgba_unmultiplied(100, 255, 180, 180),
+                                ),
                             );
-                            painter.circle_filled(symm_screen, 2.0, Color32::from_rgb(120, 255, 180));
+                            painter.circle_filled(
+                                symm_screen,
+                                2.0,
+                                Color32::from_rgb(120, 255, 180),
+                            );
                         }
                     }
                 }
@@ -2212,13 +2356,21 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     if let Some((_, hit_local, tf)) = hit_info {
                         let symm_local = Vec3::new(hit_local.x, hit_local.y, -hit_local.z);
                         let symm_world = tf.transform_point(symm_local);
-                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect) {
+                        if let Some(symm_screen) = world_to_screen_pos(symm_world, view_proj, rect)
+                        {
                             painter.circle_stroke(
                                 symm_screen,
                                 radius_px,
-                                Stroke::new(1.3, Color32::from_rgba_unmultiplied(220, 150, 255, 180)),
+                                Stroke::new(
+                                    1.3,
+                                    Color32::from_rgba_unmultiplied(220, 150, 255, 180),
+                                ),
                             );
-                            painter.circle_filled(symm_screen, 2.0, Color32::from_rgb(220, 150, 255));
+                            painter.circle_filled(
+                                symm_screen,
+                                2.0,
+                                Color32::from_rgb(220, 150, 255),
+                            );
                         }
                     }
                 }
@@ -2246,7 +2398,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         // C. Pointer Release Handling
         let secondary_released = input.pointer.button_released(PointerButton::Secondary);
         if lmb_released
-            || (app.editor_state.pointer_state == PointerInteractionState::LassoSelecting && secondary_released)
+            || (app.editor_state.pointer_state == PointerInteractionState::LassoSelecting
+                && secondary_released)
         {
             if app.editor_state.edit_mode == EditMode::Sculpt {
                 if let Some(old_mesh) = app.sculpt_stroke_initial_mesh.take() {
@@ -2350,10 +2503,20 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         EditMode::Edit => format!("Edit Mode ({:?})", app.editor_state.selection_element),
         EditMode::Sculpt => {
             let mut symm = String::new();
-            if app.sculpt_settings.symmetry_x { symm.push('X'); }
-            if app.sculpt_settings.symmetry_y { symm.push('Y'); }
-            if app.sculpt_settings.symmetry_z { symm.push('Z'); }
-            let symm_str = if symm.is_empty() { String::new() } else { format!(" Symm [{}]", symm) };
+            if app.sculpt_settings.symmetry_x {
+                symm.push('X');
+            }
+            if app.sculpt_settings.symmetry_y {
+                symm.push('Y');
+            }
+            if app.sculpt_settings.symmetry_z {
+                symm.push('Z');
+            }
+            let symm_str = if symm.is_empty() {
+                String::new()
+            } else {
+                format!(" Symm [{}]", symm)
+            };
             format!(
                 "Sculpt: {} (R: {:.2}, Str: {:.2}){}",
                 app.sculpt_settings.brush.name(),
@@ -2364,7 +2527,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     };
     let tool_str = if app.editor_state.circle_select_active {
-        format!("CircleSelect (R: {:.0}px)", app.editor_state.circle_select_radius)
+        format!(
+            "CircleSelect (R: {:.0}px)",
+            app.editor_state.circle_select_radius
+        )
     } else {
         format!("{:?}", app.editor_state.transform_mode)
     };
@@ -2405,8 +2571,16 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         ViewportMatcap::Pearl => "Pearl",
     };
 
-    let xray_str = if app.editor_state.show_xray { " | [X-Ray]" } else { "" };
-    let local_str = if app.is_in_local_view() { " (Local View)" } else { "" };
+    let xray_str = if app.editor_state.show_xray {
+        " | [X-Ray]"
+    } else {
+        ""
+    };
+    let local_str = if app.is_in_local_view() {
+        " (Local View)"
+    } else {
+        ""
+    };
 
     let hud_text = format!(
         "Live Viewer{local_str}  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}) | {matcap_str}{xray_str}{ptr_state_str}"
@@ -2485,40 +2659,79 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         });
                     });
                     ui.separator();
-                    if ui.checkbox(&mut app.editor_state.show_overlays, "Show Overlays (Shift+Alt+Z)").changed() {
+                    if ui
+                        .checkbox(
+                            &mut app.editor_state.show_overlays,
+                            "Show Overlays (Shift+Alt+Z)",
+                        )
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
                     ui.separator();
                     ui.label(egui::RichText::new("Guides").color(Color32::from_rgb(180, 190, 210)));
-                    if ui.checkbox(&mut app.editor_state.show_grid, "Floor Grid").changed() {
+                    if ui
+                        .checkbox(&mut app.editor_state.show_grid, "Floor Grid")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
-                    if ui.checkbox(&mut app.editor_state.show_axes, "Coordinate Axes").changed() {
+                    if ui
+                        .checkbox(&mut app.editor_state.show_axes, "Coordinate Axes")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
-                    if ui.checkbox(&mut app.editor_state.show_cursor_3d, "3D Cursor").changed() {
+                    if ui
+                        .checkbox(&mut app.editor_state.show_cursor_3d, "3D Cursor")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
-                    if ui.checkbox(&mut app.editor_state.show_origins, "Object Origins").changed() {
+                    if ui
+                        .checkbox(&mut app.editor_state.show_origins, "Object Origins")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
-                    if ui.checkbox(&mut app.editor_state.show_nav_widget, "Navigation Controls").changed() {
+                    if ui
+                        .checkbox(&mut app.editor_state.show_nav_widget, "Navigation Controls")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
                     ui.separator();
-                    ui.label(egui::RichText::new("Geometry & Shading").color(Color32::from_rgb(180, 190, 210)));
-                    if ui.checkbox(&mut app.editor_state.show_wireframe, "Wireframe").changed() {
+                    ui.label(
+                        egui::RichText::new("Geometry & Shading")
+                            .color(Color32::from_rgb(180, 190, 210)),
+                    );
+                    if ui
+                        .checkbox(&mut app.editor_state.show_wireframe, "Wireframe")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
-                    if ui.checkbox(&mut app.editor_state.show_xray, "X-Ray Mode (Alt+Z)").changed() {
+                    if ui
+                        .checkbox(&mut app.editor_state.show_xray, "X-Ray Mode (Alt+Z)")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
                     ui.separator();
-                    ui.label(egui::RichText::new("Statistics & Telemetry").color(Color32::from_rgb(180, 190, 210)));
-                    if ui.checkbox(&mut app.editor_state.show_statistics, "Scene Statistics").changed() {
+                    ui.label(
+                        egui::RichText::new("Statistics & Telemetry")
+                            .color(Color32::from_rgb(180, 190, 210)),
+                    );
+                    if ui
+                        .checkbox(&mut app.editor_state.show_statistics, "Scene Statistics")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
-                    if ui.checkbox(&mut app.editor_state.show_debug_info, "Debug Telemetry").changed() {
+                    if ui
+                        .checkbox(&mut app.editor_state.show_debug_info, "Debug Telemetry")
+                        .changed()
+                    {
                         ui.ctx().request_repaint();
                     }
                 });
@@ -2526,7 +2739,10 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     }
 
     // Live Scene Statistics Overlay Strip
-    if app.editor_state.show_overlays && app.editor_state.show_statistics && !app.editor_state.fly_nav_active {
+    if app.editor_state.show_overlays
+        && app.editor_state.show_statistics
+        && !app.editor_state.fly_nav_active
+    {
         let mut total_verts = 0;
         let mut total_tris = 0;
         let mut total_objects = 0;
@@ -2548,7 +2764,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             header_rect.left_bottom() + EguiVec2::new(0.0, 6.0),
             egui::vec2(header_rect.width().min(450.0), 20.0),
         );
-        painter.rect_filled(stats_rect, 3.0, Color32::from_rgba_unmultiplied(16, 18, 24, 190));
+        painter.rect_filled(
+            stats_rect,
+            3.0,
+            Color32::from_rgba_unmultiplied(16, 18, 24, 190),
+        );
         painter.text(
             stats_rect.min + EguiVec2::new(8.0, 3.0),
             egui::Align2::LEFT_TOP,
@@ -2563,23 +2783,43 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         if let Some(screen_pos) = world_to_screen_pos(app.editor_state.cursor_3d, view_proj, rect) {
             let r = 12.0;
             // Red ring with white inner line
-            painter.circle_stroke(screen_pos, r, Stroke::new(1.5, Color32::from_rgb(220, 60, 50)));
-            painter.circle_stroke(screen_pos, r - 2.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160)));
+            painter.circle_stroke(
+                screen_pos,
+                r,
+                Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
+            );
+            painter.circle_stroke(
+                screen_pos,
+                r - 2.0,
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160)),
+            );
             // Crosshair ticks
             painter.line_segment(
-                [screen_pos - EguiVec2::new(r + 5.0, 0.0), screen_pos - EguiVec2::new(r - 2.0, 0.0)],
+                [
+                    screen_pos - EguiVec2::new(r + 5.0, 0.0),
+                    screen_pos - EguiVec2::new(r - 2.0, 0.0),
+                ],
                 Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
             );
             painter.line_segment(
-                [screen_pos + EguiVec2::new(r - 2.0, 0.0), screen_pos + EguiVec2::new(r + 5.0, 0.0)],
+                [
+                    screen_pos + EguiVec2::new(r - 2.0, 0.0),
+                    screen_pos + EguiVec2::new(r + 5.0, 0.0),
+                ],
                 Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
             );
             painter.line_segment(
-                [screen_pos - EguiVec2::new(0.0, r + 5.0), screen_pos - EguiVec2::new(0.0, r - 2.0)],
+                [
+                    screen_pos - EguiVec2::new(0.0, r + 5.0),
+                    screen_pos - EguiVec2::new(0.0, r - 2.0),
+                ],
                 Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
             );
             painter.line_segment(
-                [screen_pos + EguiVec2::new(0.0, r - 2.0), screen_pos + EguiVec2::new(0.0, r + 5.0)],
+                [
+                    screen_pos + EguiVec2::new(0.0, r - 2.0),
+                    screen_pos + EguiVec2::new(0.0, r + 5.0),
+                ],
                 Stroke::new(1.5, Color32::from_rgb(220, 60, 50)),
             );
             // Center dot
@@ -2614,7 +2854,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             header_rect.right_top() - EguiVec2::new(banner_w + 140.0, -4.0),
             egui::vec2(banner_w, 20.0),
         );
-        painter.rect_filled(banner_rect, 4.0, Color32::from_rgba_unmultiplied(220, 130, 20, 220));
+        painter.rect_filled(
+            banner_rect,
+            4.0,
+            Color32::from_rgba_unmultiplied(220, 130, 20, 220),
+        );
         painter.text(
             banner_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -2778,19 +3022,63 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
 
     // Visual Snap Target Indicator (Blender-style Magnet Reticle)
     if let Some(target_world) = app.editor_state.active_snap_target {
-        if let Some(target_screen) = world_to_screen_pos(target_world, app.camera.view_proj_matrix(), rect) {
+        if let Some(target_screen) =
+            world_to_screen_pos(target_world, app.camera.view_proj_matrix(), rect)
+        {
             let orange_accent = Color32::from_rgb(255, 175, 40);
             painter.circle_stroke(target_screen, 10.0, Stroke::new(2.0, orange_accent));
             painter.circle_filled(target_screen, 2.5, Color32::from_rgb(255, 235, 120));
-            painter.line_segment([target_screen - egui::vec2(15.0, 0.0), target_screen - egui::vec2(10.0, 0.0)], Stroke::new(1.5, orange_accent));
-            painter.line_segment([target_screen + egui::vec2(10.0, 0.0), target_screen + egui::vec2(15.0, 0.0)], Stroke::new(1.5, orange_accent));
-            painter.line_segment([target_screen - egui::vec2(0.0, 15.0), target_screen - egui::vec2(0.0, 10.0)], Stroke::new(1.5, orange_accent));
-            painter.line_segment([target_screen + egui::vec2(0.0, 10.0), target_screen + egui::vec2(0.0, 15.0)], Stroke::new(1.5, orange_accent));
+            painter.line_segment(
+                [
+                    target_screen - egui::vec2(15.0, 0.0),
+                    target_screen - egui::vec2(10.0, 0.0),
+                ],
+                Stroke::new(1.5, orange_accent),
+            );
+            painter.line_segment(
+                [
+                    target_screen + egui::vec2(10.0, 0.0),
+                    target_screen + egui::vec2(15.0, 0.0),
+                ],
+                Stroke::new(1.5, orange_accent),
+            );
+            painter.line_segment(
+                [
+                    target_screen - egui::vec2(0.0, 15.0),
+                    target_screen - egui::vec2(0.0, 10.0),
+                ],
+                Stroke::new(1.5, orange_accent),
+            );
+            painter.line_segment(
+                [
+                    target_screen + egui::vec2(0.0, 10.0),
+                    target_screen + egui::vec2(0.0, 15.0),
+                ],
+                Stroke::new(1.5, orange_accent),
+            );
 
-            let badge_rect = Rect::from_min_size(target_screen + egui::vec2(14.0, -10.0), egui::vec2(78.0, 20.0));
-            painter.rect_filled(badge_rect, egui::CornerRadius::same(4), Color32::from_rgba_unmultiplied(18, 22, 30, 230));
-            painter.rect_stroke(badge_rect, egui::CornerRadius::same(4), Stroke::new(1.0, orange_accent), egui::StrokeKind::Inside);
-            painter.text(badge_rect.center(), egui::Align2::CENTER_CENTER, "Snap: Vertex", egui::FontId::proportional(10.5), Color32::WHITE);
+            let badge_rect = Rect::from_min_size(
+                target_screen + egui::vec2(14.0, -10.0),
+                egui::vec2(78.0, 20.0),
+            );
+            painter.rect_filled(
+                badge_rect,
+                egui::CornerRadius::same(4),
+                Color32::from_rgba_unmultiplied(18, 22, 30, 230),
+            );
+            painter.rect_stroke(
+                badge_rect,
+                egui::CornerRadius::same(4),
+                Stroke::new(1.0, orange_accent),
+                egui::StrokeKind::Inside,
+            );
+            painter.text(
+                badge_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Snap: Vertex",
+                egui::FontId::proportional(10.5),
+                Color32::WHITE,
+            );
         }
     }
 
@@ -3032,10 +3320,18 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         painter.text(
             toggle_rect.center(),
             egui::Align2::CENTER_CENTER,
-            if app.nav_widget_expanded { "Nav ▾" } else { "Nav ▸" },
+            if app.nav_widget_expanded {
+                "Nav ▾"
+            } else {
+                "Nav ▸"
+            },
             egui::FontId::proportional(10.5),
             if is_toggle_hover {
-                if is_light { Color32::BLACK } else { Color32::WHITE }
+                if is_light {
+                    Color32::BLACK
+                } else {
+                    Color32::WHITE
+                }
             } else if is_light {
                 Color32::from_rgb(60, 68, 85)
             } else {
@@ -3043,7 +3339,8 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             },
         );
 
-        let toggle_resp = toggle_resp.on_hover_text("Toggle Viewport Navigation Controls (Also in Left Toolbar)");
+        let toggle_resp =
+            toggle_resp.on_hover_text("Toggle Viewport Navigation Controls (Also in Left Toolbar)");
         if toggle_resp.clicked() {
             app.nav_widget_expanded = !app.nav_widget_expanded;
             ui.ctx().request_repaint();
@@ -3238,8 +3535,14 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         let mut item_to_add: Option<&'static str> = None;
 
         let clamped_pos = egui::pos2(
-            pos.x.clamp(rect.min.x + 10.0, (rect.max.x - 200.0).max(rect.min.x + 10.0)),
-            pos.y.clamp(rect.min.y + 10.0, (rect.max.y - 360.0).max(rect.min.y + 10.0)),
+            pos.x.clamp(
+                rect.min.x + 10.0,
+                (rect.max.x - 200.0).max(rect.min.x + 10.0),
+            ),
+            pos.y.clamp(
+                rect.min.y + 10.0,
+                (rect.max.y - 360.0).max(rect.min.y + 10.0),
+            ),
         );
 
         egui::Window::new("quick_add_popup")
@@ -3334,7 +3637,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             )),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Cube".to_string();
@@ -3349,7 +3654,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             )),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added UV Sphere".to_string();
@@ -3364,7 +3671,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             )),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Cylinder".to_string();
@@ -3379,7 +3688,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             )),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Cone".to_string();
@@ -3394,7 +3705,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             )),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Torus".to_string();
@@ -3409,7 +3722,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             )),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Capsule".to_string();
@@ -3422,7 +3737,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             .with_transform(forge_math::Transform::from_translation(cursor)),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Plane".to_string();
@@ -3437,7 +3754,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                             )),
                     );
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Suzanne".to_string();
@@ -3456,7 +3775,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     light.local_transform.translation = cursor + Vec3::new(0.0, 3.0, 0.0);
                     let id = app.scene.add_object(light);
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Point Light".to_string();
@@ -3466,7 +3787,9 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     camera_obj.local_transform.translation = cursor + Vec3::new(0.0, 1.5, 3.0);
                     let id = app.scene.add_object(camera_obj);
                     if let Some(obj) = app.scene.get_object(id) {
-                        app.history.push(Action::AddObject { object: obj.clone() });
+                        app.history.push(Action::AddObject {
+                            object: obj.clone(),
+                        });
                     }
                     app.selection.select(id);
                     app.status_message = "Added Camera".to_string();
@@ -3586,10 +3909,18 @@ fn render_pie_menu_overlay(
 ) -> bool {
     let painter = ui.painter_at(viewport);
     let center = egui::pos2(
-        pie_state.center.x.clamp(viewport.min.x + 150.0, viewport.max.x - 150.0),
-        pie_state.center.y.clamp(viewport.min.y + 110.0, viewport.max.y - 110.0),
+        pie_state
+            .center
+            .x
+            .clamp(viewport.min.x + 150.0, viewport.max.x - 150.0),
+        pie_state
+            .center
+            .y
+            .clamp(viewport.min.y + 110.0, viewport.max.y - 110.0),
     );
-    let mouse_pos = ui.input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos())).unwrap_or(center);
+    let mouse_pos = ui
+        .input(|i| i.pointer.hover_pos().or(i.pointer.latest_pos()))
+        .unwrap_or(center);
     let delta = mouse_pos - center;
     let dist = delta.length();
     let deadzone_radius = 26.0;
@@ -3636,7 +3967,8 @@ fn render_pie_menu_overlay(
                     label: "Studio (PBR)",
                     subtext: "8",
                     action: PieMenuAction::SetMatcap(ViewportMatcap::Studio),
-                    is_active: app.editor_state.viewport_matcap == ViewportMatcap::Studio && !app.editor_state.show_wireframe,
+                    is_active: app.editor_state.viewport_matcap == ViewportMatcap::Studio
+                        && !app.editor_state.show_wireframe,
                 },
                 PieSlice {
                     angle: std::f32::consts::FRAC_PI_2,
@@ -3873,7 +4205,9 @@ fn render_pie_menu_overlay(
         }
     }
 
-    if ui.input(|i| i.key_pressed(Key::Escape) || i.pointer.button_clicked(PointerButton::Secondary)) {
+    if ui
+        .input(|i| i.key_pressed(Key::Escape) || i.pointer.button_clicked(PointerButton::Secondary))
+    {
         return false;
     }
 
@@ -3992,7 +4326,12 @@ fn render_pie_menu_overlay(
         }
 
         painter.rect_filled(card_rect, egui::CornerRadius::same(6), fill);
-        painter.rect_stroke(card_rect, egui::CornerRadius::same(6), stroke, egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            card_rect,
+            egui::CornerRadius::same(6),
+            stroke,
+            egui::StrokeKind::Inside,
+        );
 
         painter.text(
             card_rect.left_center() + egui::vec2(10.0, 0.0),
