@@ -2032,18 +2032,10 @@ impl EditableMesh {
             (pos_end, pos_start)
         };
 
-        let mut face1_verts = Vec::new();
-        for i in first_pos..=second_pos {
-            face1_verts.push(face.vertices[i]);
-        }
+        let face1_verts = face.vertices[first_pos..=second_pos].to_vec();
 
-        let mut face2_verts = Vec::new();
-        for i in second_pos..n {
-            face2_verts.push(face.vertices[i]);
-        }
-        for i in 0..=first_pos {
-            face2_verts.push(face.vertices[i]);
-        }
+        let mut face2_verts = face.vertices[second_pos..n].to_vec();
+        face2_verts.extend_from_slice(&face.vertices[0..=first_pos]);
 
         let face_normal = face.normal;
         self.faces[face_idx] = EditFace::new(face1_verts, face_normal);
