@@ -299,29 +299,29 @@ fn default_extension_manager() -> forge_scene::ExtensionManager {
 
 pub fn dark_visuals() -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
-    // Blender-style neutral grey palette
-    visuals.panel_fill = egui::Color32::from_rgb(42, 42, 42);
-    visuals.window_fill = egui::Color32::from_rgb(48, 48, 48);
-    visuals.faint_bg_color = egui::Color32::from_rgb(36, 36, 36);
-    visuals.extreme_bg_color = egui::Color32::from_rgb(28, 28, 28);
-    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(50, 50, 50);
+    // Authentic Blender 4.x neutral dark palette
+    visuals.panel_fill = egui::Color32::from_rgb(48, 48, 48); // #303030
+    visuals.window_fill = egui::Color32::from_rgb(48, 48, 48); // #303030
+    visuals.faint_bg_color = egui::Color32::from_rgb(36, 36, 36); // #242424
+    visuals.extreme_bg_color = egui::Color32::from_rgb(24, 24, 24); // #181818 sunken input fields
+    visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(48, 48, 48);
     visuals.widgets.noninteractive.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(62, 62, 62));
-    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(60, 60, 60);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(34, 34, 34));
+    visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(56, 56, 56); // #383838
     visuals.widgets.inactive.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(72, 72, 72));
-    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(75, 75, 75);
-    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 90, 90));
-    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(74, 137, 220);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(44, 44, 44));
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(68, 68, 68); // #444444
+    visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(82, 82, 82));
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(71, 114, 179); // Blender blue #4772b3
     visuals.widgets.active.bg_stroke =
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 160, 235));
-    visuals.selection.bg_fill = egui::Color32::from_rgb(74, 137, 220);
-    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 160, 235));
-    // Sharp corners like Blender
-    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(2);
-    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(2);
-    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(2);
-    visuals.widgets.active.corner_radius = egui::CornerRadius::same(2);
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(95, 145, 215));
+    visuals.selection.bg_fill = egui::Color32::from_rgb(71, 114, 179);
+    visuals.selection.stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(95, 145, 215));
+    // Crisp corners like Blender 4.x
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(3);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(3);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(3);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(3);
     visuals.window_corner_radius = egui::CornerRadius::same(4);
     visuals.menu_corner_radius = egui::CornerRadius::same(3);
     visuals
@@ -592,6 +592,15 @@ impl Forge3dStudioApp {
     pub fn set_workspace(&mut self, workspace: forge_scene::WorkspaceMode) {
         self.editor_state.workspace = workspace;
         match workspace {
+            forge_scene::WorkspaceMode::Layout => {
+                self.editor_state.panel_settings.toolbar_visible = true;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = true;
+                self.show_material_editor = false;
+                if self.editor_state.edit_mode == EditMode::Sculpt {
+                    self.editor_state.edit_mode = EditMode::Object;
+                }
+            }
             forge_scene::WorkspaceMode::Modeling => {
                 self.editor_state.panel_settings.toolbar_visible = true;
                 self.editor_state.panel_settings.sidebar_visible = true;
@@ -622,6 +631,12 @@ impl Forge3dStudioApp {
                 self.editor_state.panel_settings.timeline_visible = false;
                 self.show_material_editor = false;
             }
+            forge_scene::WorkspaceMode::TexturePaint => {
+                self.editor_state.panel_settings.toolbar_visible = true;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = false;
+                self.show_material_editor = false;
+            }
             forge_scene::WorkspaceMode::Shading => {
                 self.editor_state.panel_settings.toolbar_visible = true;
                 self.editor_state.panel_settings.sidebar_visible = true;
@@ -636,6 +651,12 @@ impl Forge3dStudioApp {
                 self.show_material_editor = false;
             }
             forge_scene::WorkspaceMode::Rendering => {
+                self.editor_state.panel_settings.toolbar_visible = false;
+                self.editor_state.panel_settings.sidebar_visible = true;
+                self.editor_state.panel_settings.timeline_visible = false;
+                self.show_material_editor = true;
+            }
+            forge_scene::WorkspaceMode::Compositing => {
                 self.editor_state.panel_settings.toolbar_visible = false;
                 self.editor_state.panel_settings.sidebar_visible = true;
                 self.editor_state.panel_settings.timeline_visible = false;
@@ -4012,7 +4033,7 @@ impl Forge3dStudioApp {
         self.scene = Scene::create_default_scene();
         self.selection.deselect();
         self.history.clear();
-        self.editor_state.workspace = forge_scene::WorkspaceMode::Modeling;
+        self.editor_state.workspace = forge_scene::WorkspaceMode::Layout;
         self.editor_state.edit_mode = EditMode::Object;
         if let Some(r) = &mut self.renderer {
             r.invalidate_all_meshes();
@@ -4109,25 +4130,26 @@ impl Forge3dStudioApp {
 
         let ctx = ui.ctx().clone();
         let is_light = self.editor_state.panel_settings.is_light_theme;
+        let top_bar_bg = if is_light {
+            egui::Color32::from_rgb(235, 235, 235)
+        } else {
+            egui::Color32::from_rgb(29, 29, 29) // Blender top bar #1d1d1d
+        };
         let panel_bg = if is_light {
             egui::Color32::from_rgb(238, 238, 238)
         } else {
-            egui::Color32::from_rgb(42, 42, 42)
+            egui::Color32::from_rgb(48, 48, 48) // Blender panels #303030
         };
         let panel_border = if is_light {
             egui::Color32::from_rgb(200, 200, 200)
         } else {
-            egui::Color32::from_rgb(55, 55, 55)
+            egui::Color32::from_rgb(26, 26, 26) // subtle 1px border #1a1a1a
         };
-        let side_border = if is_light {
-            egui::Color32::from_rgb(200, 200, 200)
-        } else {
-            egui::Color32::from_rgb(58, 58, 58)
-        };
+        let side_border = panel_border;
         let central_bg = if is_light {
             egui::Color32::from_rgb(228, 228, 228)
         } else {
-            egui::Color32::from_rgb(51, 51, 51)
+            egui::Color32::from_rgb(57, 57, 57) // Blender 3D viewport canvas #393939
         };
 
         // 1. Measure frame delta and FPS
@@ -4165,9 +4187,9 @@ impl Forge3dStudioApp {
         egui::Panel::top("menu_bar")
             .frame(
                 egui::Frame::new()
-                    .fill(panel_bg)
+                    .fill(top_bar_bg)
                     .stroke(egui::Stroke::new(1.0, panel_border))
-                    .inner_margin(4.0),
+                    .inner_margin(egui::Margin::symmetric(6, 3)),
             )
             .show(ui, |ui| {
                 render_menu_bar(self, ui);
@@ -4260,12 +4282,84 @@ impl Forge3dStudioApp {
                         .map(|id| self.scene.animation.keyframe_frames(id))
                         .unwrap_or_default();
 
-                    // 1. Transport & Playback Row
+                    // 1. Blender 4.x Timeline Header & Transport Row
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
+                        ui.spacing_mut().item_spacing = egui::vec2(5.0, 2.0);
+
+                        // Editor icon
+                        ui.label(
+                            egui::RichText::new("⏱")
+                                .size(13.0)
+                                .color(egui::Color32::from_rgb(160, 160, 160)),
+                        );
+
+                        // Menus like Blender 4.x
+                        ui.menu_button("Playback", |ui| {
+                            ui.checkbox(&mut self.scene.animation.timeline.is_looping, "Loop");
+                            ui.separator();
+                            if ui
+                                .button(if self.scene.animation.timeline.is_playing {
+                                    "Pause (Space)"
+                                } else {
+                                    "Play Animation (Space)"
+                                })
+                                .clicked()
+                            {
+                                self.toggle_timeline_playback();
+                                ui.close();
+                            }
+                            if ui.button("Jump to Start (Shift+Left)").clicked() {
+                                self.set_timeline_frame(start_frame);
+                                ui.close();
+                            }
+                            if ui.button("Jump to End (Shift+Right)").clicked() {
+                                self.set_timeline_frame(end_frame);
+                                ui.close();
+                            }
+                        });
+
+                        ui.menu_button("Keying", |ui| {
+                            if ui.button("Insert Keyframe... (I)").clicked() {
+                                self.insert_keyframe_active();
+                                ui.close();
+                            }
+                            if ui.button("Delete Keyframe (Alt+I)").clicked() {
+                                self.remove_keyframe_active();
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("Jump to Next Keyframe (Up)").clicked() {
+                                self.jump_to_next_keyframe();
+                                ui.close();
+                            }
+                            if ui.button("Jump to Prev Keyframe (Down)").clicked() {
+                                self.jump_to_prev_keyframe();
+                                ui.close();
+                            }
+                        });
+
+                        ui.menu_button("View", |ui| {
+                            if ui.button("Frame All").clicked() {
+                                self.set_timeline_frame(start_frame);
+                                ui.close();
+                            }
+                            if ui.button("Go to Current Frame").clicked() {
+                                ui.close();
+                            }
+                        });
+
+                        ui.menu_button("Marker", |ui| {
+                            if ui.button("Add Marker (M)").clicked() {
+                                self.status_message =
+                                    format!("Added marker at frame {}", current_frame);
+                                ui.close();
+                            }
+                        });
+
+                        ui.separator();
 
                         if ui
-                            .button("⏮ Key")
+                            .button("⏮")
                             .on_hover_text("Jump to Previous Keyframe (Down)")
                             .clicked()
                         {
@@ -4321,7 +4415,7 @@ impl Forge3dStudioApp {
                             self.set_timeline_frame(end_frame);
                         }
                         if ui
-                            .button("⏭ Key")
+                            .button("⏭")
                             .on_hover_text("Jump to Next Keyframe (Up)")
                             .clicked()
                         {
@@ -4329,9 +4423,7 @@ impl Forge3dStudioApp {
                         }
 
                         ui.separator();
-                        ui.checkbox(&mut self.scene.animation.timeline.is_looping, "Loop");
 
-                        ui.separator();
                         ui.label("Start:");
                         ui.add(
                             egui::DragValue::new(&mut self.scene.animation.timeline.start_frame)
@@ -4688,8 +4780,11 @@ impl Forge3dStudioApp {
 
         // 6. Central 3D Viewport Panel
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(central_bg))
+            .frame(egui::Frame::new().fill(central_bg).inner_margin(0.0))
             .show(ui, |ui| {
+                // Viewport Header Bar (Blender 4.x style)
+                crate::ui::viewport_header::render_viewport_header(self, ui);
+
                 let available_size = ui.available_size();
                 let ppp = ctx.pixels_per_point();
                 let width = (available_size.x * ppp).round() as u32;

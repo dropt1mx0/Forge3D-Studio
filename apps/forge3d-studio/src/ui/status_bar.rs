@@ -98,34 +98,71 @@ pub fn render_status_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             EditMode::Edit => format!("[Edit Mode: {:?}]", app.editor_state.selection_element),
             EditMode::Sculpt => "[Sculpt Mode]".to_string(),
         };
-        ui.label(egui::RichText::new(mode_tag).strong());
-        ui.label(&app.status_message);
+        ui.label(
+            egui::RichText::new(mode_tag)
+                .strong()
+                .size(11.0)
+                .color(egui::Color32::from_rgb(180, 200, 230)),
+        );
+        ui.separator();
+
+        // Status message or Blender 4.x mouse action hints
+        if app.status_message.is_empty() || app.status_message == "Ready" {
+            let hint_col = egui::Color32::from_rgb(160, 160, 160);
+            ui.label(
+                egui::RichText::new("🖰 Select  |  🖰 Rotate View (MMB)  |  🖰 Context Menu (RMB)")
+                    .size(11.0)
+                    .color(hint_col),
+            );
+        } else {
+            ui.label(
+                egui::RichText::new(&app.status_message)
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(220, 220, 220)),
+            );
+        }
 
         if app.editor_state.snap_settings.enabled {
             ui.separator();
-            ui.label(format!(
-                "Snap: {:.2}m",
-                app.editor_state.snap_settings.grid_increment
-            ));
+            ui.label(
+                egui::RichText::new(format!(
+                    "Snap: {:.2}m",
+                    app.editor_state.snap_settings.grid_increment
+                ))
+                .size(11.0),
+            );
         }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Right side stats:
+            ui.label(
+                egui::RichText::new("v0.6.0")
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(130, 140, 155)),
+            );
+
+            ui.separator();
+
             // 1. GPU Adapter
             if let Some(gpu) = &app.gpu_info {
-                ui.label(format!("GPU: {} ({})", gpu.name, gpu.backend));
+                ui.label(
+                    egui::RichText::new(format!("GPU: {} ({})", gpu.name, gpu.backend)).size(11.0),
+                );
             } else {
-                ui.label("GPU: Initializing...");
+                ui.label(egui::RichText::new("GPU: Initializing...").size(11.0));
             }
 
             ui.separator();
 
             // 2. Performance (FPS & Frame time)
-            ui.label(format!("{:.1} FPS ({:.1} ms)", app.fps, app.frame_time_ms));
+            ui.label(
+                egui::RichText::new(format!("{:.1} FPS ({:.1} ms)", app.fps, app.frame_time_ms))
+                    .size(11.0),
+            );
 
             ui.separator();
 
-            // 3. Geometry metrics
+            // 3. Geometry metrics (Tris / Faces / Verts like Blender)
             let total_verts: usize = app
                 .scene
                 .objects
@@ -138,7 +175,12 @@ pub fn render_status_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 .values()
                 .map(|o| o.mesh.indices.len() / 3)
                 .sum();
-            ui.label(format!("Tris: {total_tris} | Verts: {total_verts}"));
+            ui.label(
+                egui::RichText::new(format!(
+                    "Tris: {total_tris} | Faces: {total_tris} | Verts: {total_verts}"
+                ))
+                .size(11.0),
+            );
         });
     });
 }

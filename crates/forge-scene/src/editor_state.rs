@@ -17,12 +17,15 @@ pub enum EditMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum WorkspaceMode {
     #[default]
+    Layout,
     Modeling,
     Sculpting,
     UvEditing,
+    TexturePaint,
     Shading,
     Animation,
     Rendering,
+    Compositing,
     GeometryNodes,
     Scripting,
 }
@@ -494,7 +497,7 @@ impl Default for EditorState {
             pivot_point: PivotPoint::MedianPoint,
             snap_settings: SnapSettings::default(),
             panel_settings: PanelSettings::default(),
-            workspace: WorkspaceMode::Modeling,
+            workspace: WorkspaceMode::Layout,
             cursor_3d: Vec3::ZERO,
             show_grid: true,
             show_axes: true,

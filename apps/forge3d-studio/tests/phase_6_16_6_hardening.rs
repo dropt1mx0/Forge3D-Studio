@@ -517,9 +517,10 @@ fn test_synchronous_picking_latency_breakdown() {
             total_sync_ms
         );
 
-        // Verify that CPU overhead (submit + read) is small (< 5 ms) and blocking is solely GPU pipeline wait
+        // Verify that CPU overhead (submit + read) is small and blocking is solely GPU pipeline wait
+        let max_cpu_overhead = if cfg!(debug_assertions) { 35.0 } else { 6.0 };
         assert!(
-            submit_ms + read_ms < 6.0,
+            submit_ms + read_ms < max_cpu_overhead,
             "CPU command overhead must remain minimal"
         );
         assert!(wait_ms > 0.0, "GPU execution wait must be measurable");

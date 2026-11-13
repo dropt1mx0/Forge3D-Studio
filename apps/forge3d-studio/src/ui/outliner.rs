@@ -45,26 +45,34 @@ impl Default for OutlinerFilterSettings {
 }
 
 pub fn render_outliner(app: &mut Forge3dStudioApp, ui: &mut Ui) {
-    // Top Tabs: File | Edit | View | Objects | Tags | Bookmarks
-    egui::ScrollArea::horizontal()
-        .id_salt("outliner_tabs_scroll")
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 2.0);
-                let tab_col = egui::Color32::from_rgb(160, 160, 160);
-                ui.label(egui::RichText::new("File").size(11.0).color(tab_col));
-                ui.label(egui::RichText::new("Edit").size(11.0).color(tab_col));
-                ui.label(egui::RichText::new("View").size(11.0).color(tab_col));
-                ui.label(
-                    egui::RichText::new("Objects")
-                        .size(11.0)
-                        .strong()
-                        .color(egui::Color32::from_rgb(210, 210, 210)),
-                );
-                ui.label(egui::RichText::new("Tags").size(11.0).color(tab_col));
-                ui.label(egui::RichText::new("Bookmarks").size(11.0).color(tab_col));
+    // Blender-style Outliner Header
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(5.0, 0.0);
+
+        ui.label(
+            egui::RichText::new("📦")
+                .size(12.0)
+                .color(egui::Color32::from_rgb(140, 180, 240)),
+        );
+
+        egui::ComboBox::from_id_salt("outliner_display_mode")
+            .selected_text("View Layer ▾")
+            .show_ui(ui, |ui| {
+                let _ = ui.selectable_label(true, "View Layer");
+                let _ = ui.selectable_label(false, "Scenes");
+                let _ = ui.selectable_label(false, "Orphan Data");
             });
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .small_button("📁+")
+                .on_hover_text("New Collection")
+                .clicked()
+            {
+                app.status_message = "New Collection added".to_string();
+            }
         });
+    });
     ui.add_space(2.0);
     ui.separator();
 

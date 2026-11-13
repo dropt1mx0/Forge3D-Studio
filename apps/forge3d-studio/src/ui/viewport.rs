@@ -2495,250 +2495,55 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     }
 
     // =========================================================================
-    // 8. VIEWPORT HUD & STATUS OVERLAYS
+    // 8. VIEWPORT IN-CANVAS TEXT OVERLAYS (Blender 4.x authentic visual)
     // =========================================================================
-    // Top-left Mode & Tool badge
-    let mode_str = match app.editor_state.edit_mode {
-        EditMode::Object => "Object Mode".to_string(),
-        EditMode::Edit => format!("Edit Mode ({:?})", app.editor_state.selection_element),
-        EditMode::Sculpt => {
-            let mut symm = String::new();
-            if app.sculpt_settings.symmetry_x {
-                symm.push('X');
-            }
-            if app.sculpt_settings.symmetry_y {
-                symm.push('Y');
-            }
-            if app.sculpt_settings.symmetry_z {
-                symm.push('Z');
-            }
-            let symm_str = if symm.is_empty() {
-                String::new()
-            } else {
-                format!(" Symm [{}]", symm)
-            };
-            format!(
-                "Sculpt: {} (R: {:.2}, Str: {:.2}){}",
-                app.sculpt_settings.brush.name(),
-                app.sculpt_settings.radius,
-                app.sculpt_settings.strength,
-                symm_str
-            )
+    let view_desc = if app.editor_state.is_camera_view {
+        "Camera View"
+    } else {
+        match app.camera.projection {
+            CameraProjection::Orthographic => "User Orthographic",
+            CameraProjection::Perspective => "User Perspective",
         }
     };
-    let tool_str = if app.editor_state.circle_select_active {
-        format!(
-            "CircleSelect (R: {:.0}px)",
-            app.editor_state.circle_select_radius
-        )
-    } else {
-        format!("{:?}", app.editor_state.transform_mode)
-    };
-    let proj_str = match app.camera.projection {
-        CameraProjection::Perspective => "Perspective",
-        CameraProjection::Orthographic => "Orthographic",
-    };
 
-    let ptr_state_str = if app.editor_state.pointer_state != PointerInteractionState::Idle {
-        format!(" | State: {:?}", app.editor_state.pointer_state)
-    } else {
-        String::new()
-    };
-
-    // Sleek Cinema 4D / Octane Viewport Header Strip
-    let header_w = (rect.width() - 28.0).clamp(100.0, 520.0);
-    let header_rect = Rect::from_min_size(
-        rect.min + EguiVec2::new(14.0, 14.0),
-        egui::vec2(header_w, 26.0),
-    );
-    painter.rect_filled(
-        header_rect,
-        egui::CornerRadius::same(5),
-        Color32::from_rgba_unmultiplied(16, 18, 24, 220),
-    );
-    painter.rect_stroke(
-        header_rect,
-        egui::CornerRadius::same(5),
-        Stroke::new(1.0, Color32::from_rgb(38, 42, 54)),
-        egui::StrokeKind::Outside,
-    );
-
-    let matcap_str = match app.editor_state.viewport_matcap {
-        ViewportMatcap::Studio => "Studio",
-        ViewportMatcap::Clay => "Clay",
-        ViewportMatcap::Chrome => "Chrome",
-        ViewportMatcap::Normal => "Normal",
-        ViewportMatcap::Pearl => "Pearl",
-    };
-
-    let xray_str = if app.editor_state.show_xray {
-        " | [X-Ray]"
-    } else {
-        ""
-    };
-    let local_str = if app.is_in_local_view() {
-        " (Local View)"
+    let local_desc = if app.is_in_local_view() {
+        " (Local)"
     } else {
         ""
     };
 
-    let hud_text = format!(
-        "Live Viewer{local_str}  |  View   Cameras   Display   Options   |   {mode_str} | Tool: {tool_str} ({proj_str}) | {matcap_str}{xray_str}{ptr_state_str}"
-    );
+    let primary_text = format!("{}{}", view_desc, local_desc);
+
+    let active_obj_name = app
+        .selection
+        .active_id
+        .and_then(|id| app.scene.get_object(id))
+        .map(|o| o.name.as_str())
+        .unwrap_or("");
+
+    let collection_text = if active_obj_name.is_empty() {
+        "(1) Collection".to_string()
+    } else {
+        format!("(1) Collection | {}", active_obj_name)
+    };
+
+    let text_start = rect.min + egui::vec2(16.0, 14.0);
     painter.text(
-        header_rect.min + EguiVec2::new(12.0, 6.0),
+        text_start,
         egui::Align2::LEFT_TOP,
-        hud_text,
-        egui::FontId::proportional(12.0),
-        Color32::from_rgb(215, 220, 235),
-    );
-
-    // Viewport Overlays Dropdown Button (Blender-style Overlays header control)
-    let overlays_btn_rect = Rect::from_min_size(
-        header_rect.right_top() + EguiVec2::new(8.0, 0.0),
-        egui::vec2(105.0, 26.0),
-    );
-    let overlays_resp = ui.allocate_rect(overlays_btn_rect, Sense::click());
-    let overlays_hover = overlays_resp.hovered();
-    let overlays_active = app.editor_state.show_overlays;
-    let overlays_bg = if app.show_overlays_dropdown {
-        Color32::from_rgb(50, 60, 80)
-    } else if overlays_hover {
-        Color32::from_rgb(36, 42, 56)
-    } else {
-        Color32::from_rgba_unmultiplied(16, 18, 24, 220)
-    };
-    painter.rect_filled(overlays_btn_rect, egui::CornerRadius::same(5), overlays_bg);
-    painter.rect_stroke(
-        overlays_btn_rect,
-        egui::CornerRadius::same(5),
-        Stroke::new(
-            1.0,
-            if overlays_active {
-                Color32::from_rgb(70, 130, 220)
-            } else {
-                Color32::from_rgb(38, 42, 54)
-            },
-        ),
-        egui::StrokeKind::Outside,
+        primary_text,
+        egui::FontId::proportional(12.5),
+        Color32::from_rgb(220, 220, 220),
     );
     painter.text(
-        overlays_btn_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "⛶ Overlays ▾",
-        egui::FontId::proportional(11.5),
-        if overlays_active {
-            Color32::from_rgb(220, 230, 250)
-        } else {
-            Color32::from_rgb(140, 145, 160)
-        },
+        text_start + egui::vec2(0.0, 16.0),
+        egui::Align2::LEFT_TOP,
+        collection_text,
+        egui::FontId::proportional(11.0),
+        Color32::from_rgb(155, 155, 155),
     );
-    let overlays_resp = overlays_resp.on_hover_text("Viewport Overlays Dropdown (Shift+Alt+Z)");
-    if overlays_resp.clicked() {
-        app.show_overlays_dropdown = !app.show_overlays_dropdown;
-        ui.ctx().request_repaint();
-    }
 
-    if app.show_overlays_dropdown {
-        let popover_rect = Rect::from_min_size(
-            overlays_btn_rect.left_bottom() + EguiVec2::new(-20.0, 6.0),
-            egui::vec2(220.0, 260.0),
-        );
-        egui::Area::new(ui.make_persistent_id("viewport_overlays_popover"))
-            .fixed_pos(popover_rect.min)
-            .order(egui::Order::Foreground)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(210.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Viewport Overlays").strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("✕").clicked() {
-                                app.show_overlays_dropdown = false;
-                            }
-                        });
-                    });
-                    ui.separator();
-                    if ui
-                        .checkbox(
-                            &mut app.editor_state.show_overlays,
-                            "Show Overlays (Shift+Alt+Z)",
-                        )
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    ui.separator();
-                    ui.label(egui::RichText::new("Guides").color(Color32::from_rgb(180, 190, 210)));
-                    if ui
-                        .checkbox(&mut app.editor_state.show_grid, "Floor Grid")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    if ui
-                        .checkbox(&mut app.editor_state.show_axes, "Coordinate Axes")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    if ui
-                        .checkbox(&mut app.editor_state.show_cursor_3d, "3D Cursor")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    if ui
-                        .checkbox(&mut app.editor_state.show_origins, "Object Origins")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    if ui
-                        .checkbox(&mut app.editor_state.show_nav_widget, "Navigation Controls")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    ui.separator();
-                    ui.label(
-                        egui::RichText::new("Geometry & Shading")
-                            .color(Color32::from_rgb(180, 190, 210)),
-                    );
-                    if ui
-                        .checkbox(&mut app.editor_state.show_wireframe, "Wireframe")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    if ui
-                        .checkbox(&mut app.editor_state.show_xray, "X-Ray Mode (Alt+Z)")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    ui.separator();
-                    ui.label(
-                        egui::RichText::new("Statistics & Telemetry")
-                            .color(Color32::from_rgb(180, 190, 210)),
-                    );
-                    if ui
-                        .checkbox(&mut app.editor_state.show_statistics, "Scene Statistics")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                    if ui
-                        .checkbox(&mut app.editor_state.show_debug_info, "Debug Telemetry")
-                        .changed()
-                    {
-                        ui.ctx().request_repaint();
-                    }
-                });
-            });
-    }
-
-    // Live Scene Statistics Overlay Strip
+    // Live Scene Statistics Overlay (Clean text directly below collection)
     if app.editor_state.show_overlays
         && app.editor_state.show_statistics
         && !app.editor_state.fly_nav_active
@@ -2757,24 +2562,15 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
         let sel_count = app.selection.selected_ids.len();
         let stats_text = format!(
-            "Objects: {}/{} (Selected: {}) | Verts: {} | Tris: {}",
+            "Objects: {}/{} (Sel: {}) | Verts: {} | Tris: {}",
             visible_objects, total_objects, sel_count, total_verts, total_tris
         );
-        let stats_rect = Rect::from_min_size(
-            header_rect.left_bottom() + EguiVec2::new(0.0, 6.0),
-            egui::vec2(header_rect.width().min(450.0), 20.0),
-        );
-        painter.rect_filled(
-            stats_rect,
-            3.0,
-            Color32::from_rgba_unmultiplied(16, 18, 24, 190),
-        );
         painter.text(
-            stats_rect.min + EguiVec2::new(8.0, 3.0),
+            text_start + egui::vec2(0.0, 32.0),
             egui::Align2::LEFT_TOP,
             stats_text,
-            egui::FontId::proportional(11.0),
-            Color32::from_rgb(185, 195, 215),
+            egui::FontId::proportional(10.5),
+            Color32::from_rgb(175, 180, 195),
         );
     }
 
@@ -2851,7 +2647,7 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     if app.is_in_local_view() {
         let banner_w = 210.0;
         let banner_rect = Rect::from_min_size(
-            header_rect.right_top() - EguiVec2::new(banner_w + 140.0, -4.0),
+            rect.right_top() - EguiVec2::new(banner_w + 140.0, -14.0),
             egui::vec2(banner_w, 20.0),
         );
         painter.rect_filled(
@@ -3282,196 +3078,111 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
         }
     }
 
-    // Collapsible Viewport Navigation Controls Widget (Zoom, Pan, Camera, Ortho/Persp, X-Ray, Local View)
+    // Circular Viewport Navigation Controls (Zoom, Pan, Camera, Ortho/Persp - Blender 4.x authentic visual)
     if app.editor_state.show_nav_widget {
-        let toggle_size = egui::vec2(48.0, 20.0);
-        let toggle_x = compass_center.x - toggle_size.x / 2.0;
-        let toggle_y = compass_center.y + compass_radius + 8.0;
-        let toggle_rect = Rect::from_min_size(egui::pos2(toggle_x, toggle_y), toggle_size);
-        let toggle_resp = ui.allocate_rect(toggle_rect, Sense::click());
+        let nav_btn_radius = 13.0;
+        let btn_center_x = compass_center.x;
+        let btn_start_y = compass_center.y + compass_radius + 14.0;
 
-        let is_toggle_hover = toggle_resp.hovered();
-        let toggle_bg = if is_toggle_hover {
-            if is_light {
-                Color32::from_rgb(220, 226, 240)
-            } else {
-                Color32::from_rgb(45, 50, 65)
-            }
-        } else if is_light {
-            Color32::from_rgb(240, 243, 250)
-        } else {
-            Color32::from_rgba_unmultiplied(26, 28, 36, 220)
-        };
-
-        painter.rect(
-            toggle_rect,
-            egui::CornerRadius::same(4),
-            toggle_bg,
-            Stroke::new(
-                1.0,
-                if is_light {
-                    Color32::from_rgb(205, 212, 225)
-                } else {
-                    Color32::from_rgb(50, 56, 70)
+        let nav_buttons: [(&str, &str); 4] = [
+            ("🔍", "Zoom View (Click & Drag Up/Down)"),
+            ("✋", "Pan View (Click & Drag)"),
+            ("🎥", "Toggle Camera View (Numpad 0)"),
+            (
+                match app.camera.projection {
+                    CameraProjection::Perspective => "▦",
+                    CameraProjection::Orthographic => "⧉",
                 },
+                "Toggle Perspective / Orthographic (Numpad 5)",
             ),
-            egui::StrokeKind::Inside,
-        );
-        painter.text(
-            toggle_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            if app.nav_widget_expanded {
-                "Nav ▾"
+        ];
+
+        for (idx, (icon, tooltip)) in nav_buttons.iter().enumerate() {
+            let center = Pos2::new(btn_center_x, btn_start_y + idx as f32 * 30.0);
+            let btn_rect = Rect::from_center_size(
+                center,
+                egui::vec2(nav_btn_radius * 2.0, nav_btn_radius * 2.0),
+            );
+            let sense = if idx <= 1 {
+                Sense::click_and_drag()
             } else {
-                "Nav ▸"
-            },
-            egui::FontId::proportional(10.5),
-            if is_toggle_hover {
+                Sense::click()
+            };
+            let resp = ui.allocate_rect(btn_rect, sense);
+
+            let is_hover = resp.hovered();
+            let is_drag = resp.dragged();
+
+            let bg = if is_drag {
+                Color32::from_rgb(71, 114, 179)
+            } else if is_hover {
                 if is_light {
-                    Color32::BLACK
+                    Color32::from_rgb(215, 222, 235)
                 } else {
-                    Color32::WHITE
+                    Color32::from_rgb(60, 60, 60)
                 }
             } else if is_light {
-                Color32::from_rgb(60, 68, 85)
+                Color32::from_rgba_unmultiplied(240, 243, 250, 180)
             } else {
-                Color32::from_rgb(180, 190, 210)
-            },
-        );
-
-        let toggle_resp =
-            toggle_resp.on_hover_text("Toggle Viewport Navigation Controls (Also in Left Toolbar)");
-        if toggle_resp.clicked() {
-            app.nav_widget_expanded = !app.nav_widget_expanded;
-            ui.ctx().request_repaint();
-        }
-
-        if app.nav_widget_expanded {
-            let btn_start_y = toggle_y + toggle_size.y + 4.0;
-            let btn_size = egui::vec2(48.0, 20.0);
-            let nav_btn_x = toggle_x;
-
-            let xray_tooltip = if app.editor_state.show_xray {
-                "Toggle X-Ray Mode (Alt+Z) [Active]"
-            } else {
-                "Toggle X-Ray Mode (Alt+Z)"
+                Color32::from_rgba_unmultiplied(36, 36, 36, 210)
             };
 
-            let local_tooltip = if app.is_in_local_view() {
-                "Exit Local View (Numpad / or /) [Active]"
-            } else {
-                "Isolate Selected / Local View (Numpad / or /)"
-            };
-
-            let nav_buttons = [
-                ("Zoom", "Zoom View (Drag up/down)"),
-                ("Pan", "Pan View (Drag)"),
-                ("Cam", "Toggle Camera View (Numpad 0)"),
-                ("Focus", "Frame Selected (Focus / F)"),
-                (
-                    match app.camera.projection {
-                        CameraProjection::Perspective => "Ortho",
-                        CameraProjection::Orthographic => "Persp",
+            painter.circle_filled(center, nav_btn_radius, bg);
+            painter.circle_stroke(
+                center,
+                nav_btn_radius,
+                Stroke::new(
+                    1.0,
+                    if is_drag {
+                        Color32::from_rgb(110, 160, 230)
+                    } else if is_light {
+                        Color32::from_rgb(200, 205, 215)
+                    } else {
+                        Color32::from_rgb(52, 52, 52)
                     },
-                    "Toggle Perspective / Orthographic (Numpad 5)",
                 ),
-                ("X-Ray", xray_tooltip),
-                ("Local", local_tooltip),
-            ];
+            );
 
-            for (idx, (label, tooltip)) in nav_buttons.iter().enumerate() {
-                let btn_rect = Rect::from_min_size(
-                    egui::pos2(nav_btn_x, btn_start_y + idx as f32 * 23.0),
-                    btn_size,
-                );
-                let resp = ui.allocate_rect(btn_rect, Sense::click_and_drag());
-                let is_hover = resp.hovered();
-                let is_active_xray = idx == 5 && app.editor_state.show_xray;
-                let is_active_local = idx == 6 && app.is_in_local_view();
-                let bg = if is_active_xray {
-                    Color32::from_rgb(45, 115, 225)
-                } else if is_active_local {
-                    Color32::from_rgb(215, 120, 20)
+            painter.text(
+                center,
+                egui::Align2::CENTER_CENTER,
+                *icon,
+                egui::FontId::proportional(11.0),
+                if is_drag {
+                    Color32::WHITE
                 } else if is_hover {
                     if is_light {
-                        Color32::from_rgb(220, 226, 240)
+                        Color32::BLACK
                     } else {
-                        Color32::from_rgb(45, 50, 65)
+                        Color32::WHITE
                     }
                 } else if is_light {
-                    Color32::from_rgb(240, 243, 250)
+                    Color32::from_rgb(60, 65, 75)
                 } else {
-                    Color32::from_rgba_unmultiplied(26, 28, 36, 220)
+                    Color32::from_rgb(200, 200, 200)
+                },
+            );
+
+            let resp = resp.on_hover_text(*tooltip);
+
+            if idx == 0 && resp.dragged() {
+                let dy = input.pointer.delta().y;
+                app.camera.zoom(1.0 - dy * 0.02);
+                ui.ctx().request_repaint();
+            } else if idx == 1 && resp.dragged() {
+                let delta = input.pointer.delta();
+                app.camera.pan(delta.x, delta.y);
+                ui.ctx().request_repaint();
+            } else if idx == 2 && resp.clicked() {
+                app.toggle_camera_view();
+                ui.ctx().request_repaint();
+            } else if idx == 3 && resp.clicked() {
+                app.camera.projection = match app.camera.projection {
+                    CameraProjection::Perspective => CameraProjection::Orthographic,
+                    CameraProjection::Orthographic => CameraProjection::Perspective,
                 };
-
-                painter.rect(
-                    btn_rect,
-                    egui::CornerRadius::same(4),
-                    bg,
-                    Stroke::new(
-                        1.0,
-                        if is_active_xray {
-                            Color32::from_rgb(100, 165, 255)
-                        } else if is_active_local {
-                            Color32::from_rgb(255, 175, 70)
-                        } else if is_light {
-                            Color32::from_rgb(205, 212, 225)
-                        } else {
-                            Color32::from_rgb(45, 50, 62)
-                        },
-                    ),
-                    egui::StrokeKind::Inside,
-                );
-                painter.text(
-                    btn_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    *label,
-                    egui::FontId::proportional(10.0),
-                    if is_active_xray || is_active_local {
-                        Color32::WHITE
-                    } else if is_hover {
-                        if is_light {
-                            Color32::BLACK
-                        } else {
-                            Color32::WHITE
-                        }
-                    } else if is_light {
-                        Color32::from_rgb(60, 68, 85)
-                    } else {
-                        Color32::from_rgb(180, 185, 200)
-                    },
-                );
-
-                let resp = resp.on_hover_text(*tooltip);
-
-                if idx == 0 && resp.dragged() {
-                    let dy = input.pointer.delta().y;
-                    app.camera.zoom(1.0 - dy * 0.02);
-                    ui.ctx().request_repaint();
-                } else if idx == 1 && resp.dragged() {
-                    let delta = input.pointer.delta();
-                    app.camera.pan(delta.x, delta.y);
-                    ui.ctx().request_repaint();
-                } else if idx == 2 && resp.clicked() {
-                    app.toggle_camera_view();
-                    ui.ctx().request_repaint();
-                } else if idx == 3 && resp.clicked() {
-                    app.frame_selected();
-                    ui.ctx().request_repaint();
-                } else if idx == 4 && resp.clicked() {
-                    app.camera.projection = match app.camera.projection {
-                        CameraProjection::Perspective => CameraProjection::Orthographic,
-                        CameraProjection::Orthographic => CameraProjection::Perspective,
-                    };
-                    app.status_message = format!("Projection: {:?}", app.camera.projection);
-                    ui.ctx().request_repaint();
-                } else if idx == 5 && resp.clicked() {
-                    app.toggle_xray();
-                    ui.ctx().request_repaint();
-                } else if idx == 6 && resp.clicked() {
-                    app.toggle_local_view();
-                    ui.ctx().request_repaint();
-                }
+                app.status_message = format!("Projection: {:?}", app.camera.projection);
+                ui.ctx().request_repaint();
             }
         }
     }
@@ -3498,6 +3209,11 @@ pub fn render_viewport(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             format!("({:.1}, {:.1})", pos.x, pos.y)
         } else {
             "None".to_string()
+        };
+
+        let proj_str = match app.camera.projection {
+            CameraProjection::Perspective => "Perspective",
+            CameraProjection::Orthographic => "Orthographic",
         };
 
         let debug_text = format!(

@@ -28,38 +28,33 @@ fn tool_button(
 
     let is_dark = ui.visuals().dark_mode;
     let inactive_fg = if is_dark {
-        egui::Color32::from_rgb(200, 200, 200)
+        egui::Color32::from_rgb(190, 190, 190)
     } else {
         egui::Color32::from_rgb(50, 50, 50)
-    };
-    let inactive_bg = if is_dark {
-        egui::Color32::from_rgb(50, 50, 50)
-    } else {
-        egui::Color32::from_rgb(228, 228, 228)
     };
 
     match display_mode {
         ToolbarDisplayMode::IconOnly => {
-            let btn = egui::Button::new(egui::RichText::new(icon).size(11.0).color(if active {
+            let btn = egui::Button::new(egui::RichText::new(icon).size(12.5).color(if active {
                 egui::Color32::WHITE
             } else {
                 inactive_fg
             }))
             .selected(active)
             .fill(if active {
-                egui::Color32::from_rgb(74, 137, 220)
+                egui::Color32::from_rgb(71, 114, 179)
             } else {
-                inactive_bg
+                egui::Color32::TRANSPARENT
             })
-            .corner_radius(egui::CornerRadius::same(2));
-            ui.add_sized([ui.available_width().max(32.0), 22.0], btn)
+            .corner_radius(egui::CornerRadius::same(3));
+            ui.add_sized([ui.available_width().max(30.0), 28.0], btn)
                 .on_hover_text(tooltip)
         }
         ToolbarDisplayMode::IconAndLabel => {
             let text = if hotkey.is_empty() {
-                label.to_string()
+                format!("{icon} {label}")
             } else {
-                format!("{label} ({hotkey})")
+                format!("{icon} {label} ({hotkey})")
             };
             let btn = egui::Button::new(egui::RichText::new(text).size(11.0).color(if active {
                 egui::Color32::WHITE
@@ -68,12 +63,12 @@ fn tool_button(
             }))
             .selected(active)
             .fill(if active {
-                egui::Color32::from_rgb(74, 137, 220)
+                egui::Color32::from_rgb(71, 114, 179)
             } else {
-                inactive_bg
+                egui::Color32::TRANSPARENT
             })
-            .corner_radius(egui::CornerRadius::same(2));
-            ui.add_sized([ui.available_width(), 22.0], btn)
+            .corner_radius(egui::CornerRadius::same(3));
+            ui.add_sized([ui.available_width(), 26.0], btn)
                 .on_hover_text(tooltip)
         }
     }
@@ -223,13 +218,13 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 }
 
                 let select_active = app.editor_state.transform_mode == TransformMode::Select;
-                if tool_button(ui, select_active, "Sel", "Select", "Q", display_mode).clicked() {
+                if tool_button(ui, select_active, "⬚", "Select", "Q", display_mode).clicked() {
                     app.editor_state.transform_mode = TransformMode::Select;
                     app.status_message = "Tool: Select (Q)".to_string();
                 }
 
                 let box_active = app.editor_state.transform_mode == TransformMode::BoxSelect;
-                if tool_button(ui, box_active, "Box", "Box Select", "B", display_mode).clicked() {
+                if tool_button(ui, box_active, "◫", "Box Select", "B", display_mode).clicked() {
                     app.editor_state.transform_mode = TransformMode::BoxSelect;
                     app.status_message = "Tool: Box Select (B)".to_string();
                 }
@@ -238,7 +233,7 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 if tool_button(
                     ui,
                     lasso_active,
-                    "Las",
+                    "☡",
                     "Lasso Select",
                     "Ctrl+RMB",
                     display_mode,
@@ -250,8 +245,7 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 }
 
                 let circle_active = app.editor_state.transform_mode == TransformMode::CircleSelect;
-                if tool_button(ui, circle_active, "Cir", "Circle Select", "C", display_mode)
-                    .clicked()
+                if tool_button(ui, circle_active, "◎", "Circle Select", "C", display_mode).clicked()
                 {
                     app.editor_state.transform_mode = TransformMode::CircleSelect;
                     app.editor_state.circle_select_active = true;
@@ -267,21 +261,21 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                 }
 
                 let is_move = app.editor_state.active_gizmo_mode == GizmoMode::Translate;
-                if tool_button(ui, is_move, "Move", "Move", "G / W", display_mode).clicked() {
+                if tool_button(ui, is_move, "✛", "Move", "G / W", display_mode).clicked() {
                     app.editor_state.active_gizmo_mode = GizmoMode::Translate;
                     app.editor_state.transform_mode = TransformMode::Translate;
                     app.status_message = "Gizmo: Move (G / W)".to_string();
                 }
 
                 let is_rot = app.editor_state.active_gizmo_mode == GizmoMode::Rotate;
-                if tool_button(ui, is_rot, "Rot", "Rotate", "R / E", display_mode).clicked() {
+                if tool_button(ui, is_rot, "↻", "Rotate", "R / E", display_mode).clicked() {
                     app.editor_state.active_gizmo_mode = GizmoMode::Rotate;
                     app.editor_state.transform_mode = TransformMode::Rotate;
                     app.status_message = "Gizmo: Rotate (R / E)".to_string();
                 }
 
                 let is_scale = app.editor_state.active_gizmo_mode == GizmoMode::Scale;
-                if tool_button(ui, is_scale, "Scale", "Scale", "S", display_mode).clicked() {
+                if tool_button(ui, is_scale, "⤢", "Scale", "S", display_mode).clicked() {
                     app.editor_state.active_gizmo_mode = GizmoMode::Scale;
                     app.editor_state.transform_mode = TransformMode::Scale;
                     app.status_message = "Gizmo: Scale (S)".to_string();
@@ -297,27 +291,25 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                     }
 
                     let vert_sel = app.editor_state.selection_element == SelectionElement::Vertex;
-                    if tool_button(ui, vert_sel, "Vert", "Vertex Selection", "1", display_mode)
+                    if tool_button(ui, vert_sel, "•", "Vertex Selection", "1", display_mode)
                         .clicked()
                     {
                         app.editor_state.selection_element = SelectionElement::Vertex;
                     }
 
                     let edge_sel = app.editor_state.selection_element == SelectionElement::Edge;
-                    if tool_button(ui, edge_sel, "Edge", "Edge Selection", "2", display_mode)
-                        .clicked()
+                    if tool_button(ui, edge_sel, "/", "Edge Selection", "2", display_mode).clicked()
                     {
                         app.editor_state.selection_element = SelectionElement::Edge;
                     }
 
                     let face_sel = app.editor_state.selection_element == SelectionElement::Face;
-                    if tool_button(ui, face_sel, "Face", "Face Selection", "3", display_mode)
-                        .clicked()
+                    if tool_button(ui, face_sel, "▱", "Face Selection", "3", display_mode).clicked()
                     {
                         app.editor_state.selection_element = SelectionElement::Face;
                     }
 
-                    if tool_button(ui, false, "Ext", "Extrude", "E", display_mode).clicked() {
+                    if tool_button(ui, false, "⤊", "Extrude", "E", display_mode).clicked() {
                         let center = forge_math::Vec2::new(400.0, 300.0);
                         app.begin_interactive_edit_tool(
                             crate::app::InteractiveEditToolType::Extrude,
@@ -325,7 +317,7 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         );
                     }
 
-                    if tool_button(ui, false, "Ins", "Inset", "I", display_mode).clicked() {
+                    if tool_button(ui, false, "▣", "Inset", "I", display_mode).clicked() {
                         let center = forge_math::Vec2::new(400.0, 300.0);
                         app.begin_interactive_edit_tool(
                             crate::app::InteractiveEditToolType::Inset,
@@ -333,19 +325,19 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         );
                     }
 
-                    if tool_button(ui, false, "Sub", "Subdivide", "", display_mode).clicked() {
+                    if tool_button(ui, false, "▦", "Subdivide", "", display_mode).clicked() {
                         app.subdivide_selected_geometry();
                     }
 
-                    if tool_button(ui, false, "Mrg", "Merge", "M", display_mode).clicked() {
+                    if tool_button(ui, false, "><", "Merge", "M", display_mode).clicked() {
                         app.merge_selected_geometry();
                     }
 
-                    if tool_button(ui, false, "Fill", "Fill", "F", display_mode).clicked() {
+                    if tool_button(ui, false, "▰", "Fill", "F", display_mode).clicked() {
                         app.fill_selected_geometry();
                     }
 
-                    if tool_button(ui, false, "Bev", "Bevel", "Ctrl+B", display_mode).clicked() {
+                    if tool_button(ui, false, "◬", "Bevel", "Ctrl+B", display_mode).clicked() {
                         let center = forge_math::Vec2::new(400.0, 300.0);
                         app.begin_interactive_edit_tool(
                             crate::app::InteractiveEditToolType::Bevel,
@@ -353,8 +345,7 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         );
                     }
 
-                    if tool_button(ui, false, "Loop", "Loop Cut", "Ctrl+R", display_mode).clicked()
-                    {
+                    if tool_button(ui, false, "⌗", "Loop Cut", "Ctrl+R", display_mode).clicked() {
                         let center = forge_math::Vec2::new(400.0, 300.0);
                         app.begin_interactive_edit_tool(
                             crate::app::InteractiveEditToolType::LoopCut,
@@ -362,19 +353,19 @@ pub fn render_toolbar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
                         );
                     }
 
-                    if tool_button(ui, false, "Dis", "Dissolve", "Ctrl+X", display_mode).clicked() {
+                    if tool_button(ui, false, "⊘", "Dissolve", "Ctrl+X", display_mode).clicked() {
                         app.dissolve_selected_geometry();
                     }
 
-                    if tool_button(ui, false, "Brdg", "Bridge", "", display_mode).clicked() {
+                    if tool_button(ui, false, "∦", "Bridge", "", display_mode).clicked() {
                         app.bridge_selected_geometry();
                     }
 
-                    if tool_button(ui, false, "Sep", "Separate", "P", display_mode).clicked() {
+                    if tool_button(ui, false, "⎘", "Separate", "P", display_mode).clicked() {
                         app.separate_selected_geometry();
                     }
 
-                    if tool_button(ui, false, "Knf", "Knife", "K", display_mode).clicked() {
+                    if tool_button(ui, false, "🗡", "Knife", "K", display_mode).clicked() {
                         app.knife_connect_selected_geometry();
                     }
 

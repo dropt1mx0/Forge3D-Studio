@@ -5,14 +5,28 @@ use forge_geometry::primitives::{
 };
 use forge_math::{Transform, Vec3};
 use forge_render::{CameraProjection, ViewPreset};
-use forge_scene::{
-    Action, EditMode, ForgeProject, LightData, LightKind, PrimitiveType, SceneObject, WorkspaceMode,
-};
+use forge_scene::{Action, EditMode, ForgeProject, PrimitiveType, SceneObject, WorkspaceMode};
 
 use crate::app::Forge3dStudioApp;
 
 pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
     egui::MenuBar::new().ui(ui, |ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+
+        // Forge3D Brand Mark
+        if let Some(texture) = &app.logo_texture {
+            let size = egui::vec2(16.0, 16.0);
+            ui.image((texture.id(), size));
+        } else {
+            ui.label(
+                egui::RichText::new("✦")
+                    .color(egui::Color32::from_rgb(240, 140, 40))
+                    .size(13.0)
+                    .strong(),
+            );
+        }
+        ui.add_space(2.0);
+
         // ---------------- File Menu ----------------
         ui.menu_button("File", |ui| {
             if ui.button("Project Hub...").clicked() {
@@ -1194,283 +1208,94 @@ pub fn render_menu_bar(app: &mut Forge3dStudioApp, ui: &mut Ui) {
             }
         });
 
-        // ---------------- Right-aligned Layout Mode Selector ----------------
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        // ---------------- Horizontal Workspace Tabs Strip (Blender 4.x style) ----------------
+        let workspaces = [
+            (WorkspaceMode::Layout, "Layout"),
+            (WorkspaceMode::Modeling, "Modeling"),
+            (WorkspaceMode::Sculpting, "Sculpting"),
+            (WorkspaceMode::UvEditing, "UV Editing"),
+            (WorkspaceMode::TexturePaint, "Texture Paint"),
+            (WorkspaceMode::Shading, "Shading"),
+            (WorkspaceMode::Animation, "Animation"),
+            (WorkspaceMode::Rendering, "Rendering"),
+            (WorkspaceMode::Compositing, "Compositing"),
+            (WorkspaceMode::GeometryNodes, "Geometry Nodes"),
+            (WorkspaceMode::Scripting, "Scripting"),
+        ];
+
+        let active_ws = app.editor_state.workspace;
+        for (ws, label) in workspaces {
+            let is_active = active_ws == ws;
+            let text_col = if is_active {
+                egui::Color32::WHITE
+            } else {
+                egui::Color32::from_rgb(155, 155, 155)
+            };
+            let bg_col = if is_active {
+                egui::Color32::from_rgb(84, 84, 84)
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+
+            let text = if is_active {
+                egui::RichText::new(label)
+                    .size(11.5)
+                    .strong()
+                    .color(text_col)
+            } else {
+                egui::RichText::new(label).size(11.5).color(text_col)
+            };
+
+            let resp = ui.add(
+                egui::Button::new(text)
+                    .fill(bg_col)
+                    .corner_radius(egui::CornerRadius::same(4))
+                    .min_size(egui::vec2(0.0, 20.0)),
+            );
+
+            if resp.clicked() {
+                app.set_workspace(ws);
+            }
+        }
+
+        // Add workspace button (+)
+        let plus_btn = egui::Button::new(
+            egui::RichText::new("+")
+                .size(12.0)
+                .color(egui::Color32::from_rgb(155, 155, 155)),
+        )
+        .fill(egui::Color32::TRANSPARENT)
+        .corner_radius(egui::CornerRadius::same(3));
+        if ui
+            .add(plus_btn)
+            .on_hover_text("Add Workspace Preset")
+            .clicked()
+        {
+            app.status_message = "All Blender workspaces are active".to_string();
+        }
+
+        // ---------------- Right-aligned Scene & ViewLayer Controls ----------------
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
 
-            // Layout Mode Selector
-            let current_ws = app.editor_state.workspace;
-            let current_label = match current_ws {
-                WorkspaceMode::Modeling => "Layout: Modeling ▾",
-                WorkspaceMode::Sculpting => "Layout: Sculpting ▾",
-                WorkspaceMode::UvEditing => "Layout: UV Editing ▾",
-                WorkspaceMode::Shading => "Layout: Shading ▾",
-                WorkspaceMode::Animation => "Layout: Animation ▾",
-                WorkspaceMode::Rendering => "Layout: Rendering ▾",
-                WorkspaceMode::GeometryNodes => "Layout: Geometry Nodes ▾",
-                WorkspaceMode::Scripting => "Layout: Scripting ▾",
-            };
-            egui::ComboBox::from_id_salt("layout_mode_selector")
-                .selected_text(current_label)
+            // ViewLayer combo
+            egui::ComboBox::from_id_salt("top_viewlayer_combo")
+                .selected_text("ViewLayer ▾")
                 .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(current_ws == WorkspaceMode::Modeling, "Modeling")
-                        .clicked()
-                    {
-                        app.set_workspace(WorkspaceMode::Modeling);
-                    }
-                    if ui
-                        .selectable_label(current_ws == WorkspaceMode::Sculpting, "Sculpting")
-                        .clicked()
-                    {
-                        app.set_workspace(WorkspaceMode::Sculpting);
-                    }
-                    if ui
-                        .selectable_label(current_ws == WorkspaceMode::UvEditing, "UV Editing")
-                        .clicked()
-                    {
-                        app.set_workspace(WorkspaceMode::UvEditing);
-                    }
-                    if ui
-                        .selectable_label(current_ws == WorkspaceMode::Shading, "Shading")
-                        .clicked()
-                    {
-                        app.set_workspace(WorkspaceMode::Shading);
-                    }
-                    if ui
-                        .selectable_label(current_ws == WorkspaceMode::Animation, "Animation")
-                        .clicked()
-                    {
-                        app.set_workspace(WorkspaceMode::Animation);
-                    }
-                    if ui
-                        .selectable_label(current_ws == WorkspaceMode::Rendering, "Rendering")
-                        .clicked()
-                    {
-                        app.set_workspace(WorkspaceMode::Rendering);
-                    }
-                    if ui
-                        .selectable_label(
-                            current_ws == WorkspaceMode::GeometryNodes,
-                            "Geometry Nodes",
-                        )
-                        .clicked()
-                    {
-                        app.set_workspace(WorkspaceMode::GeometryNodes);
-                    }
-                    if ui
-                        .selectable_label(current_ws == WorkspaceMode::Scripting, "Scripting")
-                        .clicked()
-                    {
-                        app.set_workspace(WorkspaceMode::Scripting);
-                    }
+                    let _ = ui.selectable_label(true, "ViewLayer");
                 });
-        });
-    });
 
-    // ---------------- Secondary Quick Tool Shelf ----------------
-    ui.add_space(2.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(3.0, 2.0);
-
-        // Undo / Redo
-        if ui
-            .add_enabled(app.history.can_undo(), egui::Button::new("Undo"))
-            .on_hover_text("Undo (Ctrl+Z)")
-            .clicked()
-        {
-            app.undo();
-        }
-        if ui
-            .add_enabled(app.history.can_redo(), egui::Button::new("Redo"))
-            .on_hover_text("Redo (Ctrl+Shift+Z)")
-            .clicked()
-        {
-            app.redo();
-        }
-        ui.separator();
-
-        // Selection modes
-        let is_pointer = app.editor_state.transform_mode != forge_scene::TransformMode::BoxSelect;
-        if ui
-            .selectable_label(is_pointer, "Select")
-            .on_hover_text("Pointer Selection (LMB Click/Drag)")
-            .clicked()
-        {
-            app.editor_state.transform_mode = forge_scene::TransformMode::Translate;
-        }
-        let is_box = app.editor_state.transform_mode == forge_scene::TransformMode::BoxSelect;
-        if ui
-            .selectable_label(is_box, "Box")
-            .on_hover_text("Box Selection (B)")
-            .clicked()
-        {
-            app.editor_state.transform_mode = forge_scene::TransformMode::BoxSelect;
-        }
-        ui.separator();
-
-        // Transform Gizmo modes
-        let is_trans = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Translate;
-        if ui
-            .selectable_label(is_trans, "Move")
-            .on_hover_text("Translate Tool (G / Move Gizmo)")
-            .clicked()
-        {
-            app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Translate;
-            app.editor_state.transform_mode = forge_scene::TransformMode::Translate;
-        }
-        let is_rot = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Rotate;
-        if ui
-            .selectable_label(is_rot, "Rotate")
-            .on_hover_text("Rotate Tool (R / Rotate Gizmo)")
-            .clicked()
-        {
-            app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Rotate;
-            app.editor_state.transform_mode = forge_scene::TransformMode::Rotate;
-        }
-        let is_scale = app.editor_state.active_gizmo_mode == forge_scene::GizmoMode::Scale;
-        if ui
-            .selectable_label(is_scale, "Scale")
-            .on_hover_text("Scale Tool (S / Scale Gizmo)")
-            .clicked()
-        {
-            app.editor_state.active_gizmo_mode = forge_scene::GizmoMode::Scale;
-            app.editor_state.transform_mode = forge_scene::TransformMode::Scale;
-        }
-        ui.separator();
-
-        // Primitives Quick Add
-        let cursor = app.editor_state.cursor_3d;
-        if ui
-            .button("Cube")
-            .on_hover_text("Add Cube at 3D Cursor")
-            .clicked()
-        {
-            let mesh = generate_cube(1.0);
-            let id = app.scene.add_object(
-                SceneObject::new("Cube", PrimitiveType::Cube, mesh)
-                    .with_color([0.35, 0.65, 0.95, 1.0])
-                    .with_transform(Transform::from_translation(
-                        cursor + Vec3::new(0.0, 0.5, 0.0),
-                    )),
-            );
-            if let Some(obj) = app.scene.get_object(id) {
-                app.history.push(Action::AddObject {
-                    object: obj.clone(),
+            // Scene combo
+            let scene_title = format!("Scene ({}) ▾", app.scene.name);
+            egui::ComboBox::from_id_salt("top_scene_combo")
+                .selected_text(scene_title)
+                .show_ui(ui, |ui| {
+                    let _ = ui.selectable_label(true, &app.scene.name);
                 });
-            }
-            app.selection.select(id);
-            app.status_message = "Added Cube".to_string();
-        }
-        if ui
-            .button("Sphere")
-            .on_hover_text("Add UV Sphere at 3D Cursor")
-            .clicked()
-        {
-            let mesh = generate_uv_sphere(0.75, 24, 16);
-            let id = app.scene.add_object(
-                SceneObject::new("Sphere", PrimitiveType::Sphere, mesh)
-                    .with_color([0.90, 0.45, 0.35, 1.0])
-                    .with_transform(Transform::from_translation(
-                        cursor + Vec3::new(0.0, 0.75, 0.0),
-                    )),
-            );
-            if let Some(obj) = app.scene.get_object(id) {
-                app.history.push(Action::AddObject {
-                    object: obj.clone(),
-                });
-            }
-            app.selection.select(id);
-            app.status_message = "Added UV Sphere".to_string();
-        }
-        if ui
-            .button("Light")
-            .on_hover_text("Add Light Object")
-            .clicked()
-        {
-            let mesh = generate_uv_sphere(0.25, 12, 8);
-            let mut light = SceneObject::new_light(
-                "Point Light",
-                LightData {
-                    kind: LightKind::Point,
-                    color: [1.0, 0.92, 0.72],
-                    intensity: 30.0,
-                    range: 10.0,
-                    ..LightData::default()
-                },
-                mesh,
-            )
-            .with_transform(Transform::from_translation(
-                cursor + Vec3::new(2.0, 4.0, 2.0),
-            ));
-            light.visible = false;
-            let id = app.scene.add_object(light);
-            if let Some(obj) = app.scene.get_object(id) {
-                app.history.push(Action::AddObject {
-                    object: obj.clone(),
-                });
-            }
-            app.selection.select(id);
-            app.status_message = "Added Light".to_string();
-        }
-        if ui
-            .button("Camera")
-            .on_hover_text("Add Camera Object")
-            .clicked()
-        {
-            let mesh = generate_cone(0.4, 0.6, 12);
-            let mut cam_obj = SceneObject::new("Camera", PrimitiveType::Camera, mesh)
-                .with_color([0.2, 0.8, 0.4, 1.0])
-                .with_transform(Transform::from_translation(
-                    cursor + Vec3::new(0.0, 2.0, 4.0),
-                ));
-            cam_obj.camera_data = Some(forge_scene::CameraData::default());
-            let id = app.scene.add_object(cam_obj);
-            if let Some(obj) = app.scene.get_object(id) {
-                app.history.push(Action::AddObject {
-                    object: obj.clone(),
-                });
-            }
-            app.selection.select(id);
-            app.status_message = "Added Camera".to_string();
-        }
-        ui.separator();
-
-        // Snapping & Grid Toggles
-        let snap_on = app.editor_state.snap_settings.enabled;
-        if ui
-            .selectable_label(snap_on, "Snap")
-            .on_hover_text("Toggle Snapping to Grid")
-            .clicked()
-        {
-            app.editor_state.snap_settings.enabled = !snap_on;
-        }
-        let grid_on = app.editor_state.show_grid;
-        if ui
-            .selectable_label(grid_on, "Grid")
-            .on_hover_text("Toggle Viewport Ground Grid")
-            .clicked()
-        {
-            app.editor_state.show_grid = !grid_on;
-        }
-        ui.separator();
-
-        // Right-aligned Live Viewer status pill
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Live Viewer")
-                            .color(egui::Color32::from_rgb(170, 200, 235)),
-                    )
-                    .fill(egui::Color32::from_rgb(50, 58, 70))
-                    .corner_radius(egui::CornerRadius::same(2)),
-                )
-                .on_hover_text("Cinema 4D / Octane Live Viewport Renderer")
-                .clicked()
-            {
-                app.status_message = "Live Viewer Active (WGPU Viewport)".to_string();
-            }
         });
     });
 }

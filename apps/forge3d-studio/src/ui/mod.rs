@@ -7,4 +7,5 @@ pub mod shader_editor;
 pub mod status_bar;
 pub mod toolbar;
 pub mod viewport;
+pub mod viewport_header;
 pub mod welcome;

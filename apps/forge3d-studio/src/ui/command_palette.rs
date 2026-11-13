@@ -287,6 +287,12 @@ pub fn get_all_commands() -> Vec<CommandItem> {
         // Workspaces
         CommandItem {
             category: "Workspace",
+            title: "Switch to Layout Workspace",
+            shortcut: "",
+            action_id: "ws_layout",
+        },
+        CommandItem {
+            category: "Workspace",
             title: "Switch to Modeling Workspace",
             shortcut: "",
             action_id: "ws_modeling",
@@ -883,6 +889,9 @@ pub fn execute_command(app: &mut Forge3dStudioApp, action_id: &str) {
             {
                 app.status_message = format!("Export error: {e}");
             }
+        }
+        "ws_layout" => {
+            app.set_workspace(WorkspaceMode::Layout);
         }
         "ws_modeling" => {
             app.set_workspace(WorkspaceMode::Modeling);
