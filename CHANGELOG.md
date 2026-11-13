@@ -5,6 +5,35 @@ All notable changes to Forge3D Rust Edition will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-13
+
+### Added
+- **Loop & Ring Selection (Blender Parity)**:
+  - `Alt + Click` on Edge: Selects continuous topological edge loops across quad topology.
+  - `Ctrl + Alt + Click` on Edge: Selects edge rings (parallel edges across adjacent quads).
+  - `Shift + Alt + Click` / `Shift + Ctrl + Alt + Click`: Additive loop and ring selection.
+  - `Alt + Click` on Face: Selects full face loop along dominant quad flow.
+  - `Alt + Click` on Vertex: Selects vertex loops with pole-stop criteria.
+  - Half-edge topology traversal algorithms in `crates/forge-geometry/src/edit_mesh.rs` with safe boundary handling and cycle prevention.
+- **Interactive Bevel Tool (`Ctrl+B`)**:
+  - Modal interactive mouse tracking for edge beveling with HUD badge, mouse delta sensitivity, and real-time live preview.
+  - Full Undo/Redo integration via `HistoryStack` and toolbar shortcut in `apps/forge3d-studio/src/ui/toolbar.rs`.
+- **Merge by Distance (`Alt+M`)**:
+  - Topological vertex clustering algorithm welding colocated vertices within a distance threshold (`merge_by_distance`).
+  - Added shortcut `Alt+M`, Menu item under `Mesh -> Merge by Distance`, and Command Palette action (`Ctrl+K`).
+- **Proportional Editing (`O`)**:
+  - Toggle Proportional Editing mode with `O`, Viewport Mesh Menu, and Command Palette.
+  - Dynamic radius scaling using mouse scroll wheel during active gizmo transformation.
+  - Smooth falloff curves applied to vertex translations across 3D meshes in Edit Mode.
+- **Full 3D Gizmo Support in Edit Mode**:
+  - Added `Rotate` and `Scale` operations to the 3D Gizmo in Edit Mode, allowing rotation and scaling of selected vertices, edges, and faces around the selection pivot.
+- **Release Automation & CI Hardening**:
+  - Added multi-platform GitHub Actions CI workflow in `.github/workflows/ci.yml` (Ubuntu & Windows runners testing build, fmt, clippy, and full test suite).
+  - Adjusted latency benchmark assertions for debug/release profile differences across operating systems.
+  - Zero warnings across entire workspace with `cargo clippy --workspace --all-targets -- -D warnings`.
+  - 100% green automated test suite across all 8 crates and 6 studio integration suites (~300 tests passing).
+  - Standalone, highly optimized native Windows release binary (`target/release/forge3d-studio.exe`, 17.5 MB).
+
 ## [0.5.5-alpha.7] - 2026-11-03
 
 ### Added
