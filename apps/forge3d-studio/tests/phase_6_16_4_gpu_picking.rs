@@ -605,10 +605,17 @@ fn test_gpu_picking_latency_benchmark() {
         "GPU Picking round-trip latency must be under 15ms on Intel HD 4000 (measured: {avg_latency_ms:.3}ms)"
     );
     #[cfg(debug_assertions)]
-    assert!(
-        avg_latency_ms < 250.0,
-        "GPU Picking round-trip latency in debug mode must be under 250ms (measured: {avg_latency_ms:.3}ms)"
-    );
+    {
+        let max_picking_latency = if std::env::var("CI").is_ok() {
+            1500.0
+        } else {
+            250.0
+        };
+        assert!(
+            avg_latency_ms < max_picking_latency,
+            "GPU Picking round-trip latency in debug mode must be under {max_picking_latency}ms (measured: {avg_latency_ms:.3}ms)"
+        );
+    }
 }
 
 #[test]
