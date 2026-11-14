@@ -38,8 +38,6 @@ impl MirrorModifier {
         let mut out_vertices = base_mesh.vertices.clone();
         let mut out_indices = base_mesh.indices.clone();
 
-        let base_vertex_count = base_mesh.vertices.len();
-
         let scale = Vec3::new(
             if self.axis_x { -1.0 } else { 1.0 },
             if self.axis_y { -1.0 } else { 1.0 },
@@ -48,8 +46,7 @@ impl MirrorModifier {
 
         // Mirror vertices
         let mirrored_start = out_vertices.len() as u32;
-        for i in 0..base_vertex_count {
-            let v = &base_mesh.vertices[i];
+        for v in &base_mesh.vertices {
             let pos = Vec3::from_array(v.position) * scale;
             let norm = Vec3::from_array(v.normal) * scale;
 

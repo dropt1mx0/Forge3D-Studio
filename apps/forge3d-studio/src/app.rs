@@ -4019,7 +4019,7 @@ impl Forge3dStudioApp {
     pub fn trim_process_memory(&self) {
         #[cfg(target_os = "linux")]
         unsafe {
-            extern "C" {
+            unsafe extern "C" {
                 fn malloc_trim(pad: usize) -> i32;
             }
             malloc_trim(0);
